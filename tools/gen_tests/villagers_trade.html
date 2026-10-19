@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Trade screen harness</title>
+<base href="/">  <!-- the game's relative asset paths (audio.js: assets/sfx/...) resolve from the project root -->
+<link rel="icon" href="data:,">
+<!-- A standalone page for the villager trade screen (src/tradeui.js), not part of the game: it loads only what the
+     screen needs (items.json, the Minecraft font, the icons and assets/mc/villagers), opens the screen on a sample
+     villager and exposes window.__trade for tools/gen_tests/villagers_trade.mjs. Served from the project root:
+     http://127.0.0.1:<port>/tools/gen_tests/villagers_trade.html?prof=farmer&lvl=1  (add &manual to stop the frame loop).
+     The page, the canvas fit and the touch pad copy index.html's, so desktop and phone sizes look as in the game. -->
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #151515; overflow: hidden; font-family: ui-monospace, Menlo, monospace; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; background: #000; cursor: default; }
+  #pad { display: none; position: fixed; inset: auto 0 0 0; padding: 12px 18px 22px; justify-content: space-between; align-items: flex-end; pointer-events: none; }
+  #pad > div { pointer-events: auto; }
+  .dpad { position: relative; width: 132px; height: 132px; }
+  .dpad button, .ab button { -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; border: 0; background: #3a3a3a; color: #ddd; font: 700 14px ui-monospace, monospace; border-radius: 10px; }
+  .dpad button { position: absolute; width: 44px; height: 44px; }
+  .dpad .u { left: 44px; top: 0 } .dpad .d { left: 44px; top: 88px } .dpad .l { left: 0; top: 44px } .dpad .r { left: 88px; top: 44px }
+  .ab { display: flex; gap: 10px; align-items: flex-end; }
+  .ab button { width: 52px; height: 52px; border-radius: 50%; }
+  .ab .small { width: 56px; height: 30px; border-radius: 8px; font-size: 11px; }
+  @media (pointer: coarse) { #pad { display: flex; } }
+</style>
+</head>
+<body>
+  <canvas id="game" width="480" height="320"></canvas>
+  <div id="pad">
+    <div class="dpad">
+      <button class="u" data-k="up">▲</button><button class="l" data-k="left">◀</button>
+      <button class="r" data-k="right">▶</button><button class="d" data-k="down">▼</button>
+    </div>
+    <div class="ab">
+      <button class="small" data-k="inv">INV</button>
+      <button class="small" data-k="start">MENU</button>
+      <button data-k="b">B</button>
+      <button data-k="a">A</button>
+    </div>
+  </div>
+<script type="module">
+import { A } from '/src/assets.js';
+import { Inventory } from '/src/items.js';
+import { Input } from '/src/input.js';
+import { TradeScreen, loadTradeAssets, TA } from '/src/tradeui.js';
+import { offersFor, findOffer } from '/src/trades.js';
+
+const HW = 480, HH = 320;
+const canvas = document.getElementById('game'), ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+function fit() {
+  const availH = window.innerHeight - 16;
+  const scale = Math.max(0.5, Math.min(window.innerWidth / HW, availH / HH));
+  const s = scale >= 2 ? Math.floor(scale) : scale;
+  canvas.style.width = Math.round(HW * s) + 'px'; canvas.style.height = Math.round(HH * s) + 'px';
+}
+window.addEventListener('resize', fit); fit();
+
+const img = (u) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u; });
+const json = (u) => fetch(u).then((r) => r.json());
+const [items, mcFont, sfx] = await Promise.all([json('/assets/mc/items.json'), json('/assets/mc/font.json'), json('/assets/sfx/sfx.json').catch(() => ({}))]);
+Object.assign(A, { items, mcFont, sfx });
+[A.mc.font, A.mc.fontE, A.mc.icons] = await Promise.all([img('/assets/mc/font.png'), img('/assets/mc/font_eacute.png'), img('/assets/mc/icons.png')]);
+await loadTradeAssets('/assets/mc/villagers/');
+
+const q = new URLSearchParams(location.search);
+const input = new Input(canvas);
+const G = { inv: new Inventory(), input, xp: 0, dropped: [], traded: [] };
+G.giveXp = (n) => { G.xp += n; };
+G.dropStack = (s) => { G.dropped.push(s); };
+let screen = null;
+
+// open the screen on a villager; `give` fills the inventory first ([[id, n], ...]). The page shows every sample offer
+// (its own icons draw the items stage 5a adds); { strict: true } uses the game's default, items.json's items only.
+function open(v, give = [], o = {}) {
+  if (screen) screen.close();
+  G.inv = new Inventory();
+  for (const [id, n] of give) G.inv.add(id, n);
+  screen = new TradeScreen(G, v, { ...(o.strict ? {} : { has: () => true }), onTrade: (vv, key, r) => G.traded.push({ key, lvl: r && r.lvl }) });
+  return screen;
+}
+const v0 = { vid: Number(q.get('vid') || 7), prof: q.get('prof') || 'farmer', vtype: 'plains', lvl: Number(q.get('lvl') || 1), xp: Number(q.get('xp') || 0) };
+open(v0, [['wheat', 40], ['emerald', 12], ['pumpkin', 12], ['cod', 12], ['paper', 30]]);
+
+function frame(dt = 1 / 30) {
+  try {
+    if (screen && !screen.done) screen.update(dt, input);
+    if (screen && screen.done) { screen.close(); screen = null; }
+  } catch (e) { console.error(e); window.__trade.errors.push(String(e && e.stack || e)); }
+  input.endFrame();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#5a8a3c'; ctx.fillRect(0, 0, HW, HH);           // a grass backdrop, as the game draws the world under the screen
+  for (let y = 0; y < HH; y += 16) for (let x = (y / 16) % 2 ? 0 : 16; x < HW; x += 32) { ctx.fillStyle = '#62933f'; ctx.fillRect(x, y, 16, 16); }
+  if (screen) screen.draw(ctx);
+}
+window.__trade = {
+  ready: true, errors: [], G, A, TA, input, frame, open, offersFor, findOffer,
+  get screen() { return screen; },
+  // canvas pixel (480x320 layer) to page coordinates, for real mouse and touch events
+  toPage(x, y) { const r = canvas.getBoundingClientRect(); return { x: r.left + (x / HW) * r.width, y: r.top + (y / HH) * r.height }; },
+  press(k) { input.press(k); frame(); input.release(k); frame(); },
+};
+if (!q.has('manual')) { let last = performance.now(); const loop = (t) => { frame(Math.min(0.1, (t - last) / 1000)); last = t; requestAnimationFrame(loop); }; requestAnimationFrame(loop); }
+else frame();
+</script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- every relative URL (the game's assets, src/) resolves from the project root, as on the real page -->
+<base href="/">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Menus test page</title>
+<link rel="icon" href="assets/ui/favicon.png">
+<style>
+  /* the game page's canvas and touch pad (index.html), so the menus are tested where they will run */
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #151515; overflow: hidden; font-family: ui-monospace, Menlo, monospace; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; background: #000; cursor: default; }
+  #pad { display: none; position: fixed; inset: auto 0 0 0; padding: 12px 18px 22px; justify-content: space-between; align-items: flex-end; pointer-events: none; }
+  #pad > div { pointer-events: auto; }
+  .dpad { position: relative; width: 132px; height: 132px; }
+  .dpad button, .ab button { -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; border: 0; background: #3a3a3a; color: #ddd; font: 700 14px ui-monospace, monospace; border-radius: 10px; }
+  .dpad button { position: absolute; width: 44px; height: 44px; }
+  .dpad .u { left: 44px; top: 0 } .dpad .d { left: 44px; top: 88px } .dpad .l { left: 0; top: 44px } .dpad .r { left: 88px; top: 44px }
+  .ab { display: flex; gap: 10px; align-items: flex-end; }
+  .ab button { width: 52px; height: 52px; border-radius: 50%; }
+  .ab .small { width: 56px; height: 30px; border-radius: 8px; font-size: 11px; }
+  @media (pointer: coarse) { #pad { display: flex; } }
+</style>
+</head>
+<body>
+  <canvas id="game" width="480" height="320"></canvas>
+  <div id="pad">
+    <div class="dpad">
+      <button class="u" data-k="up">&#9650;</button><button class="l" data-k="left">&#9664;</button>
+      <button class="r" data-k="right">&#9654;</button><button class="d" data-k="down">&#9660;</button>
+    </div>
+    <div class="ab">
+      <button class="small" data-k="inv">INV</button>
+      <button class="small" data-k="start">MENU</button>
+      <button data-k="b">B</button>
+      <button data-k="a">A</button>
+    </div>
+  </div>
+  <script type="module" src="tools/gen_tests/menus_page.js"></script>
+</body>
+</html>

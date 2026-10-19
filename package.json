@@ -1,0 +1,13 @@
+{
+  "name": "pokemon-redstone",
+  "private": true,
+  "description": "Minecraft's Steve in Pokémon FireRed's Kanto, built locally from the public decompilation and Minecraft's own asset servers.",
+  "scripts": {
+    "setup": "./setup.sh",
+    "start": "python3 serve.py",
+    "video": "node tools/render_video.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

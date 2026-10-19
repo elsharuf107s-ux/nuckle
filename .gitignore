@@ -1,0 +1,53 @@
+# Everything below is fetched or built on your machine by ./setup.sh (or by the test and video tools).
+# It is third-party material or derived from it, so it must never be committed.
+/vendor/
+/assets/
+/.venv/
+/.build.log
+/out/
+/node_modules/
+/package-lock.json
+
+# No image, audio, video, model or game file belongs in this repository: every picture and sound the game uses is
+# built from Pokémon FireRed's decompilation and Minecraft's assets by ./setup.sh. These patterns stop a built or
+# fetched file being added by mistake.
+*.png
+*.gif
+*.jpg
+*.jpeg
+*.webp
+*.bmp
+*.tga
+*.4bpp
+*.8bpp
+*.1bpp
+*.gbapal
+*.pal
+*.bin
+*.lz
+*.rl
+*.wav
+*.mp3
+*.ogg
+*.opus
+*.f32
+*.mid
+*.midi
+*.s
+*.inc
+*.mp4
+*.webm
+*.mov
+*.mcmeta
+*.jar
+*.zip
+*.gba
+*.sav
+*.ss[0-9]
+*.state
+
+# local secrets and editor litter
+.env
+.env.*
+__pycache__/
+.DS_Store
