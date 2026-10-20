@@ -1,187 +1,108 @@
-# Pokémon Redstone
+# Steel Vanguard
 
-Minecraft's Steve dropped into Pokémon FireRed. The whole outdoor Kanto overworld is stitched from
-FireRed's own maps, and every tile in it is a block: trees can be punched down, cliffs mined for ore,
-houses built and torn down again. The wild Pokémon in the grass are fought on FireRed's battle
-screen, with Steve as the battler and hearts where the HP bar would be.
+A 3D third-person mobile-suit combat game that runs in the browser. Pilot the **VG-01 Vanguard** through a
+dusk-lit colony city: boost over rooftops, lock on, burn enemies down with a beam rifle, homing missiles and a
+three-hit beam-saber combo, and survive five waves ending in a fight with the **Crimson Baron**.
 
-Unofficial fan project. Not affiliated with or endorsed by Nintendo, Game Freak, Creatures, The Pokémon Company, Mojang or Microsoft.
+Everything is generated in code. There are no model, texture or audio files: mechs are built from primitives,
+the city and sky are procedural, and every sound effect and the music are synthesised with WebAudio.
 
-- **Survival**: health, hunger, saturation and exhaustion, knockback, armor, XP orbs and levels, the
-  attack cooldown and jump crits, all with Java Edition's numbers.
-- **Buildings and caves you can enter**: 152 FireRed rooms (every Poké Center, Mart, house, lab, gym
-  and gatehouse, the Dept Store, Pokémon Tower, Viridian Forest, Mt Moon, Rock Tunnel, Diglett's Cave,
-  Victory Road, Seafoam, Cerulean Cave, the Power Plant) joined by FireRed's own warps. Rooms have their
-  people with their FireRed lines; the nurse heals and becomes the respawn point.
-- **Mining**: break time from tool speed, block hardness and harvestability. Ores depend on depth;
-  trees fall whole; mined cliffs and cave walls re-edge themselves with FireRed's tiles. Buildings
-  can't be mined or blown up, except their doors.
-- **Crafting, smelting and building**: the inventory, crafting table, furnace and chest screens with
-  the recipe book; Minecraft's recipes plus Poké Balls, Great Balls and Ultra Balls. Planks,
-  cobblestone, glass, doors, fences, beds, chests, signs, torches and TNT.
-- **Mobs, farming, fishing, boats**: zombies, skeletons, creepers and spiders at night; cows, sheep,
-  pigs and chickens; wheat; a fishing rod that hooks water Pokémon; boats.
-- **Wild Pokémon you can see**: each route, cave and the forest spawns its own FireRed species walking
-  around. Some run off, some chase you into a battle. Walk into one or press Z at it.
-- **Battles**: FIGHT uses the held tool (sword, jump for crits, punch, bow, TNT), weapon durability
-  stands in for PP, and BAG throws the balls Steve crafted. Caught Pokémon join the party and the first
-  one follows Steve around.
-- **The Nether, a stronghold and The End**, the Ender Dragon and the Wither, Poké Marts, villages and
-  villager trading, advancements.
-- **Generated worlds**: besides Classic Kanto, the title menus make Wild Worlds and Kanto Worlds from a
-  seed, in Survival, Hardcore or Creative.
-
-## What this repository contains
-
-Only original code, tools and docs. No graphics, maps, fonts, music or sounds from either game are
-included. The code does contain short in-game text and names written in by hand (some FireRed battle
-and menu messages, Minecraft item and advancement names) and a few game values. `./setup.sh` downloads the public FireRed decompilation and Minecraft's own assets at
-pinned versions and builds every picture, sound and data file the game uses on your machine.
-Third-party assets are fetched and built locally and never included here, and `.gitignore` keeps them
-out of commits.
-
-## Setup
-
-You need `bash`, `git` 2.25 or newer, `curl`, Python 3.10 to 3.13 with `venv`, `ffmpeg` and `ffprobe`
-built with libopus (Homebrew's and most Linux distributions' are), about 1 GB of free memory and network
-access to github.com, pypi.org and Mojang's servers.
+## Play
 
 ```bash
-git clone https://github.com/Mozetech/pokemon-redstone
-cd pokemon-redstone
-./setup.sh
-python3 serve.py
+python3 serve.py          # http://localhost:8000   (or: python3 serve.py 3000)
 ```
 
-Then open http://localhost:5300 (`python3 serve.py 8000` picks another port). Add `?new` to the URL
-to ignore a saved game, `?play` to skip the title.
+Any static file server works. The only requirement is that it serves `.js` files with a JavaScript MIME type
+(ES modules). Open the page, click **SORTIE**, and the game captures your mouse. Press **Esc** to pause.
+Desktop browsers with WebGL only: there is no touch or gamepad support.
 
-A first run takes about 20 minutes on an idle machine, longer on a busy one (most of it ray-casting the eight other player skins) and uses
-about 240 MB of disk: 120 MB of sources in `vendor/`, 55 MB for `.venv/` and 60 MB of built `assets/`;
-the 28 MB `client.jar` is deleted once its textures are unpacked. The build peaks at about 750 MB of
-memory. Setup prints its own time and sizes at the end. It does this:
+### Controls
 
-1. Fetches [pret/pokefirered](https://github.com/pret/pokefirered) at `c75f352` into
-   `vendor/pokefirered` (a shallow clone of that one commit) and
-   [rh-hideout/pokeemerald-expansion](https://github.com/rh-hideout/pokeemerald-expansion) at `160396e`
-   into `vendor/pokeemerald-expansion`. The expansion is large, so that fetch is sparse and blobless: only
-   the 288 overworld sprite files (96 species) the build reads are downloaded.
-2. Runs `tools/fetch_minecraft.py`, which downloads Minecraft 1.21.4 from Mojang's servers: the version
-   manifest, the version file, `client.jar` (only its `textures/` folder is unpacked, then the jar is
-   deleted), asset index 19, `sounds.json` and the 732 sounds listed in `tools/minecraft-sounds.txt`.
-   The version file, jar and index are pinned by SHA-1 and each sound is checked against the index.
-3. Checks each of the 3,713 upstream files the build reads against its SHA-1 in
-   `tools/upstream-inputs.tsv`.
-4. Creates `.venv/` with numpy 2.2.2 and Pillow 11.1.0.
-5. Runs the build tools in order (each step prints its time; the full log is in `.build.log`):
-   `build_end_assets.py`, `build_world.py`, `build_music.py`, `build_minecraft.py` (twice, the second
-   time with `--skins`), `build_pokemon.py` (twice, the second time with `--world`),
-   `build_menu_assets.py`, `build_villagers.py`, `build_minimap.py`, `build_kanto_sign.py` and
-   `build_extras.py`.
-6. Checks all 1,869 built files against `tools/assets.tsv`. With the pinned packages they are
-   byte-identical to the reference build. Another Pillow, zlib, ffmpeg or libopus may encode a file
-   differently, so a file that differs in bytes is accepted when its content matches: a PNG's decoded
-   pixels, a JSON file's parsed data, or a sound's length for the music and the two cries ffmpeg
-   encodes.
-
-Running it again skips whatever is already done and verified. Options:
-
-| Option | What it does |
+| Input | Action |
 | --- | --- |
-| `--rebuild` | build `assets/` again even if it verifies |
-| `--prune` | delete `vendor/` and `.venv/` afterwards; `assets/` (60 MB) is all the game needs |
-| `POKEFIRERED_SRC=<dir>` | fetch pret/pokefirered from a local clone that has the pinned commit, not GitHub |
-| `EXPANSION_SRC=<dir>` | the same for pokeemerald-expansion |
-| `PYTHON=<python>` | build the venv with this interpreter |
+| `W` `A` `S` `D` | Move (relative to the camera; strafes around your lock-on target) |
+| Mouse | Aim / camera (the camera tracks your target while locked on) |
+| `Space` (hold) | Boost upward |
+| `Shift` | Quick-boost dash, with brief invulnerability. Aimed along your input, or at your target |
+| Left mouse | Beam rifle (8-round magazine, auto-reloads) |
+| Right mouse | Beam saber. Lunges at the target; press again mid-swing to chain a 3-hit combo |
+| `E` | Missile salvo (4 homing missiles, 2 charges that recharge) |
+| `Q` | Toggle lock-on |
+| `Tab` | Switch lock-on target |
+| `R` | Reload |
+| `X` | **Burst**, when the gauge is full: unlimited boost, +50% damage, faster fire, partial repair |
+| `M` | Mute |
 
-On Python 3.14 or newer the pinned wheels do not exist, so setup installs the current numpy and
-Pillow and the content checks apply.
+Dash to dodge, use the saber to close gaps and break enemy guard, and keep an eye on the **EN** bar: boosting
+to zero overheats the thrusters until they recover. The burst gauge fills as you deal damage and score kills.
 
-The Wither's and the beacon's sounds are not in `tools/minecraft-sounds.txt`, so they play silently,
-as in the reference build. Add their paths to that list (`mob/wither/...`, `block/beacon/...`) and run
-`./setup.sh --rebuild` to hear them; `tools/assets.tsv` then no longer matches for the sound files
-involved (`python3 tools/verify.py record` rewrites it).
+### The sortie
 
-## Controls
-
-| Key | What it does |
+| Wave | Hostiles |
 | --- | --- |
-| Arrows / WASD | move |
-| Z (hold) | mine, attack, talk |
-| X | use, place, eat |
-| Space | jump |
-| Shift | sprint |
-| E | inventory |
-| Q | drop |
-| 1 to 9, mouse wheel, C / V | pick the hotbar slot |
-| Enter | FireRed's start menu |
-| J | map |
-| M | music on or off |
+| 1 First Contact | 3 Drones |
+| 2 Pincer | 4 Drones, 1 Striker |
+| 3 Heavy Support | 4 Drones, 2 Bulwarks |
+| 4 Blade Dance | 3 Strikers, 3 Drones, 2 Bulwarks |
+| 5 The Crimson Baron | the boss and 2 Drones |
 
-On touch devices an on-screen pad appears.
+- **DR-12 Drone**: mono-eye grunt that holds its distance and fires three-round bursts.
+- **ST-21 Striker**: fast blade fighter that dashes in for a saber combo, then backs off and shoots.
+- **HV-30 Bulwark**: slow artillery. Its cannon glows as it charges, then fires a splash shell.
+- **CR-00 Crimson Baron**: boss ace. Rifle volleys, saber rushes, homing missile salvos from 66% armor, and a
+  faster, more aggressive final phase below 33%. It dodges your beam shots.
 
-Co-op needs a room relay server, which is not part of this repository; without one, CO-OP > HOST
-shows "Co-op is busy right now. Try again later."
+Between waves your ammo and missiles are restocked and 25% of your armor is repaired. Finishing the sortie
+gives a rank (S/A/B/C) from combat score, clear time and remaining armor. Kills in quick succession build a score
+multiplier.
 
-## Tests and videos (optional)
+The pause menu has mouse sensitivity, volume, a shadows toggle and a resolution scale. Lower the last two if
+the game runs slowly on integrated graphics. Settings are remembered in `localStorage`.
+
+## Project layout
+
+```
+index.html, style.css     page shell, HUD markup and menus
+src/main.js               entry point: screens, pause, pointer lock, saved options
+src/game.js               renderer, fixed-timestep loop, damage/kill/score rules, win and lose
+src/world.js              procedural city, sky shader, lighting, collision queries
+src/mechModel.js          procedural mech model and animation rig
+src/mech.js               mech physics: walk, boost, dash, collision, damage
+src/player.js             input to intent, lock-on, rifle, missiles, saber combo, burst
+src/ai.js                 Drone / Striker / Bulwark / Baron behaviours
+src/weapons.js            projectiles with swept collision and homing
+src/fx.js                 particles, explosions, debris, saber arcs
+src/camera.js             chase camera with lock-on framing and trauma shake
+src/hud.js                DOM bars plus canvas reticle, radar and damage numbers
+src/missions.js           wave director
+src/audio.js              synthesised sound effects and music
+src/data.js               mech stats, palettes and wave definitions
+vendor/three/             three.js r170 (MIT), vendored so the game runs offline
+scripts/test.mjs          end-to-end test suite
+serve.py                  tiny static server
+```
+
+The simulation runs on a fixed 60 Hz step independent of the display refresh rate. `window.__game` exposes the
+running game for debugging (`__game.cheat.invincible = true` is handy for sightseeing).
+
+## Tests
+
+`scripts/test.mjs` loads the game in headless Chromium and plays it: movement, boosting, landing on roofs,
+building collision (including a randomised stress run), every weapon, each enemy type and the boss, a full
+scripted playthrough to victory, a defeat and retry, and the pause/options UI. It fails on any console error.
 
 ```bash
-npm install                                      # Playwright; it drives your installed Google Chrome
-node tools/headless.mjs tools/smoke.mjs --params '?new' --out out/smoke
+npm i -D playwright       # once; a Chromium build must be available to Playwright
+npm test                  # SHOTS=0 to skip screenshots, DEBUG=1 for the raw numbers
+npm run lint              # needs eslint
 ```
 
-`tools/smoke.mjs` boots the title screen, starts a new Classic Kanto game, walks, punches a tree down,
-fights a wild battle with the keys, then makes a new Wild World through the title menus and walks in
-it, failing on any page error. `tools/gen_tests/` holds the rest of the test suite (each file says how
-to run it; a few compare against an earlier build kept in `out/baselines/`). `tools/render_video.mjs`,
-`render_trailer.mjs` and `render_showcase.mjs` drive the game frame by frame and write MP4s with
-ffmpeg. Screenshots and videos show game graphics, so they stay in `out/`, which is ignored.
+Screenshots from each run are written to `out/test/` (git-ignored).
 
-## How it works
+## Notes
 
-`tools/build_world.py` reads every FireRed map, layout, tileset and script in the decompilation,
-stitches the outdoor maps through their connections, packs the rooms and caves below them, and gives
-every cell a reference into a tile atlas whose entries carry a behaviour, a collision and a material
-(a tree is oak logs, a cliff is stone, a red roof is bricks). Cliff faces get ore veins painted from
-Minecraft's ore textures. The Nether, the stronghold and The End are generated regions in the same
-grid (`build_nether.py`, `build_stronghold.py`, `build_end.py`), and `build_terrain.py` makes the tile
-bank the generated worlds draw from.
-
-`tools/build_minecraft.py` turns Minecraft's textures into the item icons, block looks, GUI and font,
-and ray-casts Steve, the mobs, the Ender Dragon and the Wither from their box models
-(`tools/mcmodel.py`, `tools/models.py`) into a slightly top-down view that matches FireRed's camera.
-`tools/build_pokemon.py` writes the battle screen, every Pokémon's sprites, icons and cries, the fonts,
-the party menu and `pokemon.json` (species, moves, learnsets, types and EXP curves parsed from the
-decompilation's C tables by `tools/extract_data.py`). `tools/build_music.py` is an M4A player that
-renders FireRed's songs from the decompilation's MIDI files, voicegroups and samples.
-
-The game itself is plain JavaScript modules in `src/` with no build step: `src/main.js` (state machine,
-input, saving), `src/world.js` and `src/chunks.js` (the block world), `src/player.js`, `src/items.js`
-and `src/entities.js` (Steve, items, mobs), `src/battle.js` (a Gen 3 battle engine on FireRed's battle
-screen), `src/gen/` (the seeded world generator, run in a Worker), `src/ui/` (Minecraft's menus and the
-title menus) and `src/net/` (co-op).
-
-## Layout
-
-- `setup.sh` fetch, check, build and verify
-- `tools/fetch_minecraft.py`, `tools/minecraft-sounds.txt` Minecraft's files from Mojang's servers
-- `tools/verify.py`, `tools/upstream-inputs.tsv`, `tools/assets.tsv` hash checks (hashes only)
-- `tools/build_*.py` and their helpers (`fr.py`, `mcdata.py`, `mcmodel.py`, `models.py`, `autotile.py`,
-  `pix.py`, `extract_data.py`, `villager_trades.py`, `trade_check.py`) the asset pipeline
-- `tools/headless.mjs`, `tools/smoke.mjs`, `tools/gen_tests/` headless tests
-- `tools/render_*.mjs` videos; `tools/dev.js` browser console helpers
-- `src/` the game; `index.html`, `serve.py` the page and a local static server
-
-## Credits
-
-- [pret/pokefirered](https://github.com/pret/pokefirered), the FireRed decompilation: every map,
-  metatile and tileset, the scripts and text of the rooms' people, the wild encounter tables, battle
-  terrains, text boxes, healthboxes, fonts, the party screen, every Pokémon's sprites and cries, the
-  species and move data, and the music, rendered from its MIDI files, voicegroups and samples.
-- [rh-hideout/pokeemerald-expansion](https://github.com/rh-hideout/pokeemerald-expansion) and the
-  artists credited there: the overworld sprites of the follower Pokémon.
-- Minecraft 1.21.4 by Mojang: block and item textures, the GUI, the font and the sounds, downloaded
-  from Mojang's asset servers by `tools/fetch_minecraft.py`.
-
-Pokémon and all related names are trademarks of Nintendo, Game Freak, Creatures and The Pokémon
-Company. Minecraft is a trademark of Mojang Synergies AB.
+- The mech designs are original. They borrow the visual language of the real-robot anime genre (a V-fin hero,
+  mono-eye grunts, a horned ace) but copy no existing machine. This is an independent fan-style project and is
+  not affiliated with or endorsed by any anime studio or toy maker.
+- three.js is © its authors, MIT licensed; see `vendor/three/LICENSE`.

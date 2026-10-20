@@ -1,175 +1,402 @@
-// Minecraft's HUD over the FireRed world: hotbar, hearts, hunger, armor and the experience bar, item
-// icons with stack counts and durability bars, tooltips and action-bar text. Everything here is drawn
-// on the full-resolution canvas (480x320), where one GBA pixel is two canvas pixels.
-import { A } from './assets.js';
-import { mcText, mcWidth, MC_COLOR } from './mcfont.js';
-import { item, toolOf } from './items.js';
+// Heads-up display. Static widgets are DOM (bars, counters); everything that tracks something in
+// the 3D world — lock-on reticle, radar, off-screen markers, damage numbers — is drawn on a 2D canvas.
 
-export const HW = 480, HH = 320;
+import * as THREE from 'three';
+import { clamp, fmtTime } from './util.js';
 
-export function drawIcon(ctx, id, x, y, size = 16) {
-  const it = item(id);
-  if (!it) return;
-  const i = it.iconIndex;
-  ctx.drawImage(A.mc.icons, (i % 32) * 16, Math.floor(i / 32) * 16, 16, 16, Math.round(x), Math.round(y), size, size);
-}
-// a one-pixel coloured outline round an item icon (its silhouette drawn at the four neighbouring offsets)
-const rimCache = new Map();
-export function iconRim(ctx, id, x, y, color) {
-  const it = item(id);
-  if (!it || !A.mc.icons) return;
-  const key = id + color;
-  let c = rimCache.get(key);
-  if (!c) {
-    const i = it.iconIndex;
-    c = document.createElement('canvas'); c.width = 16; c.height = 16;
-    const g = c.getContext('2d');
-    g.drawImage(A.mc.icons, (i % 32) * 16, Math.floor(i / 32) * 16, 16, 16, 0, 0, 16, 16);
-    g.globalCompositeOperation = 'source-in'; g.fillStyle = color; g.fillRect(0, 0, 16, 16);
-    rimCache.set(key, c);
-  }
-  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) ctx.drawImage(c, Math.round(x) + dx, Math.round(y) + dy);
-}
-// An inventory stack: icon, count in the corner, durability bar under damaged tools.
-export function drawStack(ctx, s, x, y) {
-  if (!s) return;
-  drawIcon(ctx, s.id, x, y);
-  const t = toolOf(s);
-  if (t && s.dmg) {
-    const f = Math.max(0, 1 - s.dmg / t.dur);
-    const w = Math.round(13 * f);
-    ctx.fillStyle = '#000'; ctx.fillRect(x + 2, y + 13, 13, 2);
-    const hue = Math.round(f * 120);
-    ctx.fillStyle = `hsl(${hue},100%,50%)`; ctx.fillRect(x + 2, y + 13, w, 1);
-  }
-  if (s.n > 1) { const txt = String(s.n); mcText(ctx, txt, x + 17 - mcWidth(txt), y + 9, '#ffffff'); }
-}
+const $ = (id) => document.getElementById(id);
+const CYAN = '#52e0ff', RED = '#ff4260', AMBER = '#ffb62e', GREEN = '#5dffa5', PINK = '#ff6ad5';
 
-// Experience: points needed for the next level, as in Java Edition.
-export function xpForLevel(l) { return l >= 30 ? 9 * l - 158 : l >= 15 ? 5 * l - 38 : 2 * l + 7; }
+export class Hud {
+  constructor(game) {
+    this.game = game;
+    this.canvas = $('hud2d');
+    this.ctx = this.canvas.getContext('2d');
+    this.el = {
+      root: $('hud'), waveTitle: $('wave-title'), enemies: $('enemies-left'), score: $('score'), clock: $('clock'),
+      hpFill: $('hp-fill'), hpText: $('hp-text'), hpBar: $('hp-fill').parentElement,
+      enFill: $('en-fill'), enText: $('en-text'), enBar: $('en-fill').parentElement,
+      burstFill: $('burst-fill'), burstText: $('burst-text'), burstBar: $('burst-fill').parentElement, burstReady: $('burst-ready'),
+      ammo: $('ammo-pips'), missiles: $('missile-pips'), reload: $('reload-note'),
+      boss: $('boss-bar'), bossFill: $('boss-fill'), bossName: $('boss-name'),
+      banner: $('banner'), aMissile: $('alert-missile'), aArea: $('alert-area'), aArmor: $('alert-armor'),
+      dmg: $('damage-vignette'), burstV: $('burst-vignette'),
+    };
+    this.numbers = [];
+    this.hitMarker = 0;
+    this.dmgFlash = 0;
+    this._v = new THREE.Vector3();
+    this._w = new THREE.Vector3();
+    this._c = new THREE.Vector3();
+    this._s = { x: 0, y: 0, visible: false, dist: 0 };
+    this._missileAlert = false;
+    this._lastAmmo = -1;
+    this._lastMissile = -1;
+    this._bannerQueue = [];
+    this._bannerT = 0;
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
 
-export function drawHUD(ctx, G, t) {
-  const P = G.P, inv = G.inv;
-  // generated worlds' modes (the world update's 6.1): Creative draws the hotbar only, a spectator nothing, Hardcore
-  // its own hearts (G.hcHearts, src/ui/hardcore.js); Classic (no G.mr) as ever
-  const hud = G.mr ? G.mr.hud : 'full', bars = hud !== 'hotbar';
-  if (hud === 'none') return;
-  const x0 = Math.round((HW - 182) / 2), yb = HH - 22;
-  ctx.drawImage(A.mc.gui_hotbar, x0, yb);
-  ctx.drawImage(A.mc.gui_hotbar_selection, x0 - 1 + inv.sel * 20, yb - 1);
-  for (let i = 0; i < 9; i++) drawStack(ctx, inv.slots[i], x0 + 3 + i * 20, yb + 3);
-  // experience bar and level
-  const yx = yb - 7;
-  if (bars) ctx.drawImage(A.mc.gui_xp_bg, x0, yx);
-  const need = xpForLevel(P.level);
-  const w = bars ? Math.floor((P.xpProgress / need) * 183) : 0;
-  if (w > 0) ctx.drawImage(A.mc.gui_xp_fill, 0, 0, w, 5, x0, yx, w, 5);
-  if (bars && P.level > 0) {
-    const s = String(P.level), lx = Math.round(HW / 2 - mcWidth(s) / 2), ly = yx - 7;
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) mcText(ctx, s, lx + dx, ly + dy, '#000000', false);
-    mcText(ctx, s, lx, ly, '#80ff20', false);
+  resize() {
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.w = window.innerWidth;
+    this.h = window.innerHeight;
+    this.canvas.width = Math.round(this.w * this.dpr);
+    this.canvas.height = Math.round(this.h * this.dpr);
   }
-  // hearts (left) and hunger (right), 10 each, 8px apart
-  const yh = yx - 10;
-  const hp = Math.ceil(P.health), max = 20;
-  const blink = P.hurtFlash > 0 && Math.floor(P.hurtFlash * 10) % 2 === 0;
-  const low = hp <= 4;
-  if (hud === 'hardcore' && G.hcHearts) G.hcHearts(ctx, P, x0, yh, G.tick);
-  else if (bars) for (let i = 0; i < max / 2; i++) {
-    const x = x0 + i * 8;
-    let y = yh;
-    if (low) y += ((G.tick * 7 + i * 13) % 3) - 1;
-    if (P.regenFlash > 0 && i === Math.floor((1 - P.regenFlash) * 10)) y -= 2;
-    ctx.drawImage(blink ? A.mc.gui_heart_container_blinking : A.mc.gui_heart_container, x, y);
-    const kind = P.poisoned ? 'poisoned_' : '';
-    if (hp >= i * 2 + 2) ctx.drawImage(A.mc[`gui_heart_${kind}full`], x, y);
-    else if (hp === i * 2 + 1) ctx.drawImage(A.mc[`gui_heart_${kind}half`], x, y);
+
+  show(on) {
+    this.el.root.classList.toggle('hidden', !on);
+    if (!on) this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
-  if (P.absorb > 0 && bars && !(hud === 'hardcore' && G.hcHearts)) {
-    for (let i = 0; i < Math.ceil(P.absorb / 2); i++) {
-      const x = x0 + i * 8, y = yh - 10;
-      ctx.drawImage(A.mc.gui_heart_container, x, y);
-      ctx.drawImage(P.absorb >= i * 2 + 2 ? A.mc.gui_heart_absorbing_full : A.mc.gui_heart_absorbing_half, x, y);
+
+  reset() {
+    this.numbers.length = 0;
+    this.hitMarker = 0;
+    this.dmgFlash = 0;
+    this._bannerQueue.length = 0;
+    this._bannerT = 0;
+    this.el.banner.classList.remove('show');
+    this.el.boss.classList.add('hidden');
+  }
+
+  // ------------------------------------------------------------------ events from the game
+
+  message(text, kind = '', sub = '') {
+    this._bannerQueue.push({ text, kind, sub });
+  }
+
+  damageNumber(pos, amount, kind) {
+    this.numbers.push({ x: pos.x, y: pos.y, z: pos.z, amount: Math.round(amount), kind, age: 0, dx: (Math.random() - 0.5) * 30 });
+    if (this.numbers.length > 40) this.numbers.shift();
+  }
+
+  playerHit(amount) {
+    this.dmgFlash = clamp(0.35 + amount / 500, 0.35, 1);
+  }
+
+  enemyHit() {
+    this.hitMarker = 0.18;
+  }
+
+  // ------------------------------------------------------------------ projection
+
+  /** World point → screen pixels. `visible` is false behind the camera. */
+  toScreen(p, out = this._s) {
+    const cam = this.game.camera;
+    const v = this._v.copy(p).applyMatrix4(cam.matrixWorldInverse);
+    out.dist = Math.hypot(v.x, v.y, v.z);
+    out.visible = v.z < -0.5;
+    v.applyMatrix4(cam.projectionMatrix);
+    out.x = (v.x * 0.5 + 0.5) * this.w;
+    out.y = (-v.y * 0.5 + 0.5) * this.h;
+    return out;
+  }
+
+  // ------------------------------------------------------------------ per frame
+
+  update(dt) {
+    const g = this.game;
+    const player = g.player;
+    const mech = player.mech;
+    const e = this.el;
+
+    // ---- text
+    const m = g.missions;
+    e.waveTitle.textContent = m.finished ? 'MISSION COMPLETE' : `WAVE ${m.waveNumber}/${m.total} — ${m.title}`;
+    e.enemies.textContent = String(g.enemies.length);
+    e.score.textContent = g.stats.score.toLocaleString('en-US');
+    e.clock.textContent = fmtTime(g.stats.time);
+
+    // ---- bars
+    const hpK = mech.hp / mech.maxHp;
+    e.hpFill.style.width = `${hpK * 100}%`;
+    e.hpBar.classList.toggle('low', hpK < 0.25);
+    e.hpText.textContent = String(Math.ceil(mech.hp));
+    e.enFill.style.width = `${(mech.en / mech.maxEn) * 100}%`;
+    e.enBar.classList.toggle('overheat', mech.overheat);
+    e.enText.textContent = mech.overheat ? 'HEAT' : String(Math.ceil(mech.en));
+    const burstK = player.burstActive ? player.burstT / 12 : player.burst / 100;
+    e.burstFill.style.width = `${burstK * 100}%`;
+    e.burstText.textContent = player.burstActive ? 'ON' : `${Math.floor(player.burst)}%`;
+    const ready = player.burst >= 100 && !player.burstActive;
+    e.burstBar.classList.toggle('ready', ready);
+    e.burstReady.classList.toggle('on', ready);
+
+    // ---- weapon pips (rebuilt only when the count changes)
+    this._pips(e.ammo, player.ammo, 8, '_lastAmmo');
+    this._missilePips(player);
+    e.reload.classList.toggle('on', player.reloadT > 0);
+    if (player.reloadT > 0) e.reload.textContent = `RELOADING ${Math.round((1 - player.reloadT / player.reloadDur) * 100)}%`;
+
+    // ---- alerts
+    const incoming = g.projectiles.incomingAt(mech);
+    if (incoming > 0 && !this._missileAlert) g.audio.alert();
+    this._missileAlert = incoming > 0;
+    e.aMissile.classList.toggle('hidden', incoming === 0);
+    e.aArea.classList.toggle('hidden', !mech.outOfBounds);
+    e.aArmor.classList.toggle('hidden', hpK >= 0.2 || mech.dead);
+
+    // ---- boss bar
+    const boss = g.enemies.find((en) => en.mech.def.boss);
+    e.boss.classList.toggle('hidden', !boss);
+    if (boss) {
+      e.bossFill.style.width = `${(boss.mech.hp / boss.mech.maxHp) * 100}%`;
+      e.bossName.textContent = boss.mech.def.name;
+    }
+
+    // ---- screen overlays
+    this.dmgFlash = Math.max(0, this.dmgFlash - dt * 2.2);
+    e.dmg.style.opacity = String(this.dmgFlash + (hpK < 0.2 && !mech.dead ? 0.25 + 0.15 * Math.sin(g.time * 8) : 0));
+    e.burstV.style.opacity = player.burstActive ? '1' : '0';
+
+    // ---- banner queue
+    this._bannerT -= dt;
+    if (this._bannerT <= 0 && this._bannerQueue.length) {
+      const b = this._bannerQueue.shift();
+      const el = e.banner;
+      el.className = '';
+      void el.offsetWidth; // restart the CSS animation
+      el.innerHTML = '';
+      el.append(document.createTextNode(b.text));
+      if (b.sub) {
+        const s = document.createElement('small');
+        s.textContent = b.sub;
+        el.append(s);
+      }
+      el.className = `show ${b.kind}`;
+      this._bannerT = 2.2;
+    }
+
+    this._draw(dt);
+  }
+
+  _pips(container, count, max, key) {
+    if (this[key] === count) return;
+    this[key] = count;
+    container.textContent = '';
+    for (let i = 0; i < max; i++) {
+      const d = document.createElement('div');
+      d.className = `pip${i < count ? ' on' : ''}`;
+      container.append(d);
     }
   }
-  const hunger = P.hungerEffect > 0 ? '_hunger' : '';
-  for (let i = 0; i < (bars ? 10 : 0); i++) {
-    const x = x0 + 182 - 9 - i * 8;
-    let y = yh;
-    if (P.sat <= 0 && (G.tick + i * 7) % 24 < 2) y += 1;
-    ctx.drawImage(A.mc[`gui_food_empty${hunger}`], x, y);
-    if (P.food >= i * 2 + 2) ctx.drawImage(A.mc[`gui_food_full${hunger}`], x, y);
-    else if (P.food === i * 2 + 1) ctx.drawImage(A.mc[`gui_food_half${hunger}`], x, y);
-  }
-  const armor = bars ? inv.armorPoints() : 0;
-  if (armor > 0) {
-    const ya = yh - 10 - (P.absorb > 0 ? 10 : 0);
-    for (let i = 0; i < 10; i++) {
-      const x = x0 + i * 8;
-      ctx.drawImage(armor >= i * 2 + 2 ? A.mc.gui_armor_full : armor === i * 2 + 1 ? A.mc.gui_armor_half : A.mc.gui_armor_empty, x, ya);
+
+  _missilePips(player) {
+    const key = `${player.missiles}:${Math.floor(player.missileT * 4)}`;
+    if (this._lastMissile === key) return;
+    this._lastMissile = key;
+    const c = this.el.missiles;
+    c.textContent = '';
+    for (let i = 0; i < 2; i++) {
+      const d = document.createElement('div');
+      d.className = `pip${i < player.missiles ? ' on' : ''}`;
+      if (i === player.missiles) {
+        const f = document.createElement('i');
+        f.style.width = `${(player.missileT / 7) * 100}%`;
+        d.append(f);
+      }
+      c.append(d);
     }
   }
-  // held item name after switching, then action bar messages
-  if (G.heldName && G.heldName.t > 0) {
-    const a = Math.min(1, G.heldName.t / 0.5);
-    ctx.globalAlpha = a;
-    const s = G.heldName.text;
-    mcText(ctx, s, Math.round(HW / 2 - mcWidth(s) / 2), yh - (armor > 0 ? 22 : 12), '#ffffff');
+
+  // ------------------------------------------------------------------ canvas layer
+
+  _draw(dt) {
+    const ctx = this.ctx;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.clearRect(0, 0, this.w, this.h);
+    ctx.lineCap = 'round';
+
+    this._drawMarkers(ctx);
+    this._drawCrosshair(ctx, dt);
+    this._drawRadar(ctx);
+    this._drawNumbers(ctx, dt);
+  }
+
+  _drawCrosshair(ctx, dt) {
+    const cx = this.w / 2, cy = this.h / 2;
+    const locked = !!this.game.player.lock;
+    ctx.strokeStyle = locked ? 'rgba(93,255,165,0.7)' : 'rgba(82,224,255,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 11, 0, Math.PI * 2);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      ctx.moveTo(cx + dx * 15, cy + dy * 15);
+      ctx.lineTo(cx + dx * 24, cy + dy * 24);
+    }
+    ctx.stroke();
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillRect(cx - 1, cy - 1, 2, 2);
+
+    if (this.hitMarker > 0) {
+      this.hitMarker -= dt;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+        ctx.moveTo(cx + sx * 8, cy + sy * 8);
+        ctx.lineTo(cx + sx * 17, cy + sy * 17);
+      }
+      ctx.stroke();
+    }
+  }
+
+  /** Lock-on reticle on the target; small diamonds / edge arrows for everything else. */
+  _drawMarkers(ctx) {
+    const g = this.game;
+    const lock = g.player.lock;
+    const s = this._s;
+    const margin = 46;
+    const cx = this.w / 2, cy = this.h / 2;
+
+    for (const en of g.enemies) {
+      const m = en.mech;
+      if (m.dead) continue;
+      this.toScreen(m.center(this._c), s);
+      const boss = !!m.def.boss;
+      const onScreen = s.visible && s.x > margin && s.x < this.w - margin && s.y > margin && s.y < this.h - margin;
+
+      if (m === lock && onScreen) {
+        this._reticle(ctx, s, m);
+      } else if (onScreen) {
+        const hpK = m.hp / m.maxHp;
+        ctx.strokeStyle = boss ? 'rgba(255,66,96,0.9)' : 'rgba(255,110,90,0.75)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y - 9); ctx.lineTo(s.x + 7, s.y); ctx.lineTo(s.x, s.y + 9); ctx.lineTo(s.x - 7, s.y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(s.x - 16, s.y + 14, 32, 3);
+        ctx.fillStyle = boss ? RED : '#ff7a5a';
+        ctx.fillRect(s.x - 16, s.y + 14, 32 * hpK, 3);
+      } else {
+        // off-screen: arrow on the screen edge pointing toward the enemy
+        let ax = s.x - cx, ay = s.y - cy;
+        if (!s.visible) { ax = -ax; ay = -ay; }
+        const len = Math.hypot(ax, ay) || 1;
+        ax /= len; ay /= len;
+        const k = Math.min((this.w / 2 - margin) / Math.max(Math.abs(ax), 1e-3), (this.h / 2 - margin) / Math.max(Math.abs(ay), 1e-3));
+        const px = cx + ax * k, py = cy + ay * k;
+        const ang = Math.atan2(ay, ax);
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(ang);
+        ctx.fillStyle = m === lock ? GREEN : boss ? RED : 'rgba(255,110,90,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(12, 0); ctx.lineTo(-8, -9); ctx.lineTo(-3, 0); ctx.lineTo(-8, 9);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  _reticle(ctx, s, m) {
+    const t = this.game.time;
+    const size = clamp((m.height * 1100) / Math.max(s.dist, 60) / 2.2, 26, 110);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.strokeStyle = GREEN;
+    ctx.lineWidth = 2;
+    ctx.rotate(Math.sin(t * 2) * 0.03);
+    const L = size * 0.4;
+    ctx.beginPath();
+    for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      ctx.moveTo(sx * size, sy * (size - L));
+      ctx.lineTo(sx * size, sy * size);
+      ctx.lineTo(sx * (size - L), sy * size);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = GREEN;
+    const range = this.game.player.mech.center(this._v).distanceTo(m.center(this._w));
+    ctx.fillText(`${m.def.name}  ${Math.round(range)}m`, s.x, s.y - size - 10);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(s.x - size, s.y + size + 8, size * 2, 5);
+    ctx.fillStyle = m.hp / m.maxHp < 0.3 ? RED : GREEN;
+    ctx.fillRect(s.x - size, s.y + size + 8, size * 2 * (m.hp / m.maxHp), 5);
+  }
+
+  _drawRadar(ctx) {
+    const g = this.game;
+    const R = 72, range = 420;
+    const cx = this.w - R - 26, cy = R + 26;
+    const yaw = g.rig.yaw;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    const me = g.player.mech.pos;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(8,16,26,0.7)';
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(82,224,255,0.4)';
+    ctx.lineWidth = 1;
+    for (const f of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(cx, cy, R * f, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.beginPath();
+    ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R);
+    ctx.stroke();
+    // view cone
+    ctx.fillStyle = 'rgba(82,224,255,0.1)';
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, -Math.PI / 2 - 0.55, -Math.PI / 2 + 0.55); ctx.closePath(); ctx.fill();
+
+    const blip = (wx, wz, color, size, shape = 'dot') => {
+      const dx = wx - me.x, dz = wz - me.z;
+      let u = (dx * rx + dz * rz) / range * R;
+      let v = (dx * fx + dz * fz) / range * R;
+      const d = Math.hypot(u, v);
+      let a = 1;
+      if (d > R - 4) { u *= (R - 4) / d; v *= (R - 4) / d; a = 0.55; }
+      ctx.globalAlpha = a;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (shape === 'dot') ctx.arc(cx + u, cy - v, size, 0, Math.PI * 2);
+      else { ctx.moveTo(cx + u, cy - v - size); ctx.lineTo(cx + u + size, cy - v + size); ctx.lineTo(cx + u - size, cy - v + size); ctx.closePath(); }
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    };
+    for (const en of g.enemies) {
+      if (en.mech.dead) continue;
+      const lock = en.mech === g.player.lock;
+      blip(en.mech.pos.x, en.mech.pos.z, lock ? GREEN : en.mech.def.boss ? RED : '#ff7a5a', en.mech.def.boss ? 5 : 3.5);
+    }
+    for (const p of g.projectiles.list) {
+      if (p.type === 'missile' && p.team === 'enemy') blip(p.pos.x, p.pos.z, AMBER, 3, 'tri');
+    }
+    // you
+    ctx.fillStyle = CYAN;
+    ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx + 5, cy + 5); ctx.lineTo(cx - 5, cy + 5); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(82,224,255,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  _drawNumbers(ctx, dt) {
+    const s = this._s;
+    ctx.textAlign = 'center';
+    for (let i = this.numbers.length - 1; i >= 0; i--) {
+      const n = this.numbers[i];
+      n.age += dt;
+      if (n.age > 0.95) { this.numbers.splice(i, 1); continue; }
+      n.y += 14 * dt;
+      this.toScreen(this._v.set(n.x, n.y, n.z), s);
+      if (!s.visible) continue;
+      const k = n.age / 0.95;
+      ctx.globalAlpha = 1 - k * k;
+      const big = clamp(n.amount / 60, 1, 2.2);
+      ctx.font = `700 ${Math.round(13 * big)}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.fillStyle = n.kind === 'player' ? RED : n.kind === 'saber' ? PINK : '#ffe08a';
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 3;
+      const x = s.x + n.dx * k, y = s.y - k * 36;
+      ctx.strokeText(String(n.amount), x, y);
+      ctx.fillText(String(n.amount), x, y);
+    }
     ctx.globalAlpha = 1;
   }
-  if (G.actionBar && G.actionBar.t > 0) {
-    const a = Math.min(1, G.actionBar.t / 0.6);
-    ctx.globalAlpha = a;
-    const s = G.actionBar.text;
-    mcText(ctx, s, Math.round(HW / 2 - mcWidth(s) / 2), yh - (armor > 0 ? 34 : 24), G.actionBar.color || '#ffffff');
-    ctx.globalAlpha = 1;
-  }
-  void t;
-}
-
-// Minecraft's tooltip: a dark purple-bordered box with the item name (and extra lines).
-export function drawTooltip(ctx, lines, x, y) {
-  const w = Math.max(...lines.map((l) => mcWidth(l.text))) + 8;
-  const h = lines.length * 10 + 4 + (lines.length > 1 ? 2 : 0);
-  let tx = x + 12, ty = y - 12;
-  if (tx + w > HW) tx = x - w - 4;
-  if (ty + h > HH) ty = HH - h - 2;
-  if (ty < 2) ty = 2;
-  ctx.fillStyle = 'rgba(16,0,16,0.94)';
-  ctx.fillRect(tx + 1, ty, w - 2, h); ctx.fillRect(tx, ty + 1, w, h - 2);
-  const g = ctx.createLinearGradient(0, ty, 0, ty + h);
-  g.addColorStop(0, 'rgba(80,0,255,0.31)'); g.addColorStop(1, 'rgba(40,0,127,0.31)');
-  ctx.strokeStyle = g; ctx.lineWidth = 1; ctx.strokeRect(tx + 1.5, ty + 1.5, w - 3, h - 3);
-  lines.forEach((l, i) => mcText(ctx, l.text, tx + 4, ty + 3 + i * 10 + (i > 0 ? 2 : 0), l.color || '#ffffff'));
-}
-export function tooltipLines(s) {
-  const it = item(s.id);
-  if (!it) return [{ text: s.id }];
-  const lines = [{ text: it.name, color: it.ball ? MC_COLOR.aqua : (s.id.includes('diamond') || s.id === 'golden_apple') ? MC_COLOR.aqua : '#ffffff' }];
-  const t = it.tool;
-  if (t && ['sword', 'axe', 'pickaxe', 'shovel', 'hoe'].includes(t.kind)) {
-    lines.push({ text: '' });
-    lines.push({ text: 'When in Main Hand:', color: MC_COLOR.gray });
-    lines.push({ text: ` ${t.dmg} Attack Damage`, color: MC_COLOR.darkGreen });
-    lines.push({ text: ` ${t.rate} Attack Speed`, color: MC_COLOR.darkGreen });
-  }
-  if (t && s.dmg) lines.push({ text: `Durability: ${t.dur - s.dmg} / ${t.dur}`, color: '#ffffff' });
-  if (it.armor) lines.push({ text: `+${it.armor.points} Armor`, color: MC_COLOR.blue });
-  if (it.ball) lines.push({ text: 'Catches wild POKéMON', color: MC_COLOR.gray });
-  return lines;
-}
-
-// Minecraft's advancement toast: slides in at the top right, holds for five seconds, slides out.
-export function drawToast(ctx, toast, y0 = 0) {
-  if (!toast) return;
-  const t = toast.t, total = 5.6;
-  const k = t < 0.5 ? t / 0.5 : t > total - 0.5 ? Math.max(0, (total - t) / 0.5) : 1;
-  const e = 1 - (1 - k) * (1 - k);
-  const x = Math.round(HW - 160 * e), y = y0;
-  ctx.drawImage(A.mc.gui_toast, x, y);
-  // the dragon egg is near-black on the toast's dark grey: a soft violet rim makes it read
-  if (toast.icon === 'dragon_egg') iconRim(ctx, toast.icon, x + 8, y + 8, '#9a6ad0');
-  drawIcon(ctx, toast.icon, x + 8, y + 8);
-  mcText(ctx, toast.kind === 'challenge' ? 'Challenge Complete!' : toast.kind === 'goal' ? 'Goal Reached!' : 'Advancement Made!', x + 30, y + 7, toast.kind === 'challenge' ? '#ff88ff' : '#ffff00', false);
-  mcText(ctx, toast.title, x + 30, y + 18, '#ffffff', false);
 }

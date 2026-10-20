@@ -1,13 +1,12 @@
 {
-  "name": "pokemon-redstone",
+  "name": "steel-vanguard",
+  "version": "1.0.0",
   "private": true,
-  "description": "Minecraft's Steve in Pokémon FireRed's Kanto, built locally from the public decompilation and Minecraft's own asset servers.",
+  "description": "A 3D third-person mobile-suit combat game that runs in the browser.",
+  "type": "module",
   "scripts": {
-    "setup": "./setup.sh",
     "start": "python3 serve.py",
-    "video": "node tools/render_video.mjs"
-  },
-  "devDependencies": {
-    "playwright": "1.62.1"
+    "test": "node scripts/test.mjs",
+    "lint": "eslint src scripts"
   }
 }
