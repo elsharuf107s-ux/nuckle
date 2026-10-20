@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { MECHS } from './data.js';
 import { buildMech, MECH_HEIGHT } from './mechModel.js';
 import { ARENA } from './world.js';
-import { clamp, damp, dampAngle, lerp, rand, segSegDistSq } from './util.js';
+import { angleDiff, clamp, damp, dampAngle, lerp, rand, segSegDistSq } from './util.js';
 
 const GRAVITY = 78;
 const MAX_FALL = 120;
@@ -67,6 +67,7 @@ export class Mech {
     this.stagger = 0;
     this.flashT = 0;
     this.lastHitAt = -99;
+    this.turnRate = 0; // yaw change per second, for the animation (turning on the spot shuffles the feet)
     this.barrierMax = this.barrier = this.def.barrier ?? 0; // barrier core: soaks damage first, then recharges
     this.barrierHitAt = -99;
     this.dead = false;
@@ -209,13 +210,16 @@ export class Mech {
     // ---- facing
     let faceYaw = it.faceYaw;
     if (faceYaw === undefined && (mx || mz)) faceYaw = Math.atan2(-mx, -mz);
+    const prevYaw = this.yaw;
     if (faceYaw !== undefined) this.yaw = dampAngle(this.yaw, faceYaw, def.turn, dt);
+    this.turnRate = dt > 0 ? angleDiff(prevYaw, this.yaw) / dt : 0;
     this.pitch = damp(this.pitch, it.pitch ?? 0, 10, dt);
 
     this._syncModel(dt, it);
   }
 
   _landed(speed) {
+    this.model.land(clamp((speed - 20) / 120, 0.2, 1));
     this.game.fx.dust(this.pos, Math.min(16, 6 + speed / 10), 18);
     if (speed > 70) this.game.shakeFrom(this.pos, 0.25, 200);
   }
@@ -231,6 +235,10 @@ export class Mech {
       speed: Math.hypot(this.vel.x, this.vel.z),
       localFwd, localRight,
       grounded: this.grounded,
+      vy: this.vel.y,
+      dash: this.dashT > 0 ? this.dashT / this.def.dashTime : 0,
+      turnRate: this.turnRate,
+      relaxed: !!it.relaxed,
       boost: this.thrusting ? 1 : this.grounded ? 0 : 0.12,
       pitch: this.pitch,
       attack: it.attack ?? null,

@@ -15,6 +15,9 @@ import { clamp, fmtTime } from './util.js';
 
 const STEP = 1 / 60;
 const ZERO = new THREE.Vector3();
+// the garage's saber preview: the player's combo (see player.js) and a pause in guard
+const GARAGE_COMBO = [['slash1', 0.5], ['slash2', 0.5], ['slash3', 0.72], [null, 1.1]];
+const GARAGE_COMBO_LENGTH = GARAGE_COMBO.reduce((n, [, d]) => n + d, 0);
 
 export class Game {
   constructor(canvas) {
@@ -414,7 +417,7 @@ export class Game {
     }
 
     if (!garage) {
-      mech.update(dt, {});
+      mech.update(dt, { relaxed: true });
       const a = this.time * 0.15;
       const cx = Math.cos(a), cz = Math.sin(a);
       cam.position.set(c.x + cx * 62, 16, c.z + cz * 62);
@@ -434,21 +437,34 @@ export class Game {
   _garagePose(dt) {
     const m = this.player.mech;
     if (this.garagePose === 'saber') {
+      // the real three-hit combo at its real speed, arcs and all, then a moment in guard before it repeats
       if (!m.saberOut) m.setSaber(true);
-      const kinds = ['slash1', 'slash2', 'slash3'];
-      const period = 1.7;
       m.pos.y = 0;
-      m.update(dt, { attack: { kind: kinds[Math.floor(this.time / period) % 3], t: (this.time % period) / period } });
+      let t = this.time % GARAGE_COMBO_LENGTH;
+      const cycle = Math.floor(this.time / GARAGE_COMBO_LENGTH);
+      let attack = null;
+      for (const [kind, dur] of GARAGE_COMBO) {
+        if (t < dur) {
+          if (kind) attack = { kind, t: t / dur };
+          break;
+        }
+        t -= dur;
+      }
+      if (attack && attack.t >= 0.28 && this._garageArc !== `${cycle}${attack.kind}`) {
+        this._garageArc = `${cycle}${attack.kind}`;
+        this.fx.slashArc(m, attack.kind, m.spec.palette.blade);
+      }
+      m.update(dt, { attack, hover: true });
       return;
     }
     if (m.saberOut) m.setSaber(false);
     if (this.garagePose === 'boost') {
       m.pos.y = 7; // hover with the thrusters lit
-      m.update(dt, { velocity: ZERO });
+      m.update(dt, { velocity: ZERO, relaxed: true });
       return;
     }
     m.pos.y = 0;
-    m.update(dt, {});
+    m.update(dt, { relaxed: true });
   }
 
   /** Mechs are solid: push overlapping bodies apart. */

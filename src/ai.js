@@ -130,6 +130,7 @@ class Enemy {
   fire(opts) {
     const dir = this.aim(opts.speed, opts.lead ?? 0.7, opts.spread ?? 0.05).clone();
     this.game.projectiles.spawn({ team: 'enemy', source: this.mech, pos: this._muz, dir, ...opts, target: opts.target ?? null });
+    this.mech.model.recoil(opts.type === 'cannon' ? 1 : opts.type === 'bullet' ? 0.15 : 0.4);
   }
 
   /** Resolve a sabre hit on the player: a close, in-front check. Returns true on contact. */

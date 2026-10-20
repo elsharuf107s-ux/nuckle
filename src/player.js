@@ -461,6 +461,7 @@ export class Player {
         splash: w.splash ? { radius: w.splash.radius, damage: w.splash.damage * this.dmgMul } : null,
       });
     }
+    mech.model.recoil(w.kind === 'cannon' ? 1 : w.pellets ? 0.8 : w.kind === 'bullet' ? 0.16 : w.damage > 300 ? 0.75 : 0.42);
     const m = this._muzzle;
     const c = rgb(color);
     game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.09, w.kind === 'cannon' ? 12 : 8, 3, [1, 1, 1], c, 0.9);

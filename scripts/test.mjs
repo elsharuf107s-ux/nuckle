@@ -1402,6 +1402,158 @@ try {
     g.enemies.length = 0; g.projectiles.clear();
   });
 
+  // ------------------------------------------------------------ 5f. animation
+  const anim = await page.evaluate(async () => {
+    const g = window.__game;
+    const THREE = await import('three');
+    const { createEnemy } = await import('/src/ai.js');
+    const P = await import('/src/parts.js');
+    const keep = { state: g.state, manual: g.manual };
+    g.manual = true;
+    g.state = 'ended'; // nothing else moves the mech while these run
+    g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning } });
+    const m = g.player.mech;
+    const box = new THREE.Box3();
+    const out = {};
+    const reset = (x, z, y, yaw) => { m.dead = false; m.stagger = 0; m.dashT = 0; m.dashCd = 0; m.en = m.maxEn; m.overheat = false; m.setSaber(false); m.vel.set(0, 0, 0); m.place(x, z, y, yaw); };
+    const step = (mech, it) => { mech.update(1 / 60, it); g.time += 1 / 60; mech.root.updateWorldMatrix(true, true); };
+    const feet = (mech) => mech.model.feet.map((f) => { box.setFromObject(f); return { y: box.min.y, x: (box.min.x + box.max.x) / 2, z: (box.min.z + box.max.z) / 2 }; });
+
+    // planted-foot slip (as a share of the body's own travel), ground penetration and floating, over a gait
+    const gait = (mech, it, steps = 240, warm = 60) => {
+      let slip = 0, travel = 0, sink = 0, float = 0, prev = null;
+      for (let i = 0; i < steps; i++) {
+        const before = mech.pos.clone();
+        step(mech, it(i));
+        if (i < warm || !mech.grounded) { prev = null; continue; }
+        travel += Math.hypot(mech.pos.x - before.x, mech.pos.z - before.z);
+        const f = feet(mech);
+        const k = f[0].y < f[1].y ? 0 : 1;
+        sink = Math.min(sink, f[k].y);
+        float = Math.max(float, f[k].y);
+        if (prev && prev.k === k) slip += Math.hypot(f[k].x - prev.x, f[k].z - prev.z);
+        prev = { k, x: f[k].x, z: f[k].z };
+      }
+      return { slip: slip / Math.max(travel, 1e-6), sink, float };
+    };
+    reset(0, 0, 0, Math.PI / 2);
+    out.walk = gait(m, () => ({ moveX: -1, faceYaw: Math.PI / 2 }));
+    reset(0, 0, 0, Math.PI / 2);
+    out.walkSlow = gait(m, () => ({ moveX: -0.4, faceYaw: Math.PI / 2 }));
+    reset(0, 0, 0, 0);
+    out.strafe = gait(m, () => ({ moveX: 1, faceYaw: 0 }));
+    out.strafeHips = m.model.hips.rotation.y;
+    reset(0, 0, 0, Math.PI / 2);
+    out.back = gait(m, () => ({ moveX: 1, faceYaw: Math.PI / 2 }));
+    out.backHips = m.model.hips.rotation.y;
+    reset(0, 0, 0, 0);
+    out.diagonal = gait(m, () => ({ moveX: -0.7, moveZ: -0.7, faceYaw: 0 }));
+    out.enemies = {};
+    for (const type of ['drone', 'bulwark', 'baron']) {
+      const e = createEnemy(g, type, 1);
+      e.mech.place(300, 300, 0, Math.PI / 2);
+      out.enemies[type] = gait(e.mech, () => ({ moveX: -1, faceYaw: Math.PI / 2 }));
+      e.mech.destroy();
+    }
+
+    // a dash glides: both feet stay on the ground instead of sprinting
+    reset(0, 0, 0, Math.PI / 2);
+    for (let i = 0; i < 20; i++) step(m, {});
+    let dashLift = 0;
+    for (let i = 0; i < 16; i++) {
+      step(m, i === 0 ? { dash: new THREE.Vector3(-1, 0, 0), faceYaw: Math.PI / 2 } : { faceYaw: Math.PI / 2 });
+      if (i > 3) { const f = feet(m); dashLift = Math.max(dashLift, f[0].y, f[1].y); }
+    }
+    out.dashLift = dashLift;
+
+    // a hard landing crouches, then stands back up
+    reset(0, 0, 60, Math.PI / 2);
+    m.vel.y = -90;
+    let minHip = Infinity, landedAt = -1;
+    for (let i = 0; i < 120; i++) {
+      step(m, {});
+      if (m.grounded && landedAt < 0) landedAt = i;
+      if (landedAt >= 0 && i - landedAt < 20) minHip = Math.min(minHip, m.model.hips.position.y);
+    }
+    out.landing = { minHip, settled: m.model.hips.position.y };
+
+    // idle breathes (not frozen); the garage and title stand at ease with the rifle lowered
+    reset(0, 0, 0, 0);
+    const ty = [];
+    for (let i = 0; i < 120; i++) { step(m, {}); ty.push(m.model.torso.position.y); }
+    out.breath = Math.max(...ty) - Math.min(...ty);
+    out.readyArm = m.model.armR.arm.rotation.x;
+    for (let i = 0; i < 40; i++) step(m, { relaxed: true });
+    out.relaxedArm = m.model.armR.arm.rotation.x;
+
+    // a shot kicks the gun arm up, and it settles again
+    for (let i = 0; i < 20; i++) step(m, {});
+    const rest = m.model.armR.arm.rotation.x;
+    m.model.recoil(1);
+    step(m, {});
+    const kicked = m.model.armR.arm.rotation.x;
+    for (let i = 0; i < 30; i++) step(m, {});
+    out.recoil = { rest, kicked, settled: m.model.armR.arm.rotation.x };
+
+    // the saber: each slash sweeps the way it should, the chest turns with the arm, and the blade stays out of the ground
+    reset(0, 0, 0, 0);
+    m.setSaber(true);
+    for (let i = 0; i < 20; i++) step(m, {});
+    const tip = () => { const sab = m.model.saber; sab.updateWorldMatrix(true, true); return sab.localToWorld(new THREE.Vector3(0, -11.6, 0)); };
+    out.slashes = {};
+    let lowest = Infinity;
+    for (const [kind, n] of [['slash1', 30], ['slash2', 30], ['slash3', 43]]) {
+      const samples = [];
+      for (let k = 0; k <= n; k++) {
+        const it = { attack: { kind, t: k / n }, hover: true };
+        step(m, it);
+        for (let w = 0; w < 3; w++) m.update(1 / 240, it);
+        m.root.updateWorldMatrix(true, true);
+        const p = tip();
+        lowest = Math.min(lowest, p.y);
+        samples.push({ t: k / n, x: p.x, y: p.y, z: p.z, twist: m.model.torso.rotation.y });
+      }
+      const at = (t) => samples.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
+      out.slashes[kind] = { windup: at(0.28), strike: at(0.48) };
+    }
+    out.lowestTip = lowest;
+    m.setSaber(false);
+
+    // the garage preview plays the combo at its real speed: three arcs per 2.8-second loop
+    const arcsBefore = g.fx.timed.length;
+    g.state = 'garage';
+    g.garagePose = 'saber';
+    g.time = Math.ceil(g.time / 2.82) * 2.82 + 0.01;
+    for (let i = 0; i < Math.round(60 * 2.4); i++) { g._garagePose(1 / 60); g.time += 1 / 60; g.fx.update(0); }
+    out.garageArcs = g.fx.timed.length - arcsBefore;
+    g.garagePose = 'idle';
+    m.setSaber(false);
+    g.fx.clear();
+
+    g.state = keep.state;
+    g.manual = keep.manual;
+    reset(0, 0, 0, 0);
+    return out;
+  });
+  dump('animation', anim);
+  const pct = (v) => `${(v * 100).toFixed(1)}%`;
+  check('walking: a planted foot stays put (slip under 6% of the distance walked)', anim.walk.slip < 0.06 && anim.walkSlow.slip < 0.06, `${pct(anim.walk.slip)}, slow ${pct(anim.walkSlow.slip)}`);
+  check('strafing, backing up and diagonals keep their feet planted too', anim.strafe.slip < 0.08 && anim.back.slip < 0.06 && anim.diagonal.slip < 0.06, `${pct(anim.strafe.slip)} / ${pct(anim.back.slip)} / ${pct(anim.diagonal.slip)}`);
+  check('enemies of every size walk without sliding', Object.values(anim.enemies).every((e) => e.slip < 0.06), Object.entries(anim.enemies).map(([k, e]) => `${k} ${pct(e.slip)}`).join(', '));
+  const allGaits = [anim.walk, anim.walkSlow, anim.strafe, anim.back, anim.diagonal, ...Object.values(anim.enemies)];
+  check('feet neither sink into the ground nor float above it while walking', allGaits.every((r) => r.sink > -0.12 && r.float < 0.12), allGaits.map((r) => `${r.sink.toFixed(2)}..${r.float.toFixed(2)}`).join(' '));
+  check('a strafe turns the hips toward travel; backing up steps backward instead of moonwalking', anim.strafeHips < -0.9 && Math.abs(anim.backHips) < 0.15, `strafe hips ${anim.strafeHips.toFixed(2)}, back ${anim.backHips.toFixed(2)}`);
+  check('a dash glides with both feet down instead of sprinting', anim.dashLift < 0.3, `highest foot ${anim.dashLift.toFixed(2)}`);
+  check('a hard landing crouches and then stands back up', anim.landing.minHip < 8.5 && anim.landing.settled > 9.2, JSON.stringify(anim.landing));
+  check('an idle mech breathes; at ease (garage, title) it lowers the rifle', anim.breath > 0.03 && anim.relaxedArm < 0.6 && anim.readyArm > 0.9, `breath ${anim.breath.toFixed(3)}, arm ${anim.readyArm.toFixed(2)} -> ${anim.relaxedArm.toFixed(2)}`);
+  check('a shot kicks the gun arm up and it settles again', anim.recoil.kicked > anim.recoil.rest + 0.15 && Math.abs(anim.recoil.settled - anim.recoil.rest) < 0.02, JSON.stringify(anim.recoil));
+  const S = anim.slashes;
+  check('slash 1 swings right to left and slash 2 left to right, the chest turning with the blade', S.slash1.windup.x > 5 && S.slash1.strike.x < -5 && S.slash1.strike.twist > S.slash1.windup.twist + 0.5
+    && S.slash2.windup.x < -5 && S.slash2.strike.x > 5 && S.slash2.strike.twist < S.slash2.windup.twist - 0.5, JSON.stringify([S.slash1, S.slash2].map((x) => [x.windup.x.toFixed(1), x.strike.x.toFixed(1)])));
+  check('slash 3 chops from overhead down to the front', S.slash3.windup.y > 15 && S.slash3.strike.y < S.slash3.windup.y - 8 && S.slash3.strike.z < -10, JSON.stringify([S.slash3.windup.y.toFixed(1), S.slash3.strike.y.toFixed(1), S.slash3.strike.z.toFixed(1)]));
+  check('the saber never cuts into the ground', anim.lowestTip > 0.5, `lowest tip ${anim.lowestTip.toFixed(2)}`);
+  check('the garage saber preview plays the combo at full speed, with its arcs', anim.garageArcs === 3, `${anim.garageArcs} arcs in one loop`);
+
   // ------------------------------------------------------------ 6. enemies fight back
   const enemies = await page.evaluate(async () => {
     const g = window.__game, p = g.player, m = p.mech;

@@ -369,7 +369,9 @@ try {
   await G(() => window.__game.step(40));
   const risen = await st();
   check('tapping BOOST latches it on: the mech keeps climbing with the finger off', latched.space && risen.y > yb + 8, `y ${yb.toFixed(1)} -> ${risen.y.toFixed(1)}`);
-  check('the BOOST button shows it is latched', await page.$eval('#tc-boost', (e) => e.classList.contains('on')));
+  // (the button's state is refreshed on the next animation frame, so give it a moment)
+  const latchShown = await page.waitForFunction(() => document.getElementById('tc-boost').classList.contains('on'), null, { timeout: 2000 }).then(() => true, () => false);
+  check('the BOOST button shows it is latched', latchShown);
   await tap('#tc-boost');
   await page.waitForTimeout(150);
   check('a second tap turns boost off', !(await st()).space && !(await page.$eval('#tc-boost', (e) => e.classList.contains('on'))));

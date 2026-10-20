@@ -285,25 +285,32 @@ export class Fx {
   }
 
   /** Crescent beam-sabre trail. kind: slash1 (right to left), slash2 (left to right), slash3 (overhead chop). */
+  /**
+   * The crescent a saber leaves. Its shape follows the blade's real path (see the swing poses in mechModel.js):
+   * the two horizontal slashes sweep the front half at waist-to-chest height, from one side round to the other;
+   * the overhead chop falls in a vertical plane just right of centre, from behind the head to low in front.
+   * The crescent sweeps about as fast as the blade does, then fades.
+   */
   slashArc(mech, kind, color) {
     const vertical = kind === 'slash3';
-    const thetaStart = vertical ? -0.2 : 0.35;
-    const thetaLen = vertical ? Math.PI * 1.05 : Math.PI - 0.7;
-    const geo = new THREE.RingGeometry(7, 15, 40, 1, thetaStart, thetaLen);
+    const thetaStart = vertical ? -0.55 : -0.05;
+    const thetaLen = vertical ? 3.35 : Math.PI + 0.1;
+    const inner = 7, outer = vertical ? 20 : 19;
+    const geo = new THREE.RingGeometry(inner, outer, 48, 1, thetaStart, thetaLen);
     const mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false,
       uniforms: {
         uHead: { value: 0 }, uFade: { value: 1 }, uColor: { value: new THREE.Color(color) },
-        uStart: { value: thetaStart }, uLen: { value: thetaLen },
+        uStart: { value: thetaStart }, uLen: { value: thetaLen }, uInner: { value: inner }, uWidth: { value: outer - inner },
         uDir: { value: kind === 'slash1' ? 1 : kind === 'slash2' ? -1 : -1 },
       },
       vertexShader: `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
       fragmentShader: `
-        varying vec2 vP; uniform float uHead, uFade, uStart, uLen, uDir; uniform vec3 uColor;
+        varying vec2 vP; uniform float uHead, uFade, uStart, uLen, uDir, uInner, uWidth; uniform vec3 uColor;
         void main(){
           float u = (atan(vP.y, vP.x) - uStart) / uLen;
           if (uDir < 0.0) u = 1.0 - u;
-          float r = (length(vP) - 7.0) / 8.0;
+          float r = (length(vP) - uInner) / uWidth;
           float body = smoothstep(uHead - 0.55, uHead, u) * step(u, uHead);
           float crescent = smoothstep(0.0, 0.85, r) * (1.0 - smoothstep(0.88, 1.0, r));
           gl_FragColor = vec4(mix(uColor, vec3(1.0), body * body * 0.7), body * crescent * uFade);
@@ -312,14 +319,18 @@ export class Fx {
     const mesh = new THREE.Mesh(geo, mat);
     const holder = new THREE.Group();
     holder.add(mesh);
-    if (vertical) mesh.rotation.y = Math.PI / 2;
-    else mesh.rotation.x = -Math.PI / 2;
-    holder.position.set(mech.pos.x, mech.pos.y + 11 * mech.spec.scale, mech.pos.z);
+    if (vertical) {
+      mesh.rotation.y = Math.PI / 2; // ring +x points ahead, +y up
+      mesh.position.x = 3.5;         // the right arm swings it
+    } else {
+      mesh.rotation.x = -Math.PI / 2; // ring +x is the mech's right, +y ahead
+    }
+    holder.position.set(mech.pos.x, mech.pos.y + (vertical ? 13 : 11) * mech.spec.scale, mech.pos.z);
     holder.rotation.y = mech.yaw;
     holder.scale.setScalar(mech.spec.scale);
-    this._addTimed(holder, 0.32, (t) => {
-      mat.uniforms.uHead.value = Math.min(1.15, t * 3.2);
-      mat.uniforms.uFade.value = 1 - Math.max(0, t - 0.4) / 0.6;
+    this._addTimed(holder, 0.38, (t) => {
+      mat.uniforms.uHead.value = Math.min(1.15, t * 4.5); // t runs 0..1 over the 0.38 s: the crescent sweeps in about 0.1 s
+      mat.uniforms.uFade.value = 1 - Math.max(0, t - 0.3) / 0.7;
     }, geo);
   }
 

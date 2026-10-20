@@ -168,7 +168,8 @@ index.html, style.css     page shell, HUD markup and menus
 src/main.js               entry point: screens, pause, pointer lock, saved options
 src/game.js               renderer, fixed-timestep loop, damage/kill/score rules, win and lose
 src/world.js              procedural city, sky shader, lighting, collision queries
-src/mechModel.js          procedural mech model and animation rig
+src/mechModel.js          procedural mech model and animation rig: planted-foot gait with two-bone IK, skating dashes,
+                          air poses, landing crouch, keyframed saber swings
 src/mech.js               mech physics: walk, boost, dash, collision, damage
 src/player.js             input to intent, lock-on, rifle, missiles, saber combo, burst
 src/ai.js                 Drone / Striker / Bulwark / Baron behaviours
@@ -203,8 +204,10 @@ power shortfalls, tuning), each new part's mechanic in combat (shotgun pellets, 
 the lance piercing, the greatsword's reach, the barrier's soak and recharge, ECM jamming, micro-missiles, the EN
 injector, shock pulse and aegis field), the pit stop (the card, no free repairs, launching back to the same spot, the
 setting to turn it off, no pit after the boss), 25 random builds through a short fight each, each enemy type and the
-boss, a full scripted playthrough to victory through four pit stops, a defeat and retry, and the pause/options UI. It
-fails on any console error.
+boss, a full scripted playthrough to victory through four pit stops, a defeat and retry, the pause/options UI, and the
+animation (planted feet do not slide or sink when walking, strafing, backing up or for enemies of any size; strafes
+turn the hips; dashes glide; landings crouch; the saber slashes sweep the right way and never cut the ground; the
+garage previews the combo at full speed). It fails on any console error.
 
 `scripts/test-touch.mjs` does the same for phones: an emulated touch device with real multi-touch (both thumbs at once),
 the title, garage, HUD, pause and end screens at 844x390 and 667x375, every on-screen control, the analog stick, tap to
