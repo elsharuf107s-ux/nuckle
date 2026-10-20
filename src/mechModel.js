@@ -77,6 +77,40 @@ export function buildMech(spec) {
   add(hips, boxGeo(2.6, 1.6, 0.6), M.accent, 0, -0.9, 1.6, { rx: -0.1, edge: true });
   for (const s of [-1, 1]) add(hips, boxGeo(0.7, 2.0, 2.3), M.accent, s * 2.3, -1.0, 0, { rz: s * 0.12, edge: true });
 
+  // core module: small, but visible at the waist and rear skirt
+  const greenGlow = new THREE.MeshBasicMaterial({ color: 0x6dff9a, fog: false });
+  const coreStyle = spec.core ?? 'std';
+  if (coreStyle === 'capacitor') {
+    for (const s of [-1, 1]) {
+      add(hips, cylGeo(0.7, 0.7, 2.6, 10), M.accent, s * 2.0, -0.1, 2.0, { edge: true });             // capacitor cells
+      add(hips, cylGeo(0.76, 0.76, 0.4, 10), M.trim, s * 2.0, 0.75, 2.0);
+    }
+  } else if (coreStyle === 'overclock') {
+    add(hips, cylGeo(2.5, 2.5, 0.3, 20), glowMat, 0, 0.9, 0, { shadow: false });                        // glowing waist ring
+    for (const s of [-1, 1]) add(hips, boxGeo(0.7, 0.5, 0.7), M.trim, s * 2.5, 0.9, 0, { edge: true });
+  } else if (coreStyle === 'regen') {
+    add(hips, boxGeo(1.9, 0.55, 0.3), greenGlow, 0, -0.9, 1.98, { shadow: false });                      // repair cross on the rear skirt
+    add(hips, boxGeo(0.55, 1.9, 0.3), greenGlow, 0, -0.9, 1.98, { shadow: false });
+  } else if (coreStyle === 'phase') {
+    for (const s of [-1, 1]) {
+      add(hips, boxGeo(0.3, 1.8, 1.3), M.accent, s * 1.7, -0.6, 2.1, { rz: s * 0.25, edge: true });      // phase vanes
+      add(hips, boxGeo(0.12, 1.5, 0.5), glowMat, s * 1.92, -0.6, 2.55, { rz: s * 0.25, shadow: false });
+    }
+  }
+
+  // hip-mounted sub-weapons
+  const subStyle = spec.sub ?? 'none';
+  if (subStyle === 'flare') {
+    for (const s of [-1, 1]) {
+      add(hips, boxGeo(0.8, 0.7, 1.5), M.dark, s * 3.05, -0.2, 0.5, { edge: true });                    // flare launchers
+      for (let k = -1; k <= 1; k++) add(hips, cylGeo(0.18, 0.18, 0.5, 6), M.trim, s * 3.05, 0.3, 0.5 + k * 0.45);
+    }
+  } else if (subStyle === 'repair') {
+    add(hips, boxGeo(1.2, 1.2, 0.8), M.main, -3.0, -0.3, 1.0, { edge: true });                          // repair unit with a green cross
+    add(hips, boxGeo(0.1, 0.8, 0.25), greenGlow, -3.62, -0.3, 1.0, { shadow: false });
+    add(hips, boxGeo(0.1, 0.25, 0.8), greenGlow, -3.62, -0.3, 1.0, { shadow: false });
+  }
+
   // ---- legs
   const legs = [];
   const flames = [];
@@ -202,6 +236,22 @@ export function buildMech(spec) {
     if (spec.head === 'horn') add(head, coneGeo(0.35, 2.8, 8), M.trim, 0, 2.9, -0.7, { rx: -0.35 }).material.side = THREE.DoubleSide;
   }
 
+  if (spec.head === 'recon') {
+    add(head, cylGeo(1.15, 0.25, 0.35, 16), M.metal, 1.55, 1.55, 0.1, { rz: -0.95, edge: true });    // sensor dish
+    add(head, cylGeo(0.08, 0.08, 1.4, 6), M.metal, 1.15, 0.95, 0.1);
+    add(head, cylGeo(0.05, 0.05, 2.6, 6), M.dark, -0.6, 2.5, 0.2);                                   // tall antenna
+  }
+  let headMuzzle = null;
+  if (spec.sub === 'vulcan') {
+    for (const s of [-1, 1]) {
+      add(head, boxGeo(0.4, 0.4, 0.7), M.dark, s * 0.95, 1.5, -0.95, { edge: true });
+      add(head, cylGeo(0.13, 0.13, 0.9, 8), M.metal, s * 0.95, 1.5, -1.55, { rx: Math.PI / 2 });      // vulcan barrels
+    }
+    headMuzzle = new THREE.Object3D();
+    headMuzzle.position.set(0, 1.5, -2.1);
+    head.add(headMuzzle);
+  }
+
   // ---- backpack, thrusters and sabre hilts
   const pack = spec.backpack ?? 'std';
   const packW = { std: 3.6, heavy: 4.6, booster: 4.4, pod: 4.0, wing: 3.6 }[pack] ?? 3.6;
@@ -251,10 +301,23 @@ export function buildMech(spec) {
   const A = ARM[armStyle];
   const arms = {};
   for (const s of [-1, 1]) {
-    add(torso, boxGeo(2.6, 2.4, 3.2), spec.shoulder === 'spike' ? M.sub : M.accent, s * (3.95 * bulk), 4.0, 0, { rz: s * 0.1, edge: true });
-    add(torso, boxGeo(2.7, 0.4, 3.3), M.trim, s * (3.95 * bulk), 4.95, 0, { rz: s * 0.1 });
-    if (spec.shoulder === 'spike') {
+    const shoulder = spec.shoulder ?? 'std';
+    const sx = s * (3.95 * bulk);
+    if (shoulder === 'bulwark') {
+      add(torso, boxGeo(3.2, 3.0, 3.9), M.accent, sx, 4.1, 0, { rz: s * 0.1, edge: true });            // layered armour shells
+      add(torso, boxGeo(3.3, 0.6, 4.0), M.trim, sx, 5.45, 0, { rz: s * 0.1 });
+      add(torso, boxGeo(0.5, 2.4, 3.3), M.dark, s * (5.65 * bulk), 4.0, 0, { rz: s * 0.1 });
+    } else {
+      add(torso, boxGeo(2.6, 2.4, 3.2), shoulder === 'spike' ? M.sub : M.accent, sx, 4.0, 0, { rz: s * 0.1, edge: true });
+      add(torso, boxGeo(2.7, 0.4, 3.3), M.trim, sx, 4.95, 0, { rz: s * 0.1 });
+    }
+    if (shoulder === 'spike') {
       add(torso, coneGeo(0.5, 2.2, 6), M.trim, s * (4.6 * bulk), 5.9, 0, { rz: -s * 0.4 }).material.side = THREE.DoubleSide;
+    } else if (shoulder === 'vernier') {
+      const tilt = Math.PI / 2 + 0.3;                                                                   // nozzle points back and slightly down
+      const vx = s * (4.5 * bulk), vy = 5.5, vz = 1.3;
+      add(torso, cylGeo(0.7, 0.45, 1.4, 8), M.metal, vx, vy, vz, { rx: tilt });
+      makeFlame(torso, vx, vy + Math.cos(tilt) * 0.7, vz + Math.sin(tilt) * 0.7, tilt, 0.5, 3.4);
     }
     const arm = group(torso, s * (3.7 * bulk), 3.4, 0);
     arm.rotation.order = 'YXZ';
@@ -499,5 +562,12 @@ export function buildMech(spec) {
     return shoulderMuzzle.getWorldPosition(out);
   }
 
-  return { root, update, setSaber, tint, muzzleWorld, shoulderMuzzleWorld, flashMats, hips, torso, armR, head };
+  /** World position of the head vulcans' muzzle (falls back to the main muzzle if there are none). */
+  function headMuzzleWorld(out = tmp) {
+    if (!headMuzzle) return muzzleWorld(out);
+    root.updateWorldMatrix(true, true);
+    return headMuzzle.getWorldPosition(out);
+  }
+
+  return { root, update, setSaber, tint, muzzleWorld, shoulderMuzzleWorld, headMuzzleWorld, flashMats, hips, torso, armR, head };
 }

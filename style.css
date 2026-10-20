@@ -141,6 +141,12 @@ button.secondary { margin-left: 10px; }
 /* ---------- weapon panel additions ---------- */
 #ammo-count { font-size: 18px; letter-spacing: 0.08em; color: var(--pink); font-weight: 700; }
 .bar.cannon i { background: linear-gradient(90deg, #ff8a2e, #ffd27a); }
+.bar.sub i { background: linear-gradient(90deg, #4fe3a0, #b6ffd9); }
+.bar.sub.danger i { background: linear-gradient(90deg, #ff4260, #ff8a5a); }
+#sub-row .bar { margin-top: 6px; }
+#sub-state { margin-top: 4px; letter-spacing: 0.14em; }
+#build-flags { font-size: 10px; letter-spacing: 0.1em; color: var(--amber); margin: -2px 0 6px; line-height: 1.5; }
+#build-flags:empty { display: none; }
 #cannon-row .bar { margin-top: 6px; }
 .title-buttons { display: flex; gap: 12px; }
 .build-line { margin-top: 14px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; color: var(--dim); }
@@ -229,3 +235,22 @@ button.secondary { margin-left: 10px; }
 }
 
 .title-buttons button.secondary, .g-actions button.secondary { margin-left: 0; }
+
+/* ---------- garage: budgets, tuning ---------- */
+.stat .s-bar i.over { background: linear-gradient(90deg, #ff4260, #ff8a5a); }
+.stat .s-bar b.lim { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--amber); box-shadow: 0 0 4px var(--amber); }
+.g-summary .warn { color: var(--red); }
+.g-summary .warn b { color: var(--red); }
+.g-tab { padding: 7px 2px; font-size: 9px; }
+
+.tune-left { font-size: 13px; letter-spacing: 0.14em; color: var(--text); margin-bottom: 6px; }
+.tune-row { padding: 10px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(120, 220, 255, 0.16); margin-bottom: 7px; }
+.tune-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.tune-name { font-size: 12px; letter-spacing: 0.16em; font-weight: 700; }
+.tune-controls { display: flex; align-items: center; gap: 8px; }
+.tune-btn { width: 26px; height: 26px; padding: 0; font-size: 16px; line-height: 1; letter-spacing: 0; clip-path: none; }
+.tune-btn:disabled { opacity: 0.3; cursor: default; }
+.tune-btn:disabled:hover { background: transparent; color: var(--text); }
+.tune-pips { display: flex; gap: 3px; }
+.tune-pips i { width: 12px; height: 12px; background: rgba(255, 255, 255, 0.1); transform: skewX(-18deg); }
+.tune-pips i.on { background: var(--cyan); box-shadow: 0 0 6px rgba(82, 224, 255, 0.6); }

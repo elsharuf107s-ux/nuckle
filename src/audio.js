@@ -217,6 +217,19 @@ export class AudioEngine {
     this._tone({ type: 'square', f0: 440, f1: 660, dur: 0.08, vol: 0.08, delay: 0.09 });
   }
 
+  /** Decoy flares popping. */
+  flare() {
+    if (!this.ctx) return;
+    this._noise({ type: 'highpass', f0: 1500, f1: 5000, dur: 0.5, vol: 0.22 });
+    this._tone({ type: 'square', f0: 1200, f1: 600, dur: 0.25, vol: 0.08 });
+  }
+
+  /** Repair kit starting: a short rising chime. */
+  repair() {
+    if (!this.ctx) return;
+    [523, 659, 880].forEach((f, i) => this._tone({ type: 'triangle', f0: f, dur: 0.22, vol: 0.12, delay: i * 0.08 }));
+  }
+
   lockOn() {
     if (!this.ctx) return;
     this._tone({ type: 'sine', f0: 1200, dur: 0.07, vol: 0.12 });

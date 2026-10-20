@@ -19,7 +19,8 @@ export class Hud {
       burstFill: $('burst-fill'), burstText: $('burst-text'), burstBar: $('burst-fill').parentElement, burstReady: $('burst-ready'),
       ammo: $('ammo-pips'), ammoCount: $('ammo-count'), missiles: $('missile-pips'), reload: $('reload-note'),
       weaponName: $('weapon-name'), weaponKey: $('weapon-key'), gunRow: $('gun-row'), saberRow: $('saber-row'),
-      cannonRow: $('cannon-row'), cannonFill: $('cannon-fill'), mechName: $('mech-name'),
+      cannonRow: $('cannon-row'), cannonFill: $('cannon-fill'), mechName: $('mech-name'), buildFlags: $('build-flags'),
+      subRow: $('sub-row'), subName: $('sub-name'), subFill: $('sub-fill'), subState: $('sub-state'), subBar: $('sub-fill').parentElement,
       boss: $('boss-bar'), bossFill: $('boss-fill'), bossName: $('boss-name'),
       banner: $('banner'), aMissile: $('alert-missile'), aArea: $('alert-area'), aArmor: $('alert-armor'),
       dmg: $('damage-vignette'), burstV: $('burst-vignette'),
@@ -61,6 +62,15 @@ export class Hud {
     e.reload.style.display = saberOnly ? 'none' : '';
     e.saberRow.style.display = saberOnly ? 'none' : '';
     e.cannonRow.style.display = p.ability ? '' : 'none';
+    e.subRow.style.display = p.sub ? '' : 'none';
+    if (p.sub) e.subName.textContent = p.sub.name;
+
+    // budget warnings: the build's load limit and power supply are fixed for the sortie
+    const warn = [];
+    if (p.stats.overload > 0) warn.push(`OVERLOADED  −${Math.round((1 - p.stats.loadFactor) * 100)}% SPEED`);
+    if (p.stats.powerFactor < 1) warn.push(`POWER SHORT  −${Math.round((1 - p.stats.powerFactor) * 100)}% EN RECOVERY, FIRE RATE & COOLDOWNS`);
+    e.buildFlags.textContent = warn.join('\n');
+    e.buildFlags.style.whiteSpace = 'pre-line';
     e.gunRow.querySelector('.wsub')?.remove();
     if (saberOnly) {
       const sub = document.createElement('div');
@@ -155,6 +165,7 @@ export class Hud {
     else this._pips(e.ammo, player.ammo, player.magSize, '_lastAmmo');
     this._missilePips(player);
     if (player.ability) e.cannonFill.style.width = `${(1 - player.cannonCd / player.ability.cooldown) * 100}%`;
+    if (player.sub) this._updateSubRow(player);
     e.reload.classList.toggle('on', player.reloadT > 0);
     if (player.reloadT > 0) e.reload.textContent = `RELOADING ${Math.round((1 - player.reloadT / player.reloadDur) * 100)}%`;
 
@@ -198,6 +209,26 @@ export class Hud {
     }
 
     this._draw(dt);
+  }
+
+  _updateSubRow(player) {
+    const sub = player.sub;
+    const e = this.el;
+    let k = 1, text = 'READY', danger = false;
+    if (sub.kind === 'vulcan') {
+      k = player.subHeat;
+      danger = player.subLocked;
+      text = danger ? 'OVERHEATED' : k > 0.02 ? 'HEAT' : 'READY';
+    } else if (sub.kind === 'flare') {
+      k = 1 - player.subCd / sub.cooldown;
+      text = player.subCd > 0 ? `RECHARGING ${Math.ceil(player.subCd)}s` : 'READY';
+    } else {
+      k = player.repairT > 0 ? player.repairT / sub.duration : player.repairCharges > 0 ? 1 : 0;
+      text = player.repairT > 0 ? 'REPAIRING' : player.repairCharges > 0 ? `${player.repairCharges} USE LEFT` : 'USED';
+    }
+    e.subFill.style.width = `${clamp(k, 0, 1) * 100}%`;
+    e.subBar.classList.toggle('danger', danger);
+    e.subState.textContent = text;
   }
 
   _pips(container, count, max, key) {
@@ -353,7 +384,7 @@ export class Hud {
 
   _drawRadar(ctx) {
     const g = this.game;
-    const R = 72, range = 420;
+    const R = 72, range = this.game.player.stats.radar;
     const cx = this.w - R - 26, cy = R + 26;
     const yaw = g.rig.yaw;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);

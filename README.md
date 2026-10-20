@@ -1,7 +1,7 @@
 # Steel Vanguard
 
 A 3D third-person mobile-suit combat game that runs in the browser. **Build your own mech piece by piece** in the
-garage (head, torso, arms, legs, backpack, weapon, off-hand and paint), then take it through a dusk-lit colony city:
+garage (eleven slots, tuning points and paint, balanced by a load limit and a power budget), then take it through a dusk-lit colony city:
 boost over rooftops, lock on, burn enemies down with your weapon, homing missiles and a three-hit beam-saber combo,
 and survive five waves ending in a fight with the **Crimson Baron**.
 
@@ -31,6 +31,7 @@ Desktop browsers with WebGL only: there is no touch or gamepad support.
 | Right mouse | Beam saber. Lunges at the target; press again mid-swing to chain a 3-hit combo |
 | `E` | Missile salvo (4 homing missiles; charges recharge) |
 | `F` | Shoulder cannon, if you fitted one (a heavy splash shell, 7 s recharge) |
+| `V` | Your sub-weapon, if you fitted one (vulcans, flares or repair kit) |
 | `Q` | Toggle lock-on |
 | `Tab` | Switch lock-on target |
 | `R` | Reload |
@@ -65,28 +66,43 @@ the game runs slowly on integrated graphics. Settings are remembered in `localSt
 
 ## The garage
 
-Every slot has several parts. Each one changes how your mech **looks** and how it **plays**, and the right-hand
-panel shows the totals as bars. Hover a part to preview its effect on every stat (a white marker and a +/- delta)
-before you equip it. Drag to rotate the turntable, scroll to zoom, and use the preview poses (idle, boost, saber).
+Eleven slots, tuning points and paint. Each part changes how your mech **looks** and how it **plays**, and the
+right-hand panel shows the totals as bars. Hover a part to preview its effect on every stat (a white marker and a
++/- delta) before you equip it. Drag to rotate the turntable, scroll to zoom, and use the preview poses (idle, boost,
+saber).
 
 | Slot | Options |
 | --- | --- |
-| **Head** | V-Fin Sensor (balanced) · Mono-Eye Scout (light, tighter missile homing) · Commander Horn (faster burst gauge, stronger saber) · Sentinel Visor (tougher, harder to stagger) |
-| **Torso** | Standard · Light Frame (fast, fragile) · Heavy Plate (very tough, heavy) · Reactor Core (more boost fuel and EN recovery) |
+| **Head** | V-Fin Sensor (balanced) · Mono-Eye Scout (light, tighter missile homing) · Commander Horn (faster burst gauge, stronger saber) · Sentinel Visor (tougher, harder to stagger) · Recon Array (much longer radar range) |
+| **Torso** | Standard · Light Frame (fast, fragile, little power) · Heavy Plate (very tough, heavy) · Reactor Core (big power output, boost fuel, EN recovery) |
 | **Arms** | Standard · Assault Bracers (armor, saber; slower reloads) · Precision Arms (faster fire and reload) · Blade Arms (big saber damage) |
-| **Legs** | Standard · Sprint (fast, cheap dashes) · Tank (armor, stagger resistance; slow) · Jump (climb and air EN recovery) |
+| **Legs** | Standard · Sprint (fast, cheap dashes, low load limit) · Tank (armor, stagger resistance, highest load limit; slow) · Jump (climb and air EN recovery) |
+| **Shoulder** | Standard · Bulwark Shells (armor, some gunfire absorption) · Ram Spikes (saber bonus) · Vernier Shoulders (turning and cheaper, faster dashes) |
 | **Backpack** | Standard · Heavy Booster (boost fuel, climb) · Missile Pod (third missile charge, harder hits) · Wing Vernier (fast cheap dashes; fragile) |
+| **Core** | Standard · Capacitor Bank (boost fuel and EN recovery) · Overclock Unit (BURST lasts 18 s) · Nano-Repair Core (mends 7 armor/s after 3 s without a hit) · Phase Governor (0.45 s dash invulnerability) |
+| **Pilot** | Rookie · Gunner (reload, fire rate) · Duelist (saber, dash invulnerability) · Engineer (half your armor back between waves) · Evader (cheap dashes, turning) · Veteran (stagger resistance, burst gain) |
 | **Weapon** | Beam Rifle · Rapid Beam Gun (30 rounds, low damage) · Blast Bazooka (3 explosive shells) · Beam Sniper (very fast heavy beams) · Twin Sabers (no gun, big melee bonus, deflects some gunfire) |
 | **Off-hand** | Beam Shield (absorbs 22% of gunfire, missiles and shells) · Shoulder Cannon (`F`) · None (lighter) |
+| **Sub-weapon** | None · Head Vulcans (hold `V`: a stream of rounds that also **shoots down missiles**; overheats) · Decoy Flares (`V`: detonates every missile homing on you; 12 s recharge) · Repair Kit (`V`: 15% armor over 4 s, one use per wave) |
 | **Paint** | Six schemes or your own four colours, plus energy colour (beams, saber, eyes) and thruster colour |
 
-**Weight matters.** Every part has a weight; the total scales your walking speed, flying speed and dash speed
-(a stock build is the reference at 100%, the heaviest possible is about 82%, the lightest about 115%). Armor, boost
-fuel and firepower are the price of weight, so a heavy tank and a light blade-runner play very differently. You
-can also name your mech, press **Randomize** for ideas, or **Reset** to the stock Vanguard.
+### Two budgets and a tuning pool
 
-Your build is saved in the browser (`localStorage`) and used for every sortie. Open the garage from the title
-screen or from the results screen.
+- **Load.** Every part has a weight, and your **legs have a load limit** (shown as a marker on the LOAD bar).
+  Weight scales your speed on its own (a stock build is the reference at 100%). Past the limit you also pay
+  1.4% speed and dash speed per unit over, down to a floor of 55%. Tank legs carry the most, sprint legs the least.
+- **Power.** Your **torso supplies power** and most parts **draw** it (shown on the POWER bar). If the draw
+  exceeds the supply, EN recovery, weapon cycling and every cooldown (missiles, shoulder cannon, sub-weapon) slow
+  down, and the penalty is steeper than the shortfall itself (never below 40%). The reactor
+  torso supplies the most; stacking a booster, jump legs, a sniper and a cannon on a light frame will starve it.
+- **Tuning.** Twelve free points across four dials, at most six on one: **Plating** (+4% armor per point),
+  **Servos** (+2% speed and dash, +3% turning), **Thrusters** (+4% boost fuel, +1.5 climb) and **Weapons**
+  (+3% damage, including missiles and sabers).
+
+The garage warns in red when you are overloaded or power-starved, and the HUD repeats the warning during a sortie.
+You can name your mech, press **Randomize** for ideas, or **Reset** to the stock Vanguard. Your build is saved in the
+browser (`localStorage`) and used for every sortie; saves from before a slot existed load with sensible defaults. Open
+the garage from the title screen or from the results screen.
 
 ## Project layout
 
@@ -106,8 +122,8 @@ src/hud.js                DOM bars plus canvas reticle, radar and damage numbers
 src/missions.js           wave director
 src/audio.js              synthesised sound effects and music
 src/data.js               enemy mech stats, palettes and wave definitions
-src/parts.js              garage parts catalogue, stat derivation, build validation (no browser code)
-src/garage.js             the garage screen: tabs, option cards, stat bars, paint, saved builds
+src/parts.js              garage parts catalogue, load/power budgets, tuning, stat derivation, build validation (no browser code)
+src/garage.js             the garage screen: tabs, option cards, stat bars with limit markers, tuning, paint, saved builds
 vendor/three/             three.js r170 (MIT), vendored so the game runs offline
 scripts/test.mjs          end-to-end test suite
 serve.py                  tiny static server
@@ -122,7 +138,8 @@ running game for debugging (`__game.cheat.invincible = true` is handy for sights
 sanitising), then loads the game in headless Chromium and plays it: the garage UI by real clicks (equip, hover
 preview, paint, rename, random/reset, saved builds across a reload), movement, boosting, landing on roofs, building
 collision (including a randomised stress run), every weapon, the shield, shoulder cannon, missile pod and weight
-effects in actual combat, 25 random builds through a short fight each, each enemy type and the boss, a full
+effects in actual combat (vulcans shooting down missiles, flares, the repair kit, regen core, overload and
+power shortfalls, tuning), 25 random builds through a short fight each, each enemy type and the boss, a full
 scripted playthrough to victory, a defeat and retry, and the pause/options UI. It fails on any console error.
 
 ```bash

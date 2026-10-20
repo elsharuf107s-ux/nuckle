@@ -88,6 +88,8 @@ export class Projectiles {
       turn: opts.turn ?? 0,
       delay: opts.delay ?? 0,
       splash: opts.splash ?? null,
+      intercept: opts.intercept ?? false, // point-defence rounds (head vulcans) that shoot down missiles
+      dead: false,
       color: opts.color,
       trailT: 0,
       mesh: makeMesh(opts.type, opts.color),
@@ -106,6 +108,7 @@ export class Projectiles {
 
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
+      if (p.dead) { this._remove(i); continue; } // shot down or decoyed earlier this step
       p.age += dt;
       if (p.age > p.life) { this._remove(i); continue; }
 
@@ -147,6 +150,7 @@ export class Projectiles {
             break;
           }
         }
+        if (!hit && p.intercept) hit = this._intercept(p, a, b);
         if (!hit && world.pointBlocked(b.x, b.y, b.z)) {
           this._impact(p, a, null);
           hit = true;
@@ -157,6 +161,40 @@ export class Projectiles {
       p.mesh.position.copy(p.pos);
       p.mesh.quaternion.setFromUnitVectors(Y_AXIS, p.dir);
     }
+  }
+
+  /** Did this point-defence round (travelling a to b) clip an enemy missile? If so both are destroyed. */
+  _intercept(p, a, b) {
+    const ex = b.x - a.x, ey = b.y - a.y, ez = b.z - a.z;
+    const len2 = ex * ex + ey * ey + ez * ez || 1;
+    for (const q of this.list) {
+      if (q === p || q.dead || q.type !== 'missile' || q.team === p.team) continue;
+      const t = Math.max(0, Math.min(1, ((q.pos.x - a.x) * ex + (q.pos.y - a.y) * ey + (q.pos.z - a.z) * ez) / len2));
+      const dx = a.x + ex * t - q.pos.x, dy = a.y + ey * t - q.pos.y, dz = a.z + ez * t - q.pos.z;
+      const r = p.radius + 3;
+      if (dx * dx + dy * dy + dz * dz < r * r) {
+        this._shootDown(q);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  _shootDown(q) {
+    q.dead = true; // removed at the top of the next pass, so list indices stay valid mid-loop
+    this.game.fx.explosion(q.pos.clone(), 4.5, { sound: false, shake: 0 });
+    this.game.audio.hit(q.pos);
+  }
+
+  /** Decoy flares: detonate every enemy missile homing on `mech`. Returns how many were destroyed. */
+  decoyMissilesAt(mech) {
+    let n = 0;
+    for (const q of this.list) {
+      if (q.dead || q.type !== 'missile' || q.team === mech.team || q.target !== mech) continue;
+      this._shootDown(q);
+      n++;
+    }
+    return n;
   }
 
   _impact(p, atScratch, mech) {

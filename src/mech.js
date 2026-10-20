@@ -63,6 +63,7 @@ export class Mech {
     this.invuln = 0;
     this.stagger = 0;
     this.flashT = 0;
+    this.lastHitAt = -99;
     this.dead = false;
     this.saberOut = false;
     this.tintColor = null; // [r, g, b] steady glow, e.g. burst aura
@@ -258,6 +259,7 @@ export class Mech {
     if (this.def.guard && info.kind && info.kind !== 'saber') amount *= 1 - this.def.guard;
     this.hp -= amount;
     this.flashT = 0.12;
+    this.lastHitAt = this.game.time; // the nano-repair core waits for a lull
 
     if (info.knock) this.vel.addScaledVector(info.knock, this.def.boss ? 0.3 : 1);
     if (amount >= this.def.staggerAt || (info.stagger && this.def.staggerAt !== Infinity)) {

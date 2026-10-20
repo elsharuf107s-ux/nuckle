@@ -86,7 +86,7 @@ export class Missions {
           game.stats.score += bonus;
           const last = this.index === WAVES.length - 1;
           if (!last) {
-            game.player.resupply(0.25);
+            game.player.resupply(game.player.stats.resupplyHeal);
             game.hud.message('WAVE CLEARED', 'good', `+${bonus} BONUS  ·  ARMOR REPAIRED`);
             game.audio.ui('clear');
           }

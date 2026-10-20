@@ -1,12 +1,13 @@
-// The garage screen: pick a part for each slot, paint it, and watch the mech rebuild on the
-// showroom turntable (the game canvas itself). Panels are plain DOM floating over the canvas.
+// The garage screen: pick a part for each slot, tune and paint it, and watch the mech rebuild on
+// the showroom turntable (the game canvas itself). Panels are plain DOM floating over the canvas.
 //
 // Hovering an option previews its effect on the stat bars (a white marker and a +/- delta)
 // without equipping it; clicking equips it. The build is saved to localStorage on every change.
+// Two bars carry a limit marker: LOAD (weight vs the legs' limit) and POWER (draw vs the torso's output).
 
 import {
-  DEFAULT_BUILD, ENERGY, PAINTS, PARTS, THRUSTERS,
-  cleanName, deriveStats, partOf, randomBuild, sanitizeBuild, statRanges,
+  DEFAULT_BUILD, ENERGY, PAINTS, PARTS, THRUSTERS, TUNING, TUNING_MAX, TUNING_POOL,
+  cleanName, deriveStats, partOf, randomBuild, sanitizeBuild, statRanges, tuningSpent,
 } from './parts.js';
 
 const STORE_KEY = 'steel-vanguard.build';
@@ -36,19 +37,27 @@ export function describeBuild(build) {
 
 const TABS = [
   ['head', 'HEAD'], ['torso', 'TORSO'], ['arms', 'ARMS'], ['legs', 'LEGS'],
-  ['backpack', 'PACK'], ['weapon', 'WEAPON'], ['offhand', 'OFF-HAND'], ['paint', 'PAINT'],
+  ['shoulder', 'SHOULDER'], ['backpack', 'PACK'], ['core', 'CORE'], ['pilot', 'PILOT'],
+  ['weapon', 'WEAPON'], ['offhand', 'OFF-HAND'], ['sub', 'SUB-WPN'], ['tuning', 'TUNING'],
+  ['paint', 'PAINT'],
 ];
 
-/** Stat rows shown on the right. `better` says which direction is an improvement. */
+/**
+ * Stat rows shown on the right. `better` says which direction is an improvement. Rows with a `limit`
+ * draw a marker on the bar and turn red when the value goes past it; `scale` sets their bar range.
+ */
 const ROWS = [
   { id: 'hp', label: 'ARMOR', get: (s) => s.hp, text: (s) => String(Math.round(s.hp)), better: 1 },
   { id: 'speed', label: 'SPEED', get: (s) => s.speed, text: (s) => s.speed.toFixed(1), better: 1 },
   { id: 'en', label: 'BOOST FUEL', get: (s) => s.en, text: (s) => String(Math.round(s.en)), better: 1 },
   { id: 'dps', label: 'FIREPOWER', get: (s) => s.dps, text: (s) => String(s.dps), better: 1 },
-  { id: 'melee', label: 'MELEE', get: (s) => s.melee, text: (s) => `×${s.melee.toFixed(2)}`, better: 1 },
-  { id: 'missiles', label: 'MISSILES', get: (s) => s.missileCharges * s.missileDamage,
-    text: (s) => `${s.missileCharges} × ${Math.round(150 * s.missileDamage)}`, better: 1 },
-  { id: 'weight', label: 'WEIGHT', get: (s) => s.weight, text: (s) => String(s.weight), better: -1 },
+  { id: 'melee', label: 'MELEE', get: (s) => s.melee * s.damage, text: (s) => `×${(s.melee * s.damage).toFixed(2)}`, better: 1 },
+  { id: 'missiles', label: 'MISSILES', get: (s) => s.missileCharges * s.missileDamage * s.damage,
+    text: (s) => `${s.missileCharges} × ${Math.round(150 * s.missileDamage * s.damage)}`, better: 1 },
+  { id: 'weight', label: 'LOAD', get: (s) => s.weight, text: (s) => `${s.weight} / ${s.load}`, better: -1,
+    limit: (s) => s.load, scale: (r) => Math.max(r.weight.max, r.load.max) },
+  { id: 'draw', label: 'POWER', get: (s) => s.draw, text: (s) => `${s.draw} / ${s.supply}`, better: -1,
+    limit: (s) => s.supply, scale: (r) => Math.max(r.draw.max, r.supply.max) },
 ];
 
 const el = (tag, cls = '', text = '') => {
@@ -60,10 +69,13 @@ const el = (tag, cls = '', text = '') => {
 
 // ------------------------------------------------------------------ chips describing a part
 
+/** [label, +1 if a bigger number is good / -1 if bad, formatter] */
 const ADD_LABELS = {
   hp: ['ARMOR', 1], en: ['BOOST FUEL', 1], enGround: ['EN REGEN', 1], enAir: ['AIR EN REGEN', 1],
   ascendSpeed: ['CLIMB', 1], dashSpeed: ['DASH SPEED', 1], dashCost: ['DASH COST', -1], turn: ['TURNING', 1],
   staggerAt: ['STAGGER RESIST', 1], missileCharges: ['MISSILES', 1], missileTurn: ['HOMING', 1],
+  supply: ['POWER OUTPUT', 1], load: ['LOAD LIMIT', 1], regen: ['REPAIR /s', 1], burstTime: ['BURST TIME', 1, (v) => `+${v}s`],
+  dashInvuln: ['DASH INVULN', 1, (v) => `+${v}s`], radar: ['RADAR', 1], resupplyHeal: ['WAVE REPAIR', 1, (v) => `+${Math.round(v * 100)}%`],
 };
 const MUL_LABELS = {
   mobility: 'SPEED', dash: 'DASH', melee: 'MELEE', fireRate: 'FIRE RATE', reload: 'RELOAD SPEED',
@@ -74,15 +86,17 @@ function chipsFor(slot, part) {
   const chips = [];
   const sign = (v) => (v > 0 ? `+${v}` : String(v));
   if (part.add?.weight !== undefined) chips.push([`WEIGHT ${part.add.weight}`, '']);
+  if (part.add?.draw) chips.push([`POWER DRAW ${part.add.draw}`, '']);
   for (const [k, v] of Object.entries(part.add ?? {})) {
     const info = ADD_LABELS[k];
     if (!info) continue;
-    chips.push([`${info[0]} ${sign(v)}`, v * info[1] > 0 ? 'up' : 'down']);
+    const shown = info[2] ? info[2](v) : sign(v);
+    chips.push([`${info[0]} ${shown}`, v * info[1] > 0 ? 'up' : 'down']);
   }
   for (const [k, v] of Object.entries(part.mul ?? {})) {
     if (MUL_LABELS[k]) chips.push([`${MUL_LABELS[k]} ×${v}`, v > 1 ? 'up' : 'down']);
   }
-  if (slot === 'weapon' && part.guard) chips.push([`${Math.round(part.guard * 100)}% DEFLECT`, 'up']);
+  if (part.guard) chips.push([`${Math.round(part.guard * 100)}% ${slot === 'weapon' ? 'DEFLECT' : 'GUARD'}`, 'up']);
   if (slot === 'weapon' && part.weapon.kind !== 'melee') {
     const w = part.weapon;
     chips.push([`DMG ${w.damage}`, '']);
@@ -90,9 +104,12 @@ function chipsFor(slot, part) {
     chips.push([`${(1 / w.cooldown).toFixed(1)}/s`, '']);
     if (w.splash) chips.push(['BLAST', 'up']);
   }
-  if (slot === 'offhand') {
-    if (part.guard) chips.push([`${Math.round(part.guard * 100)}% GUARD`, 'up']);
-    if (part.ability) chips.push([`F: ${part.ability.damage} DMG · ${part.ability.cooldown}s`, 'up']);
+  if (slot === 'offhand' && part.ability) chips.push([`F: ${part.ability.damage} DMG · ${part.ability.cooldown}s`, 'up']);
+  if (slot === 'sub' && part.sub) {
+    const u = part.sub;
+    if (u.kind === 'vulcan') chips.push([`DMG ${u.damage}`, ''], [`${(1 / u.interval).toFixed(0)}/s`, ''], ['SHOOTS DOWN MISSILES', 'up']);
+    else if (u.kind === 'flare') chips.push([`RECHARGE ${u.cooldown}s`, ''], ['DECOYS MISSILES', 'up']);
+    else chips.push([`HEAL ${Math.round(u.heal * 100)}%`, 'up'], [`${u.charges} USE / WAVE`, '']);
   }
   return chips;
 }
@@ -162,7 +179,9 @@ export class Garage {
     document.getElementById('g-back').addEventListener('click', () => this.hooks.onBack());
     document.getElementById('g-go').addEventListener('click', () => this.hooks.onSortie());
     document.getElementById('g-random').addEventListener('click', () => this.commit(randomBuild()));
-    document.getElementById('g-reset').addEventListener('click', () => this.commit({ ...DEFAULT_BUILD, paint: { ...DEFAULT_BUILD.paint } }));
+    document.getElementById('g-reset').addEventListener('click', () => this.commit({
+      ...DEFAULT_BUILD, paint: { ...DEFAULT_BUILD.paint }, tuning: { ...DEFAULT_BUILD.tuning },
+    }));
 
     const rename = () => {
       const name = cleanName(this.nameEl.value);
@@ -209,6 +228,10 @@ export class Garage {
       this._renderPaint();
       return;
     }
+    if (this.tab === 'tuning') {
+      this._renderTuning();
+      return;
+    }
     for (const part of PARTS[this.tab]) {
       const card = el('button', 'opt');
       card.type = 'button';
@@ -218,7 +241,7 @@ export class Garage {
       card.append(name, el('div', 'o-desc', part.desc));
       const chips = el('div', 'o-chips');
       for (const [text, kind] of chipsFor(this.tab, part)) chips.append(el('span', `chip ${kind}`, text));
-      card.append(chips);
+      if (chips.children.length) card.append(chips);
 
       const slot = this.tab;
       card.addEventListener('click', () => this._select(slot, part.id));
@@ -237,10 +260,68 @@ export class Garage {
       this._syncPaint();
       return;
     }
+    if (this.tab === 'tuning') {
+      this._syncTuning();
+      return;
+    }
     for (const card of this.optionsEl.querySelectorAll('.opt')) {
       const on = card.dataset.id === this.build[this.tab];
       card.classList.toggle('selected', on);
       card.querySelector('.o-tag').textContent = on ? 'EQUIPPED' : '';
+    }
+  }
+
+  // ------------------------------------------------------------------ tuning tab
+
+  _renderTuning() {
+    const wrap = this.optionsEl;
+    const intro = el('div', 'paint-section');
+    intro.append(el('h4', '', 'TUNING POINTS'));
+    this._tuneLeft = el('div', 'tune-left');
+    intro.append(this._tuneLeft, el('div', 'o-desc', `Spend up to ${TUNING_POOL} points, at most ${TUNING_MAX} on one dial. Points are free bonuses on top of your parts.`));
+    wrap.append(intro);
+
+    this._tuneRows = {};
+    for (const dial of TUNING) {
+      const row = el('div', 'tune-row');
+      const head = el('div', 'tune-head');
+      head.append(el('span', 'tune-name', dial.name));
+      const controls = el('div', 'tune-controls');
+      const minus = el('button', 'tune-btn', '−');
+      const plus = el('button', 'tune-btn', '+');
+      minus.type = plus.type = 'button';
+      minus.dataset.dial = plus.dataset.dial = dial.id;
+      minus.dataset.dir = '-1';
+      plus.dataset.dir = '1';
+      const pips = el('div', 'tune-pips');
+      for (let i = 0; i < TUNING_MAX; i++) pips.append(el('i'));
+      controls.append(minus, pips, plus);
+      head.append(controls);
+      row.append(head, el('div', 'o-desc', dial.effect));
+      minus.addEventListener('click', () => this._tune(dial.id, -1));
+      plus.addEventListener('click', () => this._tune(dial.id, 1));
+      this._tuneRows[dial.id] = { pips, minus, plus };
+      wrap.append(row);
+    }
+    this._syncTuning();
+  }
+
+  _tune(id, dir) {
+    const t = { ...this.build.tuning };
+    t[id] += dir;
+    this.commit({ ...this.build, tuning: t }); // sanitising enforces the per-dial cap and the pool
+  }
+
+  _syncTuning() {
+    if (!this._tuneRows || this.tab !== 'tuning') return;
+    const spent = tuningSpent(this.build.tuning);
+    this._tuneLeft.textContent = `${TUNING_POOL - spent} OF ${TUNING_POOL} POINTS LEFT`;
+    for (const dial of TUNING) {
+      const v = this.build.tuning[dial.id];
+      const ref = this._tuneRows[dial.id];
+      [...ref.pips.children].forEach((p, i) => p.classList.toggle('on', i < v));
+      ref.minus.disabled = v <= 0;
+      ref.plus.disabled = v >= TUNING_MAX || spent >= TUNING_POOL;
     }
   }
 
@@ -344,10 +425,11 @@ export class Garage {
       const bar = el('div', 's-bar');
       const fill = el('i');
       const mark = el('u');
-      bar.append(fill, mark);
+      const lim = el('b', 'lim');
+      bar.append(fill, mark, lim);
       box.append(head, bar);
       this.statsEl.append(box);
-      this._statRefs[row.id] = { value, delta, fill, mark };
+      this._statRefs[row.id] = { value, delta, fill, mark, lim };
     }
   }
 
@@ -356,19 +438,28 @@ export class Garage {
     const ranges = statRanges();
     const cur = deriveStats(this.build);
     const pre = preview ? deriveStats(sanitizeBuild(preview)) : null;
-    const norm = (id, v) => {
-      const r = id === 'weight' ? ranges.weight : ranges[id];
-      return Math.min(1, Math.max(0.03, (v - r.min) / (r.max - r.min || 1)));
-    };
+    const shown = pre ?? cur;
     for (const row of ROWS) {
       const ref = this._statRefs[row.id];
-      const shown = pre ?? cur;
+      const scale = row.scale ? row.scale(ranges) : null;
+      const norm = (v) => {
+        if (scale) return Math.min(1, Math.max(0.02, v / scale));
+        const r = ranges[row.id];
+        return Math.min(1, Math.max(0.03, (v - r.min) / (r.max - r.min || 1)));
+      };
       ref.value.firstChild.textContent = row.text(shown);
-      ref.fill.style.width = `${norm(row.id, row.get(cur)) * 100}%`;
+      ref.fill.style.width = `${norm(row.get(cur)) * 100}%`;
+      if (row.limit) {
+        ref.lim.style.display = '';
+        ref.lim.style.left = `calc(${norm(row.limit(shown)) * 100}% - 1px)`;
+        ref.fill.classList.toggle('over', row.get(cur) > row.limit(cur));
+      } else {
+        ref.lim.style.display = 'none';
+      }
       if (pre && Math.abs(row.get(pre) - row.get(cur)) > 1e-6) {
         const d = row.get(pre) - row.get(cur);
         ref.mark.style.display = '';
-        ref.mark.style.left = `calc(${norm(row.id, row.get(pre)) * 100}% - 1px)`;
+        ref.mark.style.left = `calc(${norm(row.get(pre)) * 100}% - 1px)`;
         ref.delta.textContent = `${d > 0 ? '+' : '−'}${Math.abs(d) >= 10 ? Math.round(Math.abs(d)) : Math.abs(d).toFixed(2)}`;
         ref.delta.className = `d ${d * row.better > 0 ? 'up' : 'down'}`;
       } else {
@@ -377,22 +468,27 @@ export class Garage {
         ref.delta.className = 'd';
       }
     }
-    this._renderSummary(pre ?? cur, preview ? sanitizeBuild(preview) : this.build);
+    this._renderSummary(shown, preview ? sanitizeBuild(preview) : this.build);
   }
 
   _renderSummary(stats, build) {
     const w = partOf('weapon', build.weapon);
     const o = partOf('offhand', build.offhand);
+    const u = partOf('sub', build.sub);
     this.summaryEl.textContent = '';
-    const line = (label, text) => {
-      const div = el('div');
+    const line = (label, text, cls = '') => {
+      const div = el('div', cls);
       div.append(el('b', '', `${label} `), document.createTextNode(text));
       this.summaryEl.append(div);
     };
+    // the two budgets first: these are the problems a builder needs to notice
+    if (stats.overload > 0) line('OVERLOADED', `${stats.overload} over the limit: speed and dash −${Math.round((1 - stats.loadFactor) * 100)}%`, 'warn');
+    if (stats.powerFactor < 1) line('POWER SHORT', `${stats.draw} drawn from ${stats.supply}: EN recovery, weapon speed and cooldowns −${Math.round((1 - stats.powerFactor) * 100)}%`, 'warn');
     line('WEAPON', w.weapon.kind === 'melee' ? `${w.name}: LMB and RMB swing the saber` : `${w.name}: ${w.weapon.mag} rounds, ${w.weapon.damage} per shot`);
     line('OFF-HAND', o.name);
-    const pct = Math.round(stats.weightFactor * 100);
-    line('MOBILITY', `weight ${stats.weight} gives ${pct}% of base speed`);
-    line('DASH', `${Math.round(stats.dashSpeed)} u/s · ${stats.dashCost} EN each`);
+    if (build.sub !== 'none') line('SUB-WEAPON', `${u.name} (V)`);
+    line('MOBILITY', `weight ${stats.weight} gives ${Math.round(stats.weightFactor * stats.loadFactor * 100)}% of base speed`);
+    line('DASH', `${Math.round(stats.dashSpeed)} u/s · ${stats.dashCost} EN each · ${stats.dashInvuln.toFixed(2)}s invulnerable`);
+    line('BURST', `lasts ${stats.burstTime}s`);
   }
 }

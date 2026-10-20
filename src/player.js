@@ -15,7 +15,6 @@ const MELEE = [
   { kind: 'slash2', dur: 0.5, damage: 280, stagger: false },
   { kind: 'slash3', dur: 0.72, damage: 470, stagger: true },
 ];
-const BURST_TIME = 12;
 const LOCK_RANGE = 800;
 
 const rgb = (hex) => [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
@@ -33,6 +32,11 @@ export class Player {
     this.missileT = 0;
     this.missileQueue = []; // seconds until each queued missile launches
     this.cannonCd = 0;      // shoulder cannon cooldown (0 = ready)
+    this.subHeat = 0;       // head vulcans: 0..1, locked out when it reaches 1 until it has cooled
+    this.subLocked = false;
+    this.subCd = 0;         // decoy flares cooldown, and the vulcans' fire interval timer
+    this.repairCharges = 0; // repair kit uses left this wave
+    this.repairT = 0;       // seconds of repair remaining
     this.melee = null;
     this.saberHold = 0;
     this.burst = 0;      // 0..100 gauge
@@ -65,6 +69,7 @@ export class Player {
     this.stats = d.stats;
     this.weapon = d.stats.weapon;
     this.ability = d.stats.ability;
+    this.sub = d.stats.sub;
     this.energy = d.energy;
     this.mech = new Mech(this.game, 'custom', 'player', d.def);
     this.mech.place(keep.x, keep.z, 0, keep.yaw);
@@ -89,6 +94,11 @@ export class Player {
     this.missileT = 0;
     this.missileQueue.length = 0;
     this.cannonCd = 0;
+    this.subHeat = 0;
+    this.subLocked = false;
+    this.subCd = 0;
+    this.repairCharges = this.sub?.kind === 'repair' ? this.sub.charges : 0;
+    this.repairT = 0;
     this.melee = null;
     this.saberHold = 0;
   }
@@ -122,6 +132,8 @@ export class Player {
     this.reloadT = 0;
     this.missiles = this.stats.missileCharges;
     this.cannonCd = 0;
+    this.subCd = 0;
+    this.repairCharges = this.sub?.kind === 'repair' ? this.sub.charges : 0;
     this.mech.en = this.mech.maxEn;
     this.mech.overheat = false;
     this.mech.heal(this.mech.maxHp * healFraction);
@@ -229,12 +241,14 @@ export class Player {
     // ---- timers
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.burstT = Math.max(0, this.burstT - dt);
-    this.dmgMul = this.burstT > 0 ? 1.5 : 1;
+    this.dmgMul = (this.burstT > 0 ? 1.5 : 1) * this.stats.damage; // BURST and the weapons tuning dial
+    // a power shortfall (stats.powerFactor < 1) slows every recharge, not just the main gun
+    const recharge = this.stats.powerFactor * (this.burstT > 0 ? 1.8 : 1);
     if (this.missiles < this.stats.missileCharges) {
-      this.missileT += dt * (this.burstT > 0 ? 1.8 : 1);
+      this.missileT += dt * recharge;
       if (this.missileT >= MISSILE_RECHARGE) { this.missiles++; this.missileT = 0; }
     }
-    this.cannonCd = Math.max(0, this.cannonCd - dt * (this.burstT > 0 ? 1.8 : 1));
+    this.cannonCd = Math.max(0, this.cannonCd - dt * recharge);
     if (this.saberHold > 0) {
       this.saberHold -= dt;
       if (this.saberHold <= 0 && !this.melee) mech.setSaber(false);
@@ -242,7 +256,7 @@ export class Player {
 
     // ---- burst
     if ((input.pressed('KeyX') || input.pressed('KeyC')) && this.burst >= 100 && this.burstT <= 0) {
-      this.burstT = BURST_TIME;
+      this.burstT = this.stats.burstTime;
       this.burst = 0;
       mech.heal(mech.maxHp * 0.15);
       mech.en = mech.maxEn;
@@ -276,6 +290,9 @@ export class Player {
         this.missileQueue.splice(i, 1);
       }
     }
+
+    this._updateSub(dt, input);
+    this._updatePassives(dt);
 
     // ---- melee state machine
     const dashPressed = input.pressed('ShiftLeft') || input.pressed('ShiftRight');
@@ -387,6 +404,81 @@ export class Player {
     this.fireCd = w.cooldown * (this.burstT > 0 ? 0.6 : 1);
     this.lastFired = game.time;
     if (this.ammo <= 0) this._startReload();
+  }
+
+  // ------------------------------------------------------------------ sub-weapon (V) and passives
+
+  _updateSub(dt, input) {
+    const sub = this.sub;
+    this.subCd = Math.max(0, this.subCd - dt * this.stats.powerFactor); // flare recharge and vulcan fire interval
+    if (this.repairT > 0) {
+      const amount = (sub.heal * this.mech.maxHp * Math.min(dt, this.repairT)) / sub.duration;
+      this.mech.heal(amount);
+      this.repairT = Math.max(0, this.repairT - dt);
+    }
+    if (!sub) return;
+
+    if (sub.kind === 'vulcan') {
+      const firing = input.down('KeyV') && !this.melee && !this.subLocked;
+      if (firing) {
+        this.subHeat = Math.min(1, this.subHeat + sub.heatPerSecond * dt);
+        if (this.subCd <= 0) {
+          this._fireVulcan();
+          this.subCd = sub.interval;
+        }
+        if (this.subHeat >= 1) this.subLocked = true;
+      } else {
+        this.subHeat = Math.max(0, this.subHeat - sub.coolPerSecond * dt);
+        if (this.subLocked && this.subHeat <= sub.lockout) this.subLocked = false;
+      }
+    } else if (sub.kind === 'flare' && input.pressed('KeyV') && this.subCd <= 0) {
+      this._fireFlares();
+    } else if (sub.kind === 'repair' && input.pressed('KeyV') && this.repairCharges > 0 && this.repairT <= 0 && this.mech.hp < this.mech.maxHp) {
+      this.repairCharges--;
+      this.repairT = sub.duration;
+      this.game.audio.repair();
+      this.game.hud.message('REPAIRING', 'good');
+    }
+  }
+
+  _fireVulcan() {
+    const game = this.game;
+    const mech = this.mech;
+    const sub = this.sub;
+    mech.model.headMuzzleWorld(this._muzzle);
+    const dir = this._aimDir(this._muzzle, sub.speed, this._w);
+    if (dir.dot(mech.forward()) < -0.2) dir.copy(mech.forward());
+    dir.x += rand(-0.03, 0.03); dir.y += rand(-0.03, 0.03); dir.z += rand(-0.03, 0.03);
+    dir.normalize();
+    game.projectiles.spawn({
+      type: 'bullet', team: 'player', source: mech, pos: this._muzzle, dir,
+      damage: sub.damage * this.dmgMul, color: this.energy.beam, knock: 0.5, speed: sub.speed, life: 0.55, intercept: true,
+    });
+    if (Math.random() < 0.4) game.audio.gun();
+    this.lastFired = game.time;
+  }
+
+  /** Decoy flares: every enemy missile homing on us detonates harmlessly. */
+  _fireFlares() {
+    const game = this.game;
+    const mech = this.mech;
+    this.subCd = this.sub.cooldown;
+    const n = game.projectiles.decoyMissilesAt(mech);
+    const c = mech.center(this._v);
+    for (let i = 0; i < 14; i++) {
+      game.fx.glow.spawn(c.x + rand(-4, 4), c.y + rand(-2, 4), c.z + rand(-4, 4), rand(-30, 30), rand(10, 45), rand(-30, 30),
+        rand(0.5, 1.1), 2.2, 0.4, [1, 0.9, 0.5], [1, 0.4, 0.1], 1, -20, 0.6);
+    }
+    game.audio.flare();
+    if (n > 0) game.hud.message(n > 1 ? `${n} MISSILES DECOYED` : 'MISSILE DECOYED', 'good');
+  }
+
+  /** Always-on core effects: the nano-repair core mends armor once you have been left alone for a moment. */
+  _updatePassives(dt) {
+    const mech = this.mech;
+    if (this.stats.regen > 0 && mech.hp < mech.maxHp && this.game.time - mech.lastHitAt > 3) {
+      mech.heal(this.stats.regen * dt);
+    }
   }
 
   /** The shoulder cannon (off-hand): one heavy splash shell, then a cooldown. */

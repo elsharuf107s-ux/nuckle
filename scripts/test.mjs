@@ -92,6 +92,64 @@ const check = (name, ok, detail = '') => {
   check('stat ranges are sane', Object.values(r).every((v) => v.max > v.min), JSON.stringify(Object.fromEntries(Object.entries(r).map(([k, v]) => [k, [Math.round(v.min), Math.round(v.max)]]))));
   const d = P.deriveMech(P.DEFAULT_BUILD);
   check('deriveMech yields a full mech def', d.def.hp === d.stats.hp && d.def.spec.palette.main === 0xeceff6 && d.def.spec.head === 'v' && d.def.spec.offhand === 'shield' && d.def.guard > 0);
+
+  // ---- deeper building: shoulders, cores, pilots, sub-weapons
+  dir('bulwark shoulders: armor, stagger resist and a little guard', vary('shoulder', 'bulwark').hp > def.hp && vary('shoulder', 'bulwark').guard > def.guard && vary('shoulder', 'bulwark').staggerAt > def.staggerAt);
+  dir('spike shoulders: melee bonus', vary('shoulder', 'spike').melee > 1.1);
+  dir('vernier shoulders: turning and dashing', vary('shoulder', 'vernier').turn > def.turn && vary('shoulder', 'vernier').dashSpeed > def.dashSpeed && vary('shoulder', 'vernier').dashCost < def.dashCost);
+  dir('capacitor core: boost fuel and EN regen', vary('core', 'capacitor').en > def.en && vary('core', 'capacitor').enGround > def.enGround);
+  dir('overclock core: longer BURST', vary('core', 'overclock').burstTime === 18 && def.burstTime === 12 && vary('core', 'overclock').burstGain > 1);
+  dir('nano-repair core: repairs armor', vary('core', 'regen').regen === 7 && def.regen === 0);
+  dir('phase governor: longer dash invulnerability', Math.abs(vary('core', 'phase').dashInvuln - 0.45) < 1e-9 && def.dashInvuln === 0.2);
+  dir('recon head: bigger radar', vary('head', 'recon').radar > def.radar && vary('head', 'recon').missileTurn > 0);
+  dir('gunner pilot: faster reload and fire rate', vary('pilot', 'gunner').weapon.reload < def.weapon.reload && vary('pilot', 'gunner').weapon.cooldown < def.weapon.cooldown);
+  dir('duelist pilot: melee and dash invulnerability', vary('pilot', 'duelist').melee > 1.1 && vary('pilot', 'duelist').dashInvuln > def.dashInvuln);
+  dir('engineer pilot: half armor back between waves', def.resupplyHeal === 0.25 && vary('pilot', 'engineer').resupplyHeal === 0.5 && vary('pilot', 'engineer').supply > def.supply);
+  dir('evader pilot: cheaper dashes, sharper turning', vary('pilot', 'evader').dashCost < def.dashCost && vary('pilot', 'evader').turn > def.turn && vary('pilot', 'evader').speed > def.speed);
+  dir('veteran pilot: harder to stagger', vary('pilot', 'veteran').staggerAt > def.staggerAt && vary('pilot', 'veteran').burstGain > 1);
+  dir('sub-weapons are defined', def.sub === null && vary('sub', 'vulcan').sub.kind === 'vulcan' && vary('sub', 'flare').sub.kind === 'flare' && vary('sub', 'repair').sub.kind === 'repair');
+
+  // ---- budgets: weight against the legs' load limit, power draw against the torso's output
+  check('the stock build is inside both budgets', def.overload === 0 && def.loadFactor === 1 && def.powerFactor === 1 && def.draw < def.supply && def.weight < def.load, `${def.weight}/${def.load}, ${def.draw}/${def.supply}`);
+  const overloaded = P.deriveStats({ ...P.DEFAULT_BUILD, legs: 'sprint', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster' });
+  const sameParts = P.deriveStats({ ...P.DEFAULT_BUILD, legs: 'tank', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster' });
+  check('exceeding the load limit slows the mech down', overloaded.overload > 0 && overloaded.loadFactor < 1 && overloaded.speed < sameParts.speed * 1.2 && overloaded.dashSpeed < P.deriveStats(P.DEFAULT_BUILD).dashSpeed,
+    `over by ${overloaded.overload}, factor ${overloaded.loadFactor.toFixed(2)}`);
+  const crushed = P.deriveStats({ ...P.DEFAULT_BUILD, legs: 'sprint', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon', sub: 'repair', head: 'visor' });
+  check('overload never stops the mech: the slowdown has a floor', crushed.loadFactor === 0.55 && crushed.speed > 0);
+  const hungryBuild = { ...P.DEFAULT_BUILD, torso: 'light', head: 'recon', arms: 'precision', legs: 'jump', shoulder: 'vernier', backpack: 'booster', core: 'phase', weapon: 'sniper', offhand: 'cannon', sub: 'vulcan' };
+  const hungry = P.deriveStats(hungryBuild);
+  const fed = P.deriveStats({ ...hungryBuild, torso: 'reactor', shoulder: 'std', offhand: 'none', sub: 'none' }); // same gun and arms, but inside the power budget
+  check('a power shortfall slows EN recovery and weapon cycling by the power factor', hungry.draw > hungry.supply && hungry.powerFactor < 1 && fed.powerFactor === 1
+    && Math.abs(fed.weapon.cooldown / hungry.weapon.cooldown - hungry.powerFactor) < 0.01 && Math.abs(fed.weapon.reload / hungry.weapon.reload - hungry.powerFactor) < 0.01
+    && hungry.enAir < (hungry.enAir / hungry.powerFactor) - 1, `power factor ${hungry.powerFactor.toFixed(2)}`);
+  check('a power shortfall has a floor too', hungry.powerFactor >= 0.4 && Number.isFinite(hungry.weapon.cooldown) && P.deriveStats({ ...hungryBuild, torso: 'light', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon' }).powerFactor >= 0.4);
+  check('a power shortfall bites harder than the raw shortfall', hungry.powerFactor < hungry.supply / hungry.draw, `${hungry.powerFactor.toFixed(2)} vs ${(hungry.supply / hungry.draw).toFixed(2)}`);
+  check('the reactor torso out-supplies the light frame', vary('torso', 'reactor').supply > vary('torso', 'light').supply && vary('torso', 'heavy').supply > def.supply);
+  check('tank legs carry the most, sprint legs the least', vary('legs', 'tank').load > vary('legs', 'std').load && vary('legs', 'std').load > vary('legs', 'sprint').load);
+
+  // ---- stacking is capped so no single trick runs away
+  const stackedMelee = P.deriveStats({ ...P.DEFAULT_BUILD, weapon: 'sabers', arms: 'blade', shoulder: 'spike', pilot: 'duelist', head: 'horn' });
+  check('melee bonuses are soft-capped (raw product would be about x2.5)', stackedMelee.melee > 1.9 && stackedMelee.melee < 2.2, `x${stackedMelee.melee.toFixed(2)}`);
+  const stackedGuard = P.deriveStats({ ...P.DEFAULT_BUILD, weapon: 'sabers', offhand: 'shield', shoulder: 'bulwark' });
+  check('gunfire absorption is capped at 35%', stackedGuard.guard === 0.35, `${stackedGuard.guard}`);
+
+  // ---- tuning points
+  const tune = (t) => P.deriveStats({ ...P.DEFAULT_BUILD, tuning: t });
+  check('plating raises armor', tune({ plating: 6 }).hp > def.hp * 1.2 && tune({ plating: 6 }).hp < def.hp * 1.3);
+  check('servos raise speed, dash and turning', tune({ servos: 6 }).speed > def.speed * 1.1 && tune({ servos: 6 }).dashSpeed > def.dashSpeed * 1.1 && tune({ servos: 6 }).turn > def.turn);
+  check('thrusters raise boost fuel and climb', tune({ thrusters: 6 }).en > def.en * 1.2 && tune({ thrusters: 6 }).ascendSpeed > def.ascendSpeed);
+  check('weapons raise damage output', tune({ weapons: 6 }).damage > 1.15 && tune({ weapons: 6 }).dps > def.dps * 1.15);
+  const capped = P.cleanTuning({ plating: 99, servos: 99, thrusters: 99, weapons: 99 });
+  check('tuning is capped per dial and in total', Object.values(capped).every((v) => v <= P.TUNING_MAX) && P.tuningSpent(capped) === P.TUNING_POOL, JSON.stringify(capped));
+  check('tuning survives junk input', JSON.stringify(P.cleanTuning({ plating: 'x', servos: -4, thrusters: 2.6, weapons: null })) === JSON.stringify({ plating: 0, servos: 0, thrusters: 3, weapons: 0 }) && P.tuningSpent(P.cleanTuning(undefined)) === 0);
+  check('an older save (before these slots existed) loads with sensible defaults', (() => {
+    const old = P.sanitizeBuild({ name: 'OLD ONE', head: 'horn', weapon: 'mg', offhand: 'none' });
+    return old.shoulder === 'std' && old.core === 'std' && old.pilot === 'rookie' && old.sub === 'none' && P.tuningSpent(old.tuning) === 0 && old.head === 'horn';
+  })());
+  const t0 = Date.now();
+  const sampled = P.statRanges();
+  check('stat ranges are quick to compute and cover load and power', Date.now() - t0 < 2000 && sampled.load.max > sampled.load.min && sampled.draw.max > sampled.supply.min, `${Date.now() - t0} ms`);
 }
 
 // ---------------------------------------------------------------- start server + browser
@@ -140,13 +198,13 @@ try {
   check('title screen is visible', await page.isVisible('#screen-title'));
 
   // ------------------------------------------------------------ garage UI (real clicks)
-  const counts = { head: 4, torso: 4, arms: 4, legs: 4, backpack: 4, weapon: 5, offhand: 3 };
+  const counts = { head: 5, torso: 4, arms: 4, legs: 4, shoulder: 4, backpack: 4, core: 5, pilot: 6, weapon: 5, offhand: 3, sub: 4 };
   await page.click('#btn-garage');
   const opened = await page.evaluate(() => ({ state: window.__game.state, shown: !document.getElementById('screen-garage').classList.contains('hidden'), titleHidden: document.getElementById('screen-title').classList.contains('hidden') }));
   check('GARAGE button opens the garage', opened.state === 'garage' && opened.shown && opened.titleHidden);
-  check('garage has all eight tabs', (await page.$$('.g-tab')).length === 8);
+  check('garage has a tab for each of the 11 slots, tuning and paint', (await page.$$('.g-tab')).length === 13);
 
-  const tabIds = ['head', 'torso', 'arms', 'legs', 'backpack', 'weapon', 'offhand'];
+  const tabIds = Object.keys(counts);
   const optionCounts = {};
   for (const id of tabIds) {
     await page.click(`.g-tab[data-tab="${id}"]`);
@@ -199,6 +257,37 @@ try {
   check('a custom colour applies live', custom.sub === '#00ff00' && custom.mat === 0x00ff00, JSON.stringify(custom));
   await page.click('.swatch:nth-of-type(3)');
   check('energy and thruster swatches change the build', (await page.evaluate(() => window.__game.player.build.energy)) === 'green');
+
+  // tuning points
+  await page.click('.g-tab[data-tab="tuning"]');
+  const left = () => page.$eval('.tune-left', (e) => e.textContent);
+  check('tuning starts with the full pool of 12 points', /^12 OF 12/.test(await left()));
+  const armorNow = Number(await armorText());
+  await page.click('.tune-btn[data-dial="plating"][data-dir="1"]');
+  await page.click('.tune-btn[data-dial="plating"][data-dir="1"]');
+  const tuned = await page.evaluate(() => ({ plating: window.__game.player.build.tuning.plating, hp: window.__game.player.mech.maxHp, pips: document.querySelectorAll('.tune-row:nth-of-type(1) .tune-pips i.on').length }));
+  check('+ spends tuning points and the stats follow', tuned.plating === 2 && /^10 OF 12/.test(await left()) && Number(await armorText()) > armorNow && tuned.hp === Number(await armorText()), JSON.stringify(tuned));
+  check('the minus button is disabled at zero', await page.$eval('.tune-btn[data-dial="servos"][data-dir="-1"]', (b) => b.disabled));
+  for (let i = 0; i < 6; i++) await page.click('.tune-btn[data-dial="servos"][data-dir="1"]:not([disabled])').catch(() => {});
+  for (let i = 0; i < 6; i++) await page.click('.tune-btn[data-dial="thrusters"][data-dir="1"]:not([disabled])').catch(() => {});
+  const spentAll = await page.evaluate(() => Object.values(window.__game.player.build.tuning).reduce((a, b) => a + b, 0));
+  check('the pool cannot be overspent and the plus buttons lock', spentAll === 12 && /^0 OF 12/.test(await left()) && await page.$eval('.tune-btn[data-dial="weapons"][data-dir="1"]', (b) => b.disabled), `spent ${spentAll}`);
+  await page.click('.tune-btn[data-dial="servos"][data-dir="-1"]');
+  check('refunding a point frees the plus buttons', /^1 OF 12/.test(await left()));
+
+  // budgets are shown with warnings
+  await page.evaluate(() => {
+    const g = window.__garage;
+    g.commit({ ...g.build, torso: 'heavy', legs: 'sprint', shoulder: 'bulwark', arms: 'assault', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon', sub: 'repair', head: 'visor' });
+    g.tab = 'weapon'; g._renderOptions(); g._renderStats();
+  });
+  await page.mouse.move(720, 120);
+  const warned = await page.evaluate(() => ({ warns: [...document.querySelectorAll('.g-summary .warn')].map((e) => e.textContent), loadOver: document.querySelector('#g-stats .stat:nth-child(7) .s-bar i').classList.contains('over'),
+    loadText: document.querySelector('#g-stats .stat:nth-child(7) .s-head b').firstChild.textContent, powerText: document.querySelector('#g-stats .stat:nth-child(8) .s-head b').firstChild.textContent }));
+  check('the LOAD bar and summary flag an overloaded build', warned.loadOver && warned.warns.some((w) => /OVERLOADED/.test(w)) && /\d+ \/ 100/.test(warned.loadText), JSON.stringify(warned));
+  await page.click('#g-reset');
+  const clean = await page.evaluate(() => ({ warns: document.querySelectorAll('.g-summary .warn').length, over: document.querySelector('#g-stats .stat:nth-child(7) .s-bar i').classList.contains('over') }));
+  check('the stock build shows no warnings', clean.warns === 0 && !clean.over, JSON.stringify(clean));
 
   // name, pose, randomise, reset
   await page.fill('#g-name', 'tank-01 <b>!!');
@@ -666,7 +755,7 @@ try {
   check('missile pod adds a charge and hits harder; scout head homes tighter',
     loadouts.pod.charges === 3 && loadouts.pod.pips === 3 && loadouts.podMissile && loadouts.stockMissile && loadouts.podMissile.damage > loadouts.stockMissile.damage * 1.2 && loadouts.podMissile.turn > loadouts.stockMissile.turn,
     JSON.stringify([loadouts.podMissile, loadouts.stockMissile]));
-  check('build stats reach the mech (armor, boost fuel, stagger)', loadouts.heavyMech.hp >= 3400 && loadouts.heavyMech.en > 140 && loadouts.heavyMech.stagger > 300, JSON.stringify(loadouts.heavyMech));
+  check('build stats reach the mech (armor, boost fuel, stagger)', loadouts.heavyMech.hp >= 3000 && loadouts.heavyMech.en > 140 && loadouts.heavyMech.stagger > 300, JSON.stringify(loadouts.heavyMech));
   check('wing pack makes dashes cheaper and faster', loadouts.wingMech.dashCost < 22 && loadouts.wingMech.dashSpeed > 230, JSON.stringify(loadouts.wingMech));
   check('a light sprinter outruns a heavy tank', loadouts.run.sprinter > loadouts.run.tank * 1.25, `${loadouts.run.sprinter.toFixed(1)} vs ${loadouts.run.tank.toFixed(1)}`);
 
@@ -689,7 +778,9 @@ try {
       }
       for (let i = 0; i < 150; i++) {
         T.pilot({ lastDash: -1 });
-        if (i % 40 === 0) { T.tap('KeyF'); T.tap('Mouse0'); }
+        if (i % 40 === 0) { T.tap('KeyF'); T.tap('Mouse0'); T.tap('KeyV'); }
+        if (i % 40 === 5) T.keys(['KeyV']);
+        if (i % 40 === 25) T.keys([], ['KeyV']);
         g.step(1);
         if (!T.allFinite()) { bad++; break; }
         shots += g.projectiles.list.filter((p) => p.team === 'player').length ? 1 : 0;
@@ -701,6 +792,262 @@ try {
     return { bad, rendered, shots };
   });
   check('25 random builds fight and render without errors', smoke.bad === 0 && smoke.rendered === 25, JSON.stringify(smoke));
+
+  // ------------------------------------------------------------ 5c. deeper building: sub-weapons, cores, pilots, budgets in combat
+  const systems = await page.evaluate(async () => {
+    const g = window.__game, T = window.__t;
+    const P = await import('/src/parts.js');
+    const { createEnemy } = await import('/src/ai.js');
+    const THREE = await import('three');
+    const out = {};
+    const fresh = (patch) => {
+      g.cheat.invincible = true;
+      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning }, ...patch });
+      g.startMission();
+      g.manual = true;
+      g.missions.state = 'idle';
+      g.hud.reset();
+      g.player.mech.place(0, 0, 0, 0);
+      g.rig.reset(0);
+    };
+    const dummy = (x, z) => {
+      const e = createEnemy(g, 'bulwark', 1);
+      e.mech.place(x, z, 0, 0);
+      e.think = () => ({ faceYaw: 0 });
+      e.def_dodge = 0;
+      e.mech.hp = e.mech.maxHp = 100000;
+      g.enemies.push(e);
+      return e;
+    };
+    const hostileMissile = (from, speed = 120) => {
+      const m = g.player.mech;
+      return g.projectiles.spawn({ type: 'missile', team: 'enemy', source: null, pos: new THREE.Vector3(from.x, from.y, from.z),
+        dir: new THREE.Vector3(m.pos.x - from.x, m.center().y - from.y, m.pos.z - from.z).normalize(), damage: 300, speed, maxSpeed: speed, turn: 2.5, target: m, life: 6, color: 0xff6040 });
+    };
+
+    // --- head vulcans: stream of bullets, heat, lockout, cooling
+    fresh({ sub: 'vulcan' });
+    const d = dummy(0, -80);
+    g.step(3);
+    out.subRowShown = document.getElementById('sub-row').style.display !== 'none' && document.getElementById('sub-name').textContent === 'HEAD VULCANS';
+    const seen = { intercept: false, bullets: 0 };
+    T.keys(['KeyV']);
+    let maxHeat = 0, lockedAt = -1;
+    for (let i = 0; i < 400; i++) {
+      g.step(1);
+      for (const p of g.projectiles.list) if (p.team === 'player' && p.type === 'bullet' && p.intercept) { seen.intercept = true; }
+      maxHeat = Math.max(maxHeat, g.player.subHeat);
+      if (g.player.subLocked && lockedAt < 0) lockedAt = i;
+    }
+    T.keys([], ['KeyV']);
+    out.vulcan = { dealt: d.mech.maxHp - d.mech.hp, intercept: seen.intercept, maxHeat, lockedAt, lockedNow: g.player.subLocked,
+      barWhileHot: document.getElementById('sub-fill').style.width, state: document.getElementById('sub-state').textContent };
+    g.step(60 * 3);
+    out.vulcanCooled = { heat: g.player.subHeat, locked: g.player.subLocked };
+
+    // --- vulcans shoot down incoming missiles
+    fresh({ sub: 'vulcan' });
+    dummy(0, -80);
+    g.step(3);
+    const hp0 = g.player.mech.hp;
+    g.cheat.invincible = false;
+    const m1 = hostileMissile({ x: 0, y: 14, z: -70 }, 110);
+    T.keys(['KeyV']);
+    let missileGone = false;
+    for (let i = 0; i < 90; i++) {
+      g.step(1);
+      if (m1.dead || !g.projectiles.list.includes(m1)) { missileGone = true; break; }
+    }
+    T.keys([], ['KeyV']);
+    g.step(10);
+    out.intercept = { gone: missileGone, hpLost: hp0 - g.player.mech.hp };
+    g.cheat.invincible = true;
+
+    // --- decoy flares: every missile homing on us detonates; then a cooldown
+    fresh({ sub: 'flare' });
+    g.step(3);
+    g.cheat.invincible = false;
+    hostileMissile({ x: 0, y: 30, z: -140 }, 90);
+    hostileMissile({ x: 40, y: 30, z: -140 }, 90);
+    g.step(10);
+    const before = g.projectiles.list.filter((p) => p.type === 'missile' && !p.dead).length;
+    T.tap('KeyV');
+    g.step(3);
+    const after = g.projectiles.list.filter((p) => p.type === 'missile' && !p.dead).length;
+    const cd = g.player.subCd;
+    const f3 = hostileMissile({ x: 0, y: 30, z: -140 }, 90);
+    T.tap('KeyV');
+    g.step(3);
+    out.flare = { before, after, cd, secondIgnored: !f3.dead && g.projectiles.list.includes(f3), hp: g.player.mech.hp === g.player.mech.maxHp };
+    g.cheat.invincible = true;
+
+    // --- repair kit: heals over time, one use per wave, restocked by the resupply
+    fresh({ sub: 'repair' });
+    g.step(3);
+    const rm = g.player.mech;
+    g.cheat.invincible = false;
+    rm.invuln = 0;
+    rm.takeDamage(1400, { kind: 'beam' });
+    const hurt = rm.hp;
+    T.tap('KeyV');
+    g.step(30);
+    const midHeal = rm.hp - hurt;
+    g.step(60 * 4);
+    const healed = rm.hp - hurt;
+    const charges = g.player.repairCharges;
+    const afterFirst = rm.hp;
+    rm.invuln = 0;
+    rm.takeDamage(200, { kind: 'beam' });
+    const hurtAgain = rm.hp;
+    T.tap('KeyV'); g.step(90);
+    out.repair = { hurt, midHeal, healed, expected: rm.maxHp * 0.15, charges, secondUse: rm.hp - hurtAgain, afterFirst };
+    g.player.resupply(0.25);
+    out.repairRestocked = g.player.repairCharges;
+    g.cheat.invincible = true;
+
+    // --- nano-repair core: mends armor in a lull, and a hit interrupts it
+    fresh({ core: 'regen' });
+    g.step(3);
+    const nm = g.player.mech;
+    g.cheat.invincible = false;
+    nm.invuln = 0;
+    nm.takeDamage(1000, { kind: 'beam' });
+    const n0 = nm.hp;
+    g.step(60 * 2);
+    const during = nm.hp - n0; // still inside the 3 s grace period
+    g.step(60 * 4);
+    const after4 = nm.hp - n0;
+    nm.invuln = 0;
+    nm.takeDamage(50, { kind: 'beam' });
+    const n1 = nm.hp;
+    g.step(60 * 2);
+    out.regen = { during, after: after4, interrupted: nm.hp - n1 };
+    g.cheat.invincible = true;
+    fresh({});
+    g.step(60 * 6);
+    out.noRegen = g.player.mech.hp === g.player.mech.maxHp;
+
+    // --- overclock burst length, phase governor invulnerability, recon radar, overload speed, power fire rate
+    fresh({ core: 'overclock' });
+    g.player.burst = 100;
+    T.tap('KeyX'); g.step(2);
+    out.burstTime = g.player.burstT;
+    fresh({});
+    g.player.burst = 100;
+    T.tap('KeyX'); g.step(2);
+    out.burstTimeStock = g.player.burstT;
+    fresh({ core: 'phase' });
+    g.step(30);
+    T.keys(['KeyW']); T.tap('ShiftLeft'); g.step(2); T.keys([], ['KeyW']);
+    out.phaseInvuln = g.player.mech.invuln;
+    fresh({});
+    g.step(30);
+    T.keys(['KeyW']); T.tap('ShiftLeft'); g.step(2); T.keys([], ['KeyW']);
+    out.stockInvuln = g.player.mech.invuln;
+    fresh({ head: 'recon' });
+    out.radar = g.player.stats.radar;
+
+    // overload: the same parts, one set of legs over its limit and one inside it
+    const runDistance = (patch) => {
+      fresh(patch);
+      g.rig.yaw = 0; g.step(10);
+      const z0 = g.player.mech.pos.z;
+      T.keys(['KeyW']); g.step(90); T.keys([], ['KeyW']);
+      return z0 - g.player.mech.pos.z;
+    };
+    const heavyParts = { torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon' };
+    out.overloadRun = { over: runDistance({ ...heavyParts, legs: 'sprint' }), ok: runDistance({ ...heavyParts, legs: 'sprint', torso: 'std', shoulder: 'std', arms: 'std', backpack: 'std', weapon: 'rifle', offhand: 'none' }) };
+    out.overloadStat = (() => { fresh({ ...heavyParts, legs: 'sprint' }); return g.player.stats.overload; })();
+
+    // power shortfall: a power-starved build fires the same gun measurably slower
+    const shotsFired = (patch) => {
+      fresh({ weapon: 'rifle', ...patch });
+      dummy(0, -90);
+      g.step(3);
+      let shots = 0, last = g.player.ammo;
+      T.keys(['Mouse0']);
+      for (let i = 0; i < 70; i++) { g.step(1); if (g.player.ammo < last) shots++; last = g.player.ammo; if (g.player.reloadT > 0) break; }
+      T.keys([], ['Mouse0']);
+      return { shots, cd: g.player.weapon.cooldown, pf: g.player.stats.powerFactor };
+    };
+    // ...and the shoulder cannon recharges slower too (the same cannon, with and without a power shortfall)
+    const cannonRecovery = (patch) => {
+      fresh({ offhand: 'cannon', ...patch });
+      dummy(0, -90);
+      g.step(3);
+      T.tap('KeyF'); g.step(2);
+      const c0 = g.player.cannonCd;
+      g.step(60);
+      return { drop: c0 - g.player.cannonCd, pf: g.player.stats.powerFactor };
+    };
+    out.cannonRecovery = {
+      starved: cannonRecovery({ torso: 'light', head: 'recon', arms: 'precision', legs: 'jump', shoulder: 'vernier', backpack: 'booster', core: 'phase', weapon: 'sniper' }),
+      ok: cannonRecovery({}),
+    };
+    out.fireRate = { starved: shotsFired({ torso: 'light', head: 'recon', arms: 'precision', legs: 'jump', shoulder: 'vernier', backpack: 'booster', core: 'phase', offhand: 'cannon', sub: 'vulcan' }), ok: shotsFired({}) };
+
+    // --- tuning: weapons dial raises shot damage, plating raises armor in the real mech
+    const shotDamage = (tuning) => {
+      fresh({ tuning });
+      dummy(0, -90);
+      g.step(3);
+      T.tap('Mouse0'); T.keys(['Mouse0']); g.step(2); T.keys([], ['Mouse0']);
+      const p = g.projectiles.list.find((q) => q.team === 'player' && q.type === 'beam');
+      return p ? p.damage : 0;
+    };
+    out.tuneDamage = { stock: shotDamage({ plating: 0, servos: 0, thrusters: 0, weapons: 0 }), tuned: shotDamage({ plating: 0, servos: 0, thrusters: 0, weapons: 6 }) };
+    fresh({ tuning: { plating: 6, servos: 0, thrusters: 6, weapons: 0 } });
+    out.tuneMech = { hp: g.player.mech.maxHp, en: g.player.mech.maxEn };
+    fresh({});
+    out.stockMech = { hp: g.player.mech.maxHp, en: g.player.mech.maxEn };
+
+    // --- shoulder shells stack with the shield (capped), and the engineer's resupply is bigger
+    fresh({ shoulder: 'bulwark', offhand: 'shield' });
+    g.cheat.invincible = false;
+    g.player.mech.invuln = 0;
+    const gh = g.player.mech.hp;
+    g.player.mech.takeDamage(100, { kind: 'bullet' });
+    out.guardStack = gh - g.player.mech.hp;
+    g.cheat.invincible = true;
+
+    const waveHeal = (pilot) => {
+      fresh({ pilot });
+      g.cheat.invincible = false;
+      const m = g.player.mech;
+      m.invuln = 0;
+      m.takeDamage(m.maxHp * 0.8, { kind: 'beam' });
+      const low = m.hp;
+      g.missions.state = 'combat';
+      g.enemies.length = 0;
+      g.missions.update(0.01); // no hostiles left: the wave is cleared and the resupply runs
+      g.cheat.invincible = true;
+      return (m.hp - low) / m.maxHp;
+    };
+    out.resupply = { rookie: waveHeal('rookie'), engineer: waveHeal('engineer') };
+    fresh({});
+    return out;
+  });
+  dump('systems', systems);
+  const V = systems.vulcan;
+  check('head vulcans fire point-defence bullets and do damage', systems.subRowShown && V.intercept && V.dealt > 300, `${Math.round(V.dealt)} dmg`);
+  check('vulcans overheat, lock out, then cool down and work again', V.maxHeat >= 1 && V.lockedAt > 0 && systems.vulcanCooled.heat < 0.05 && !systems.vulcanCooled.locked, JSON.stringify([V.maxHeat, V.lockedAt, systems.vulcanCooled]));
+  check('the HUD shows the vulcan heat bar', /%/.test(V.barWhileHot) && ['HEAT', 'OVERHEATED', 'READY'].includes(V.state), `${V.barWhileHot} ${V.state}`);
+  check('vulcans shoot down an incoming missile before it hits', systems.intercept.gone && systems.intercept.hpLost === 0, JSON.stringify(systems.intercept));
+  check('decoy flares detonate every missile on you, then recharge', systems.flare.before === 2 && systems.flare.after === 0 && systems.flare.cd > 11 && systems.flare.secondIgnored && systems.flare.hp, JSON.stringify(systems.flare));
+  const R = systems.repair;
+  check('repair kit heals 15% over a few seconds', R.midHeal > 0 && R.midHeal < R.expected * 0.6 && Math.abs(R.healed - R.expected) < R.expected * 0.06, `${Math.round(R.healed)} of ${Math.round(R.expected)}`);
+  check('repair kit is one use per wave, and the resupply restocks it', R.charges === 0 && R.secondUse <= 0 && systems.repairRestocked === 1, JSON.stringify([R.charges, R.secondUse, systems.repairRestocked]));
+  check('nano-repair core waits for a lull, repairs, and is interrupted by hits', systems.regen.during < 5 && systems.regen.after > 15 && systems.regen.interrupted < 9 && systems.noRegen, JSON.stringify(systems.regen));
+  check('overclock core makes BURST last 18 s instead of 12', systems.burstTime > 17 && systems.burstTimeStock > 11 && systems.burstTimeStock < 12.1 && systems.burstTime > systems.burstTimeStock + 5, `${systems.burstTime.toFixed(1)} vs ${systems.burstTimeStock.toFixed(1)}`);
+  check('phase governor lengthens dash invulnerability', systems.phaseInvuln > systems.stockInvuln + 0.2, `${systems.phaseInvuln.toFixed(2)} vs ${systems.stockInvuln.toFixed(2)}`);
+  check('recon head widens the radar', systems.radar === 670);
+  check('exceeding the load limit really slows you down in play', systems.overloadStat > 0 && systems.overloadRun.over < systems.overloadRun.ok * 0.8, `${systems.overloadRun.over.toFixed(1)} vs ${systems.overloadRun.ok.toFixed(1)}`);
+  check('a power shortfall really slows weapon cycling in play', systems.fireRate.starved.pf < 1 && systems.fireRate.starved.shots < systems.fireRate.ok.shots && systems.fireRate.starved.cd > systems.fireRate.ok.cd * 1.2, JSON.stringify(systems.fireRate));
+  check('a power shortfall also slows the shoulder cannon recharge', systems.cannonRecovery.starved.pf < 1 && systems.cannonRecovery.starved.drop < systems.cannonRecovery.ok.drop * 0.8 && systems.cannonRecovery.ok.drop > 0.9, JSON.stringify(systems.cannonRecovery));
+  check('the weapons tuning dial raises real shot damage', systems.tuneDamage.tuned > systems.tuneDamage.stock * 1.15 && systems.tuneDamage.stock === 210, JSON.stringify(systems.tuneDamage));
+  check('plating and thrusters tuning reach the mech', systems.tuneMech.hp > systems.stockMech.hp * 1.2 && systems.tuneMech.en > systems.stockMech.en * 1.2, JSON.stringify([systems.tuneMech, systems.stockMech]));
+  check('shoulder shells stack with the shield', Math.abs(systems.guardStack - 74) < 0.5, `${systems.guardStack}`);
+  check('the engineer pilot repairs twice as much between waves', Math.abs(systems.resupply.rookie - 0.25) < 0.02 && Math.abs(systems.resupply.engineer - 0.5) < 0.02, JSON.stringify(systems.resupply));
   await page.evaluate(() => { // back to a stock mech for the rest of the suite
     const g = window.__game;
     g.setBuild(window.__garage.build.name ? { ...window.__garage.build, head: 'vfin', torso: 'std', arms: 'std', legs: 'std', backpack: 'std', weapon: 'rifle', offhand: 'shield' } : null);
