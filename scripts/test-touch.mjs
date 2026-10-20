@@ -566,16 +566,19 @@ try {
       g.setBuild({ ...window.__garage.build, ...patch });
       g.startMission(); g.manual = true; g.missions.state = 'idle'; g.hud.reset(); g.step(3);
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      out[label] = { cannon: vis('cannon'), sub: vis('sub'), saber: vis('saber'), reload: vis('reload'), fire: document.querySelector('#tc-fire b').textContent, subLabel: document.querySelector('#tc-sub b').textContent };
+      out[label] = { cannon: vis('cannon'), sub: vis('sub'), saber: vis('saber'), reload: vis('reload'), fire: document.querySelector('#tc-fire b').textContent, subLabel: document.querySelector('#tc-sub b').textContent, cannonLabel: document.querySelector('#tc-cannon b').textContent };
     };
     await field({ offhand: 'cannon', sub: 'vulcan' }, 'cannonVulcan');
     await field({ weapon: 'sabers', offhand: 'none', sub: 'flare' }, 'sabersFlare');
+    await field({ weapon: 'rifle', offhand: 'swarm', sub: 'injector' }, 'swarmInject');
+    await field({ weapon: 'rifle', offhand: 'shield', sub: 'pulse' }, 'pulse');
     await field({ weapon: 'rifle', offhand: 'shield', sub: 'none' }, 'stock');
     g.cheat.invincible = true;
     return out;
   });
   check('a shoulder cannon and vulcans add their buttons', shapes.cannonVulcan.cannon && shapes.cannonVulcan.sub && shapes.cannonVulcan.subLabel === 'VULCAN', JSON.stringify(shapes.cannonVulcan));
   check('twin sabers turn FIRE into SABER and drop the reload and extra saber buttons', shapes.sabersFlare.fire === 'SABER' && !shapes.sabersFlare.saber && !shapes.sabersFlare.reload && shapes.sabersFlare.sub && shapes.sabersFlare.subLabel === 'FLARE', JSON.stringify(shapes.sabersFlare));
+  check('the micro-missile arm labels its button SWARM, and the EN injector gets an INJECT button', shapes.swarmInject.cannon && shapes.swarmInject.cannonLabel === 'SWARM' && shapes.swarmInject.sub && shapes.swarmInject.subLabel === 'INJECT' && shapes.pulse.subLabel === 'PULSE', JSON.stringify([shapes.swarmInject, shapes.pulse.subLabel]));
   check('back to a stock loadout the extras disappear again', !shapes.stock.cannon && !shapes.stock.sub && shapes.stock.saber && shapes.stock.fire === 'FIRE');
   await G(() => { const p = window.__game.player; p.reset(0, 0); p.burst = 100; window.__game.step(3); });
   await page.waitForTimeout(150);
@@ -583,6 +586,52 @@ try {
   await tap('#tc-burst');
   await G(() => window.__game.step(3));
   check('tapping BURST starts it', await G(() => window.__game.player.burstT > 0));
+
+  // ------------------------------------------------------------ 10b. the pit stop between waves, on a phone
+  await G(() => {
+    const g = window.__game;
+    g.setBuild({ ...window.__garage.build, weapon: 'rifle', offhand: 'shield', sub: 'none', torso: 'std' });
+    g.settings.pitStops = true;
+    g.startMission();
+    g.manual = true;
+    g.cheat.invincible = true;
+    g.hud.reset();
+    g.step(60 * 4);
+    g.player.mech.place(90, -60, 0, 0.7);
+    g.player.mech.hp = g.player.mech.maxHp * 0.5;
+    for (const e of [...g.enemies]) e.mech.takeDamage(1e6, { kind: 'beam' });
+    g.step(1);
+    g.step(60 * 5);
+  });
+  await page.waitForFunction(() => !document.getElementById('screen-garage').classList.contains('hidden'));
+  await page.waitForTimeout(400);
+  const pitPhone = {
+    state: await G(() => window.__game.state), layer: await G(() => document.getElementById('touch').classList.contains('hidden')),
+    card: await rect('#g-pit'), opts: await rect('#g-options'), go: await rect('#g-go'), left: await rect('.g-left'), back: await rect('#g-back'),
+    name: await rect('.g-name'), label: await page.textContent('#g-go'),
+  };
+  dump('pit phone', pitPhone);
+  check('the pit stop on a phone: the touch controls hide and the garage appears', pitPhone.state === 'intermission' && pitPhone.layer);
+  check('the pit card fits inside the panel and the parts list keeps room to scroll', pitPhone.card.shown && inside(pitPhone.card, W, H) && pitPhone.card.b <= pitPhone.left.b && pitPhone.opts.h >= 100, `list ${Math.round(pitPhone.opts.h)}px`);
+  check('the pit stop hides BACK and the callsign field, and offers a big LAUNCH button', !pitPhone.back.shown && !pitPhone.name.shown && /^LAUNCH WAVE 2$/.test(pitPhone.label) && inside(pitPhone.go, W, H) && pitPhone.go.h >= 32);
+  await shot('09-pit');
+  await tap('.g-tab[data-tab="shoulder"]');
+  await tap('.opt[data-id="bulwark"]');
+  check('tapping a part in the pit equips it', (await G(() => window.__game.player.build.shoulder)) === 'bulwark');
+  await touch.down(1, 420, 200);
+  for (let i = 1; i <= 5; i++) await touch.move(1, 420 + i * 10, 200);
+  await touch.up(1);
+  check('dragging the mech around in the pit turns the turntable', !(await G(() => window.__game.garageCam.dragging)));
+  await tap('#g-go');
+  await page.waitForFunction(() => window.__game.state === 'playing');
+  await page.waitForFunction(() => !document.getElementById('touch').classList.contains('hidden'));
+  const afterPit = await G(() => { const m = window.__game.player.mech; return { at: [Math.round(m.pos.x), Math.round(m.pos.z)], wave: window.__game.missions.waveNumber, share: m.hp / m.maxHp, garage: document.getElementById('screen-garage').classList.contains('hidden') }; });
+  check('LAUNCH by touch returns to the sortie with the controls back, the armor carried over and the position kept', afterPit.garage && afterPit.at[0] === 90 && afterPit.at[1] === -60 && afterPit.wave === 2 && Math.abs(afterPit.share - 0.75) < 0.02, JSON.stringify(afterPit));
+  await touch.down(1, 150, 300);
+  await touch.move(1, 150, 232);
+  check('the stick still works after the pit stop', (await G(() => window.__game.input.axis.y)) > 0.9);
+  await touch.up(1);
+  await G(() => { const g = window.__game; g.settings.pitStops = false; g.cheat.invincible = true; });
 
   // ------------------------------------------------------------ 11. end screen, and the input device in use wins
   await G(() => { const g = window.__game; g.cheat.invincible = true; g.endMission(true); g.endTimer = 0; g.step(3); });

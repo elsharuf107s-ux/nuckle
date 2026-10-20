@@ -109,6 +109,42 @@ const check = (name, ok, detail = '') => {
   dir('veteran pilot: harder to stagger', vary('pilot', 'veteran').staggerAt > def.staggerAt && vary('pilot', 'veteran').burstGain > 1);
   dir('sub-weapons are defined', def.sub === null && vary('sub', 'vulcan').sub.kind === 'vulcan' && vary('sub', 'flare').sub.kind === 'flare' && vary('sub', 'repair').sub.kind === 'repair');
 
+  // ---- the expanded catalogue: two to four new parts in every slot
+  check('the catalogue has 75 parts across 11 slots', P.SLOTS.length === 11 && P.SLOTS.reduce((n, s) => n + P.PARTS[s].length, 0) === 75);
+  check('every part id is unique within its slot and every part has a name, a description and a model', P.SLOTS.every((slot) => new Set(P.PARTS[slot].map((p) => p.id)).size === P.PARTS[slot].length
+    && P.PARTS[slot].every((p) => p.name && p.desc.length > 20 && typeof p.model === 'string')));
+  dir('ace visor: faster trigger and burst gauge, a little melee', vary('head', 'ace').weapon.cooldown < def.weapon.cooldown && vary('head', 'ace').burstGain > 1 && vary('head', 'ace').melee > 1);
+  dir('ECM crown: jams enemy missiles', vary('head', 'jammer').jam === 0.4 && def.jam === 0);
+  dir('missile bay chest: an extra missile charge and harder missiles', vary('torso', 'bay').missileCharges === 3 && vary('torso', 'bay').missileDamage > 1);
+  dir('command chest: radar, burst gain and wave repair', vary('torso', 'command').radar > def.radar && vary('torso', 'command').burstGain > 1 && vary('torso', 'command').resupplyHeal > def.resupplyHeal);
+  dir('guard arms: armor, stagger resistance and guard', vary('arms', 'guard').hp > def.hp && vary('arms', 'guard').staggerAt > def.staggerAt && vary('arms', 'guard').guard > def.guard);
+  dir('recoil arms: a harder-hitting but slower gun', vary('arms', 'recoil').weapon.damage > def.weapon.damage && vary('arms', 'recoil').weapon.cooldown > def.weapon.cooldown);
+  dir('strider legs: quicker on foot, longer dash', vary('legs', 'strider').speed > def.speed && vary('legs', 'strider').dashSpeed > def.dashSpeed);
+  dir('siege legs: big stagger resistance and a steadier gun, but slow', vary('legs', 'siege').staggerAt > def.staggerAt + 100 && vary('legs', 'siege').weapon.reload < def.weapon.reload && vary('legs', 'siege').speed < def.speed);
+  dir('missile racks: an extra missile charge and tighter homing', vary('shoulder', 'rack').missileCharges === 3 && vary('shoulder', 'rack').missileTurn > def.missileTurn);
+  dir('aegis emitters: 10% more gunfire absorption', Math.abs(vary('shoulder', 'aegis').guard - 0.32) < 1e-9);
+  dir('generator pack: more power output, and it draws less than the standard pack', vary('backpack', 'gen').supply === def.supply + 28 && vary('backpack', 'gen').draw < def.draw);
+  dir('armor backplate: armor and stagger resistance, a weaker climb', vary('backpack', 'plate').hp > def.hp && vary('backpack', 'plate').staggerAt > def.staggerAt && vary('backpack', 'plate').ascendSpeed < def.ascendSpeed);
+  dir('burst siphon: a much faster burst gauge', vary('core', 'siphon').burstGain === 1.5);
+  dir('barrier generator: a 240-point barrier', vary('core', 'barrier').barrier === 240 && def.barrier === 0);
+  dir('marksman: a harder-hitting gun and a bigger radar', vary('pilot', 'marksman').weapon.damage > def.weapon.damage && vary('pilot', 'marksman').radar > def.radar);
+  dir('tactician: harder missiles that track tighter', vary('pilot', 'tactician').missileDamage > 1 && vary('pilot', 'tactician').missileTurn > 0);
+  dir('guardian: guard, stagger resistance and wave repair', vary('pilot', 'guardian').guard > def.guard && vary('pilot', 'guardian').staggerAt > def.staggerAt && vary('pilot', 'guardian').resupplyHeal > def.resupplyHeal);
+  dir('beam shotgun: seven short-ranged pellets', vary('weapon', 'scatter').weapon.pellets === 7 && vary('weapon', 'scatter').weapon.life < 1);
+  dir('seeker rifle: homing beams', vary('weapon', 'seeker').weapon.homing > 1);
+  dir('arc lance: a piercing beam', vary('weapon', 'lance').weapon.pierce === true && vary('weapon', 'lance').weapon.damage > vary('weapon', 'sniper').weapon.damage);
+  dir('greatsword: melee only, the biggest melee bonus and the longest reach', vary('weapon', 'greatsword').weapon.kind === 'melee' && vary('weapon', 'greatsword').melee > vary('weapon', 'sabers').melee && vary('weapon', 'greatsword').reach > vary('weapon', 'sabers').reach);
+  dir('buckler and tower shield: guard, the tower heavier and slower', vary('offhand', 'buckler').guard < def.guard && vary('offhand', 'buckler').guard > 0 && vary('offhand', 'tower').guard > def.guard && vary('offhand', 'tower').weight > def.weight && vary('offhand', 'tower').speed < def.speed);
+  dir('micro-missile arm: a swarm ability', vary('offhand', 'swarm').ability.kind === 'swarm' && vary('offhand', 'swarm').ability.count === 6);
+  dir('the three new sub-weapons are defined', ['injector', 'pulse', 'field'].every((id) => vary('sub', id).sub?.kind === id));
+  const stackedGuard2 = P.deriveStats({ ...P.DEFAULT_BUILD, offhand: 'tower', shoulder: 'aegis', pilot: 'guardian', arms: 'guard' });
+  check('guard from every kind of part stacks, up to the cap', P.deriveStats({ ...P.DEFAULT_BUILD, offhand: 'buckler', arms: 'guard' }).guard > 0.15 && stackedGuard2.guard === 0.35);
+  check('missile charges are capped at four', P.deriveStats({ ...P.DEFAULT_BUILD, backpack: 'pod', torso: 'bay', shoulder: 'rack' }).missileCharges === 4);
+  check('the burst gauge never fills more than twice as fast', P.deriveStats({ ...P.DEFAULT_BUILD, head: 'horn', torso: 'reactor', core: 'siphon', pilot: 'veteran' }).burstGain === 2);
+  check('ECM jamming is capped', P.deriveStats({ ...P.DEFAULT_BUILD, head: 'jammer' }).jam <= 0.8);
+  check('the firepower bar counts a shotgun by its pellets', vary('weapon', 'scatter').dps > 150 && vary('weapon', 'scatter').dps < 400, `${vary('weapon', 'scatter').dps}`);
+  check('every new weapon has a sane firepower rating next to the rifle', ['scatter', 'seeker', 'lance'].every((id) => vary('weapon', id).dps > def.dps * 0.6 && vary('weapon', id).dps < def.dps * 1.3), ['scatter', 'seeker', 'lance'].map((id) => vary('weapon', id).dps).join(' '));
+
   // ---- budgets: weight against the legs' load limit, power draw against the torso's output
   check('the stock build is inside both budgets', def.overload === 0 && def.loadFactor === 1 && def.powerFactor === 1 && def.draw < def.supply && def.weight < def.load, `${def.weight}/${def.load}, ${def.draw}/${def.supply}`);
   const overloaded = P.deriveStats({ ...P.DEFAULT_BUILD, legs: 'sprint', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster' });
@@ -198,7 +234,7 @@ try {
   check('title screen is visible', await page.isVisible('#screen-title'));
 
   // ------------------------------------------------------------ garage UI (real clicks)
-  const counts = { head: 5, torso: 4, arms: 4, legs: 4, shoulder: 4, backpack: 4, core: 5, pilot: 6, weapon: 5, offhand: 3, sub: 4 };
+  const counts = { head: 7, torso: 6, arms: 6, legs: 6, shoulder: 6, backpack: 6, core: 7, pilot: 9, weapon: 9, offhand: 6, sub: 7 };
   await page.click('#btn-garage');
   const opened = await page.evaluate(() => ({ state: window.__game.state, shown: !document.getElementById('screen-garage').classList.contains('hidden'), titleHidden: document.getElementById('screen-title').classList.contains('hidden') }));
   check('GARAGE button opens the garage', opened.state === 'garage' && opened.shown && opened.titleHidden);
@@ -1038,6 +1074,316 @@ try {
   check('repair kit heals 15% over a few seconds', R.midHeal > 0 && R.midHeal < R.expected * 0.6 && Math.abs(R.healed - R.expected) < R.expected * 0.06, `${Math.round(R.healed)} of ${Math.round(R.expected)}`);
   check('repair kit is one use per wave, and the resupply restocks it', R.charges === 0 && R.secondUse <= 0 && systems.repairRestocked === 1, JSON.stringify([R.charges, R.secondUse, systems.repairRestocked]));
   check('nano-repair core waits for a lull, repairs, and is interrupted by hits', systems.regen.during < 5 && systems.regen.after > 15 && systems.regen.interrupted < 9 && systems.noRegen, JSON.stringify(systems.regen));
+
+  // ------------------------------------------------------------ 5d. the expanded catalogue in combat
+  const expanded = await page.evaluate(async () => {
+    const g = window.__game, T = window.__t;
+    const P = await import('/src/parts.js');
+    const { createEnemy } = await import('/src/ai.js');
+    const THREE = await import('three');
+    const out = {};
+    // a seeded generator keeps the shotgun's spread (and everything else random) repeatable
+    const realRandom = Math.random;
+    let seed = 12345;
+    Math.random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const fresh = (patch) => {
+      g.cheat.invincible = true;
+      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning }, ...patch });
+      g.startMission();
+      g.manual = true;
+      g.missions.state = 'idle';
+      g.hud.reset();
+      g.player.mech.place(0, 0, 0, 0);
+      g.player.lock = null;
+      g.player.lockEnabled = false;
+      g.rig.reset(0);
+      g.step(5);
+    };
+    const dummy = (x, z) => {
+      const e = createEnemy(g, 'bulwark', 1);
+      e.mech.place(x, z, 0, 0);
+      e.update = () => {};
+      e.mech.hp = e.mech.maxHp = 100000;
+      g.enemies.push(e);
+      return e;
+    };
+    const lost = (e) => e.mech.maxHp - e.mech.hp;
+    const clear = () => { for (const e of g.enemies) e.mech.destroy(); g.enemies.length = 0; g.projectiles.clear(); };
+    const fire = () => { const p = g.player; p.fireCd = 0; p.reloadT = 0; p.ammo = p.magSize; p._fireWeapon(); };
+    const mine = () => g.projectiles.list.filter((q) => q.team === 'player');
+
+    // --- beam shotgun: seven pellets per shot, brutal close and thin far away
+    fresh({ weapon: 'scatter' });
+    fire();
+    const pellets = mine();
+    const dirs = pellets.map((q) => q.dir.clone());
+    out.shotgun = { count: pellets.length, spread: Math.max(...dirs.map((d) => Math.acos(Math.min(1, d.dot(dirs[0]))))), life: pellets[0].life };
+    clear();
+    const near = dummy(0, -60);
+    for (let i = 0; i < 4; i++) { fire(); g.step(40); }
+    out.shotgunNear = lost(near);
+    clear();
+    const far = dummy(0, -300);
+    for (let i = 0; i < 4; i++) { fire(); g.step(90); }
+    out.shotgunFar = lost(far);
+    clear();
+
+    // --- seeker rifle: curves onto a target that the crosshair is not quite on
+    // (the camera sits 13 units to the mech's right, so the crosshair line runs at x = 13: the dummy is 21 units off it)
+    const offAxis = (weapon) => {
+      fresh({ weapon });
+      const e = dummy(34, -200);
+      g.step(2);
+      fire();
+      const q = mine()[0];
+      const homing = { turn: q.turn, target: q.target === e.mech };
+      g.step(120);
+      const r = { dealt: lost(e), ...homing };
+      clear();
+      return r;
+    };
+    out.seeker = offAxis('seeker');
+    out.rifleMiss = offAxis('rifle');
+
+    // --- arc lance: goes through the first enemy and hits the one behind it
+    const inLine = (weapon) => {
+      fresh({ weapon });
+      const a = dummy(0, -100), b = dummy(0, -170);
+      g.step(2);
+      fire();
+      g.step(60);
+      const r = { first: lost(a), second: lost(b) };
+      clear();
+      return r;
+    };
+    out.lance = inLine('lance');
+    out.sniperInLine = inLine('sniper');
+
+    // --- melee reach: a greatsword hits an enemy that sabers cannot reach
+    const reachTest = (weapon) => {
+      fresh({ weapon });
+      const e = dummy(0, -43);
+      g.step(2);
+      g.player._meleeHit({ damage: 280, stagger: false });
+      const r = lost(e);
+      clear();
+      return r;
+    };
+    out.sabersReach = reachTest('sabers');
+    out.swordReach = reachTest('greatsword');
+
+    // --- barrier core: soaks first, spills into armor, recharges after five quiet seconds (no shield, so the numbers are plain)
+    fresh({ core: 'barrier', offhand: 'none' });
+    g.cheat.invincible = false;
+    const m = g.player.mech;
+    m.invuln = 0;
+    const hp0 = m.hp;
+    m.takeDamage(100, { kind: 'beam' });
+    const afterSoak = { barrier: m.barrier, hp: m.hp };
+    m.takeDamage(300, { kind: 'beam' });
+    const afterSpill = { barrier: m.barrier, lost: hp0 - m.hp };
+    g.step(60 * 4);
+    const early = m.barrier;
+    g.step(60 * 3);
+    const mid = m.barrier;
+    g.step(60 * 3);
+    out.barrier = { afterSoak, afterSpill, early, mid, full: m.barrier, max: m.barrierMax, row: document.getElementById('barrier-row').classList.contains('on'), text: document.getElementById('barrier-text').textContent };
+    g.cheat.invincible = true;
+
+    // --- ECM crown: enemy missiles turn slower, so they are still off-course after the same flight time
+    const missileResidual = (head) => {
+      fresh({ head });
+      const q = g.projectiles.spawn({ type: 'missile', team: 'enemy', source: null, pos: new THREE.Vector3(150, 15, 0),
+        dir: new THREE.Vector3(0, 0, -1), damage: 100, speed: 120, maxSpeed: 120, turn: 2.5, target: g.player.mech, life: 6, color: 0xff6040 });
+      g.step(20);
+      const want = g.player.mech.center().sub(q.pos).normalize();
+      const r = Math.acos(Math.min(1, q.dir.dot(want)));
+      clear();
+      return r;
+    };
+    out.ecm = { plain: missileResidual('vfin'), jammed: missileResidual('jammer') };
+
+    // --- micro-missile arm: F launches six small homing missiles
+    fresh({ offhand: 'swarm' });
+    const target = dummy(0, -120);
+    g.player.lock = target.mech;
+    g.player.lockEnabled = true;
+    g.step(2);
+    T.tap('KeyF');
+    g.step(22);
+    const swarm = mine().filter((q) => q.type === 'missile');
+    out.swarm = { count: swarm.length, homing: swarm.every((q) => q.target === target.mech && q.turn > 5), cd: g.player.cannonCd, name: document.getElementById('cannon-name').textContent };
+    g.step(150);
+    out.swarm.dealt = lost(target);
+    clear();
+
+    // --- EN injector: refills boost fuel and clears an overheat, then recharges
+    fresh({ sub: 'injector' });
+    g.player.mech.en = 15;
+    g.player.mech.overheat = true;
+    T.tap('KeyV');
+    g.step(2);
+    const inj = { en: g.player.mech.en, max: g.player.mech.maxEn, overheat: g.player.mech.overheat, cd: g.player.subCd };
+    g.player.mech.en = 10;
+    T.tap('KeyV');
+    g.step(2);
+    out.injector = { ...inj, again: g.player.mech.en };
+
+    // --- shock pulse: hurts and staggers what is close, ignores what is far
+    fresh({ sub: 'pulse' });
+    const close = dummy(0, -35), distant = dummy(0, -220);
+    g.step(2);
+    T.tap('KeyV');
+    g.step(2);
+    out.pulse = { close: lost(close), stagger: close.mech.stagger, far: lost(distant), cd: g.player.subCd };
+    clear();
+
+    // --- aegis field: nothing gets through for 2.5 seconds, then it is over
+    fresh({ sub: 'field' });
+    g.cheat.invincible = false;
+    const f = g.player.mech;
+    f.invuln = 0;
+    T.tap('KeyV');
+    g.step(2);
+    const hpF = f.hp;
+    const blocked1 = f.takeDamage(500, { kind: 'beam' });
+    g.step(60 * 2);
+    const blocked2 = f.takeDamage(500, { kind: 'beam' });
+    const text = g.hud.el.subState.textContent;
+    g.step(60 * 0.7);
+    const late = f.takeDamage(100, { kind: 'beam' });
+    out.field = { blocked1, blocked2, hpKept: hpF === hpF, text, late, cd: g.player.subCd };
+    g.cheat.invincible = true;
+    clear();
+    Math.random = realRandom;
+    return out;
+  });
+  dump('expanded', expanded);
+  const E = expanded;
+  check('a shotgun blast fires seven spread pellets with a short life', E.shotgun.count === 7 && E.shotgun.spread > 0.02 && E.shotgun.life < 1, JSON.stringify(E.shotgun));
+  check('the shotgun is brutal up close and weak at range', E.shotgunNear > 1200 && E.shotgunFar < E.shotgunNear * 0.6, `${Math.round(E.shotgunNear)} near vs ${Math.round(E.shotgunFar)} far`);
+  check('the seeker rifle curves onto a target the crosshair misses, where a rifle shot misses', E.seeker.turn > 3 && E.seeker.target && E.seeker.dealt > 100 && E.rifleMiss.dealt === 0, JSON.stringify([E.seeker, E.rifleMiss.dealt]));
+  check('the arc lance pierces the first enemy and hits the one behind it; a sniper shot stops at the first', E.lance.first > 300 && E.lance.second > 300 && E.sniperInLine.first > 300 && E.sniperInLine.second === 0, JSON.stringify([E.lance, E.sniperInLine]));
+  check('the greatsword reaches an enemy that twin sabers cannot', E.swordReach > 200 && E.sabersReach === 0, `${Math.round(E.swordReach)} vs ${E.sabersReach}`);
+  const B = E.barrier;
+  check('the barrier soaks a hit completely', B.afterSoak.barrier === 140 && B.afterSoak.hp === B.afterSpill.lost + B.afterSoak.hp - B.afterSpill.lost && B.afterSpill.barrier === 0, JSON.stringify([B.afterSoak, B.afterSpill]));
+  check('a hit bigger than the barrier spills the rest into armor', Math.abs(B.afterSpill.lost - 160) < 1, `${B.afterSpill.lost}`);
+  check('the barrier waits five quiet seconds, then recharges', B.early === 0 && B.mid > 100 && B.mid < 240 && B.full === B.max && B.max === 240, JSON.stringify([B.early, B.mid, B.full]));
+  check('the HUD shows the barrier meter', B.row && B.text === '240', JSON.stringify([B.row, B.text]));
+  check('an ECM crown leaves enemy missiles further off course', E.ecm.jammed > E.ecm.plain + 0.15, `${E.ecm.plain.toFixed(2)} vs ${E.ecm.jammed.toFixed(2)} rad`);
+  check('the micro-missile arm launches six homing missiles and puts the arm on cooldown', E.swarm.count === 6 && E.swarm.homing && E.swarm.cd > 8 && E.swarm.name === 'MICRO-MISSILES', JSON.stringify(E.swarm));
+  check('the micro-missiles hit what they were sent at', E.swarm.dealt > 250, `${Math.round(E.swarm.dealt)}`);
+  check('the EN injector refills boost fuel, clears an overheat, and then recharges', E.injector.en >= E.injector.max - 5 && !E.injector.overheat && E.injector.cd > 14 && E.injector.again < 40, JSON.stringify(E.injector));
+  check('the shock pulse hurts and staggers what is close and ignores what is far', E.pulse.close > 150 && E.pulse.stagger > 0 && E.pulse.far === 0 && E.pulse.cd > 12, JSON.stringify(E.pulse));
+  check('the aegis field blocks everything for 2.5 s and then ends', E.field.blocked1 === 0 && E.field.blocked2 === 0 && /FIELD UP/.test(E.field.text) && E.field.late > 0 && E.field.cd > 19, JSON.stringify(E.field));
+
+  // ------------------------------------------------------------ 5e. the pit stop between waves
+  const pitTest = await page.evaluate(() => {
+    const g = window.__game;
+    g.cheat.invincible = true;
+    g.setBuild({ ...window.__garage.build, name: 'PITTER', head: 'vfin', torso: 'std', arms: 'std', legs: 'std', shoulder: 'std', backpack: 'std', core: 'std', pilot: 'rookie', weapon: 'rifle', offhand: 'shield', sub: 'none', tuning: { plating: 0, servos: 0, thrusters: 0, weapons: 0 } });
+    g.settings.pitStops = true;
+    g.startMission();
+    g.manual = true;
+    g.hud.reset();
+    const out = {};
+    g.step(60 * 4); // the wave-1 intro, then three drones spawn
+    out.spawned = g.enemies.length;
+    g.player.mech.place(130, -90, 0, 1.2);
+    g.player.mech.hp = g.player.mech.maxHp * 0.5;
+    const timeBefore = g.stats.time;
+    for (const e of [...g.enemies]) e.mech.takeDamage(1e6, { kind: 'beam' });
+    g.step(1);
+    out.cleared = g.missions.state;
+    g.step(60 * 3);
+    out.beforeTimer = g.state; // the clear banner is still showing
+    g.step(60 * 2);
+    out.state = g.state;
+    out.mission = g.missions.state;
+    out.hostiles = g.enemies.length;
+    out.hudHidden = document.getElementById('hud').classList.contains('hidden');
+    const hc = document.getElementById('hud2d');
+    const px = hc.getContext('2d').getImageData(0, 0, hc.width, hc.height).data;
+    out.hudPixels = 0;
+    for (let i = 3; i < px.length; i += 4) if (px[i] > 0) out.hudPixels++;
+    out.garageShown = !document.getElementById('screen-garage').classList.contains('hidden');
+    out.inGarage = g.inGarage;
+    out.timeStopped = g.stats.time - timeBefore;
+    out.card = document.getElementById('g-pit').textContent.replace(/\s+/g, ' ').trim();
+    out.go = document.getElementById('g-go').textContent;
+    out.backShown = getComputedStyle(document.getElementById('g-back')).display !== 'none';
+    out.armorShare = g.player.mech.hp / g.player.mech.maxHp;
+    out.at = [g.player.mech.pos.x, g.player.mech.pos.z];
+    return out;
+  });
+  dump('pit', pitTest);
+  check('clearing a wave starts a short clear banner and then the pit stop', pitTest.spawned === 3 && pitTest.cleared === 'clear' && pitTest.beforeTimer === 'playing' && pitTest.state === 'intermission' && pitTest.mission === 'pit', JSON.stringify([pitTest.cleared, pitTest.beforeTimer, pitTest.state, pitTest.mission]));
+  check('in the pit stop: no hostiles, the HUD is hidden and the garage screen is up', pitTest.hostiles === 0 && pitTest.hudHidden && pitTest.garageShown && pitTest.inGarage);
+  check('the HUD canvas is wiped when the pit stop begins (no stray crosshair over the mech)', pitTest.hudPixels === 0, `${pitTest.hudPixels} pixels`);
+  check('the pit card names the next wave, its hostiles and your armor', /WAVE 1 OF 5 CLEARED/.test(pitTest.card) && /NEXT: WAVE 2/.test(pitTest.card) && /PINCER/.test(pitTest.card) && /4 × DR-12 DRONE/.test(pitTest.card) && /1 × ST-21 STRIKER/.test(pitTest.card) && /ARMOR 75%/.test(pitTest.card), pitTest.card);
+  check('the only way out of the pit is to launch the next wave', pitTest.go === 'LAUNCH WAVE 2' && !pitTest.backShown);
+  check('time stands still in the pit stop', pitTest.timeStopped < 12, `${pitTest.timeStopped.toFixed(1)} s passed since the wave began`);
+  await page.click('.g-tab[data-tab="torso"]');
+  await page.locator('.opt[data-id="heavy"]').scrollIntoViewIfNeeded();
+  await page.click('.opt[data-id="heavy"]');
+  await page.click('.g-tab[data-tab="weapon"]');
+  await page.locator('.opt[data-id="scatter"]').scrollIntoViewIfNeeded();
+  await page.click('.opt[data-id="scatter"]');
+  const swapped = await page.evaluate(() => {
+    const g = window.__game, p = g.player;
+    return { torso: p.build.torso, weapon: p.weapon.name, share: p.mech.hp / p.mech.maxHp, max: p.mech.maxHp, ammo: p.ammo, mag: p.magSize,
+      stored: JSON.parse(localStorage.getItem('steel-vanguard.build') || '{}').weapon, state: g.state, keys: [...g.input.keys] };
+  });
+  check('parts can be swapped in the pit; the new machine keeps your share of armor (no free repair)', swapped.torso === 'heavy' && swapped.weapon === 'BEAM SHOTGUN' && Math.abs(swapped.share - 0.75) < 0.01 && swapped.max > 2800 && swapped.state === 'intermission', JSON.stringify(swapped));
+  check('a swapped machine comes with a full magazine, and the build is saved', swapped.ammo === swapped.mag && swapped.stored === 'scatter');
+  await page.screenshot({ path: path.join(OUT, '04_pit.png') });
+  await page.click('#g-go');
+  const pitLaunch = await page.evaluate(() => {
+    const g = window.__game, m = g.player.mech;
+    const out = { state: g.state, mission: g.missions.state, wave: g.missions.waveNumber, at: [Math.round(m.pos.x), Math.round(m.pos.z)], yaw: m.yaw, hud: !document.getElementById('hud').classList.contains('hidden'),
+      garageHidden: document.getElementById('screen-garage').classList.contains('hidden'), grounded: m.grounded, locks: window.__lockRequests, platform: g.world.garage.visible };
+    g.step(60 * 4);
+    out.afterIntro = { mission: g.missions.state, enemies: g.enemies.length };
+    return out;
+  });
+  check('LAUNCH returns to the sortie at the same spot with the next wave starting', pitLaunch.state === 'playing' && pitLaunch.mission === 'intro' && pitLaunch.wave === 2 && pitLaunch.at[0] === 130 && pitLaunch.at[1] === -90 && Math.abs(pitLaunch.yaw - 1.2) < 0.2, JSON.stringify(pitLaunch));
+  check('after launching the HUD is back, the garage is gone and the next wave spawns', pitLaunch.hud && pitLaunch.garageHidden && !pitLaunch.platform && pitLaunch.afterIntro.mission === 'combat' && pitLaunch.afterIntro.enemies === 5, JSON.stringify(pitLaunch.afterIntro));
+  check('launching recaptures the mouse', pitLaunch.locks >= 2, `${pitLaunch.locks} requests`);
+  const skip = await page.evaluate(() => {
+    const g = window.__game;
+    g.settings.pitStops = false;
+    for (const e of [...g.enemies]) e.mech.takeDamage(1e6, { kind: 'beam' });
+    g.step(1);
+    g.step(60 * 5);
+    return { state: g.state, mission: g.missions.state, wave: g.missions.waveNumber };
+  });
+  check('with pit stops switched off the next wave simply follows', skip.state === 'playing' && skip.mission === 'intro' && skip.wave === 3, JSON.stringify(skip));
+  const lastWave = await page.evaluate(() => {
+    const g = window.__game;
+    g.settings.pitStops = true;
+    g.missions.index = 3;
+    g.missions.state = 'combat';
+    g.enemies.length = 0;
+    g.step(1);
+    g.step(60 * 5);
+    const wave4Pit = g.state;
+    g.leaveIntermission(); // the next wave is the boss
+    g.missions.state = 'combat';
+    g.enemies.length = 0;
+    g.step(1);
+    g.step(60 * 5);
+    return { wave4Pit, afterBoss: g.state, finished: g.missions.finished };
+  });
+  check('a pit stop follows every wave except the last: clearing the boss wins the sortie', lastWave.wave4Pit === 'intermission' && lastWave.afterBoss === 'ended' && lastWave.finished, JSON.stringify(lastWave));
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.settings.pitStops = true;
+    for (const id of ['screen-end', 'screen-pause', 'screen-title', 'screen-garage']) document.getElementById(id).classList.add('hidden');
+    g.world.setGarage(false);
+    g.cheat.invincible = true;
+    g.setBuild({ ...window.__garage.build, weapon: 'rifle', torso: 'std', offhand: 'shield' });
+    g.player.mech.place(0, 0, 0, 0);
+  });
   check('overclock core makes BURST last 18 s instead of 12', systems.burstTime > 17 && systems.burstTimeStock > 11 && systems.burstTimeStock < 12.1 && systems.burstTime > systems.burstTimeStock + 5, `${systems.burstTime.toFixed(1)} vs ${systems.burstTimeStock.toFixed(1)}`);
   check('phase governor lengthens dash invulnerability', systems.phaseInvuln > systems.stockInvuln + 0.2, `${systems.phaseInvuln.toFixed(2)} vs ${systems.stockInvuln.toFixed(2)}`);
   check('recon head widens the radar', systems.radar === 670);
@@ -1110,6 +1456,7 @@ try {
   let shotsTaken = new Set();
   const wanted = [['01_wave_combat', (s) => s.wave === 2 && s.enemies >= 3], ['02_boss', (s) => s.wave === 5 && s.boss]];
   let finished = false;
+  const pits = []; // what the pit-stop screen said each time the bot was dropped into it
   for (let chunk = 0; chunk < 240 && !finished; chunk++) {
     const s = await page.evaluate(() => {
       const g = window.__game, T = window.__t;
@@ -1118,10 +1465,10 @@ try {
         g.step(1);
         window.__wavesSeen.add(g.missions.waveNumber);
         if (!T.allFinite()) return { bad: true };
-        if (window.__ended) break;
+        if (window.__ended || g.state === 'intermission') break;
       }
       return {
-        ended: !!window.__ended, wave: g.missions.waveNumber, enemies: g.enemies.length, time: g.stats.time,
+        state: g.state, ended: !!window.__ended, wave: g.missions.waveNumber, enemies: g.enemies.length, time: g.stats.time,
         boss: g.enemies.some((e) => e.mech.def.boss), kills: g.stats.kills, hp: g.player.mech.hp, lock: !!g.player.lock,
       };
     });
@@ -1129,12 +1476,19 @@ try {
     for (const [name, cond] of wanted) {
       if (!shotsTaken.has(name) && cond(s)) { shotsTaken.add(name); await shot(name); }
     }
+    if (s.state === 'intermission') {
+      // between waves the bot visits the pit stop, then launches the next wave with the real button
+      pits.push(await page.evaluate(() => ({ shown: !document.getElementById('screen-garage').classList.contains('hidden'), go: document.getElementById('g-go').textContent, wave: window.__game.missions.waveNumber })));
+      await page.click('#g-go');
+      continue;
+    }
     if (s.ended) finished = true;
     if (chunk % 10 === 0) console.log(`      …wave ${s.wave}, ${s.enemies} hostile, ${s.kills} kills, t=${s.time.toFixed(0)}s, armor ${Math.round(s.hp)}`);
   }
   const result = await page.evaluate(() => ({ r: window.__ended, waves: [...window.__wavesSeen], state: window.__game.state }));
   check('bot clears all five waves and wins', !!result.r && result.r.victory === true, result.r ? `rank ${result.r.rank}` : 'mission never ended');
   check('every wave was reached', [1, 2, 3, 4, 5].every((w) => result.waves.includes(w)), `waves ${result.waves}`);
+  check('the bot visited the pit stop after waves 1 to 4 and launched each next wave from its screen', pits.length === 4 && pits.every((p, i) => p.shown && p.wave === i + 1 && p.go === `LAUNCH WAVE ${i + 2}`), JSON.stringify(pits));
   check('result screen reports stats', !!result.r && result.r.rows.length >= 6 && result.r.rows.some((r) => r[0] === 'Total'));
   await page.waitForTimeout(300);
   check('end screen is displayed', await page.isVisible('#screen-end'));

@@ -1,6 +1,6 @@
-// The sortie: five waves, resupply between them, and a boss at the end.
+// The sortie: five waves, resupply and a pit stop (the garage) between them, and a boss at the end.
 
-import { WAVES } from './data.js';
+import { MECHS, WAVES } from './data.js';
 import { createEnemy } from './ai.js';
 
 const INTRO_TIME = 2.8;
@@ -14,7 +14,7 @@ export class Missions {
 
   reset() {
     this.index = -1;
-    this.state = 'idle'; // idle | intro | combat | clear | done
+    this.state = 'idle'; // idle | intro | combat | clear | pit | done
     this.timer = 0;
     this.finished = false;
   }
@@ -26,6 +26,23 @@ export class Missions {
   start() {
     this.reset();
     this._next();
+  }
+
+  /** The cleared wave and the one that follows it, for the pit-stop screen. */
+  pitInfo() {
+    const i = this.index;
+    const next = WAVES[i + 1];
+    const hostiles = next ? next.spawn.map(([type, count]) => ({ name: MECHS[type].name, count })) : [];
+    return {
+      cleared: i + 1,
+      total: WAVES.length,
+      next: next ? { number: i + 2, title: next.title, boss: !!next.boss, hostiles } : null,
+    };
+  }
+
+  /** Leave the pit stop: the next wave begins. */
+  resume() {
+    if (this.state === 'pit') this._next();
   }
 
   _next() {
@@ -87,14 +104,21 @@ export class Missions {
           const last = this.index === WAVES.length - 1;
           if (!last) {
             game.player.resupply(game.player.stats.resupplyHeal);
-            game.hud.message('WAVE CLEARED', 'good', `+${bonus} BONUS  ·  ARMOR REPAIRED`);
+            game.hud.message('WAVE CLEARED', 'good', `+${bonus} BONUS  ·  ARMOR REPAIRED${game.settings.pitStops ? '  ·  PIT STOP NEXT' : ''}`);
             game.audio.ui('clear');
           }
         }
         break;
       case 'clear':
         this.timer -= dt;
-        if (this.timer <= 0) this._next();
+        if (this.timer <= 0) {
+          if (this.index < WAVES.length - 1 && game.settings.pitStops) {
+            this.state = 'pit'; // the game takes over until the player launches the next wave
+            game.enterIntermission();
+          } else {
+            this._next();
+          }
+        }
         break;
       default:
     }

@@ -1,9 +1,10 @@
 # Steel Vanguard
 
 A 3D third-person mobile-suit combat game that runs in the browser, on desktop and on phones. **Build your own mech piece by piece** in the
-garage (eleven slots, tuning points and paint, balanced by a load limit and a power budget), then take it through a dusk-lit colony city:
+garage (eleven slots and 75 parts, tuning points and paint, balanced by a load limit and a power budget), then take it through a dusk-lit colony city:
 boost over rooftops, lock on, burn enemies down with your weapon, homing missiles and a three-hit beam-saber combo,
-and survive five waves ending in a fight with the **Crimson Baron**.
+and survive five waves ending in a fight with the **Crimson Baron**. Between waves you drop into a **pit-stop garage**
+to re-fit your mech for what comes next.
 
 Everything is generated in code. There are no model, texture or audio files: mechs are built from primitives,
 the city and sky are procedural, and every sound effect and the music are synthesised with WebAudio.
@@ -31,8 +32,8 @@ described below. There is no gamepad support.
 | Left mouse | Your gun (auto-reloads). With **Twin Sabers** equipped it swings the saber instead |
 | Right mouse | Beam saber. Lunges at the target; press again mid-swing to chain a 3-hit combo |
 | `E` | Missile salvo (4 homing missiles; charges recharge) |
-| `F` | Shoulder cannon, if you fitted one (a heavy splash shell, 7 s recharge) |
-| `V` | Your sub-weapon, if you fitted one (vulcans, flares or repair kit) |
+| `F` | Your off-hand ability, if you fitted one (shoulder cannon: a heavy splash shell; micro-missile arm: six small homing missiles) |
+| `V` | Your sub-weapon, if you fitted one (vulcans, flares, repair kit, EN injector, shock pulse or aegis field) |
 | `Q` | Toggle lock-on |
 | `Tab` | Switch lock-on target |
 | `R` | Reload |
@@ -58,12 +59,30 @@ to zero overheats the thrusters until they recover. The burst gauge fills as you
 - **CR-00 Crimson Baron**: boss ace. Rifle volleys, saber rushes, homing missile salvos from 66% armor, and a
   faster, more aggressive final phase below 33%. It dodges your beam shots.
 
-Between waves your ammo and missiles are restocked and 25% of your armor is repaired. Finishing the sortie
-gives a rank (S/A/B/C) from combat score, clear time and remaining armor. Kills in quick succession build a score
-multiplier.
+Clearing a wave restocks your ammo and missiles and repairs 25% of your armor, then, after a short banner, you
+drop into the **pit stop**.
 
-The pause menu has look sensitivity, volume, a shadows toggle and a resolution scale. Lower the last two if
-the game runs slowly on integrated graphics. Settings are remembered in `localStorage`.
+#### The pit stop
+
+After waves 1 to 4 the game cuts to the garage, standing on the turntable, with a card at the top of the parts panel
+that shows the wave you just cleared, **what the next wave contains** (so you can fit for it: more armor for the
+Bulwarks, a shotgun for the drones, a jammer against the Baron's missiles) and your armor and score. It is the full
+garage: swap any part, spend tuning points, repaint, or press **Randomize** for a gamble.
+
+- Time stands still; the clock and your rank do not count pit-stop time.
+- **No free repairs.** The new machine keeps the share of armor the old one had (50% before a swap is 50% after, of
+  the new, perhaps larger, armor), and the garage cannot undo damage. Your pilot's wave repair has already happened.
+- Whatever you fit comes with a full magazine and a full set of missiles and cooldowns.
+- Your changes are saved, so the next sortie starts with the build you finished with.
+- There is no way back to the title; the only exit is **LAUNCH WAVE N**, which puts you back exactly where you were
+  standing and starts the next wave. After the Baron there is no pit stop: you win.
+- Prefer a straight run? Switch **Pit stops** off in the pause menu and waves follow each other as before.
+
+Finishing the sortie gives a rank (S/A/B/C) from combat score, clear time and remaining armor. Kills in quick
+succession build a score multiplier.
+
+The pause menu has look sensitivity, volume, a shadows toggle, pit stops, and a resolution scale. Lower the shadows
+and resolution if the game runs slowly on integrated graphics. Settings are remembered in `localStorage`.
 
 ### Playing on a phone or tablet
 
@@ -106,18 +125,23 @@ saber).
 
 | Slot | Options |
 | --- | --- |
-| **Head** | V-Fin Sensor (balanced) · Mono-Eye Scout (light, tighter missile homing) · Commander Horn (faster burst gauge, stronger saber) · Sentinel Visor (tougher, harder to stagger) · Recon Array (much longer radar range) |
-| **Torso** | Standard · Light Frame (fast, fragile, little power) · Heavy Plate (very tough, heavy) · Reactor Core (big power output, boost fuel, EN recovery) |
-| **Arms** | Standard · Assault Bracers (armor, saber; slower reloads) · Precision Arms (faster fire and reload) · Blade Arms (big saber damage) |
-| **Legs** | Standard · Sprint (fast, cheap dashes, low load limit) · Tank (armor, stagger resistance, highest load limit; slow) · Jump (climb and air EN recovery) |
-| **Shoulder** | Standard · Bulwark Shells (armor, some gunfire absorption) · Ram Spikes (saber bonus) · Vernier Shoulders (turning and cheaper, faster dashes) |
-| **Backpack** | Standard · Heavy Booster (boost fuel, climb) · Missile Pod (third missile charge, harder hits) · Wing Vernier (fast cheap dashes; fragile) |
-| **Core** | Standard · Capacitor Bank (boost fuel and EN recovery) · Overclock Unit (BURST lasts 18 s) · Nano-Repair Core (mends 7 armor/s after 3 s without a hit) · Phase Governor (0.45 s dash invulnerability) |
-| **Pilot** | Rookie · Gunner (reload, fire rate) · Duelist (saber, dash invulnerability) · Engineer (half your armor back between waves) · Evader (cheap dashes, turning) · Veteran (stagger resistance, burst gain) |
-| **Weapon** | Beam Rifle · Rapid Beam Gun (30 rounds, low damage) · Blast Bazooka (3 explosive shells) · Beam Sniper (very fast heavy beams) · Twin Sabers (no gun, big melee bonus, deflects some gunfire) |
-| **Off-hand** | Beam Shield (absorbs 22% of gunfire, missiles and shells) · Shoulder Cannon (`F`) · None (lighter) |
-| **Sub-weapon** | None · Head Vulcans (hold `V`: a stream of rounds that also **shoots down missiles**; overheats) · Decoy Flares (`V`: detonates every missile homing on you; 12 s recharge) · Repair Kit (`V`: 15% armor over 4 s, one use per wave) |
+| **Head** | V-Fin Sensor (balanced) · Mono-Eye Scout (light, tighter missile homing) · Commander Horn (faster burst gauge, stronger saber) · Sentinel Visor (tougher, harder to stagger) · Recon Array (much longer radar range) · **Ace Visor** (quicker trigger, faster burst gauge) · **ECM Crown** (enemy missiles lose 40% of their turning) |
+| **Torso** | Standard · Light Frame (fast, fragile, little power) · Heavy Plate (very tough, heavy) · Reactor Core (big power output, boost fuel, EN recovery) · **Missile Bay Chest** (an extra missile charge, harder missiles) · **Command Chest** (radar, burst gain, extra armor back between waves) |
+| **Arms** | Standard · Assault Bracers (armor, saber; slower reloads) · Precision Arms (faster fire and reload) · Blade Arms (big saber damage) · **Guard Arms** (armor, stagger resistance, a little gunfire absorption) · **Heavy Recoil Arms** (gun damage +12%, slower cycling) |
+| **Legs** | Standard · Sprint (fast, cheap dashes, low load limit) · Tank (armor, stagger resistance, highest load limit; slow) · Jump (climb and air EN recovery) · **Strider** (fast walking, longer dash) · **Siege** (very hard to stagger, steadier gun; slow) |
+| **Shoulder** | Standard · Bulwark Shells (armor, some gunfire absorption) · Ram Spikes (saber bonus) · Vernier Shoulders (turning and cheaper, faster dashes) · **Missile Racks** (an extra missile charge, tighter homing) · **Aegis Emitters** (absorb 10% of gunfire) |
+| **Backpack** | Standard · Heavy Booster (boost fuel, climb) · Missile Pod (third missile charge, harder hits) · Wing Vernier (fast cheap dashes; fragile) · **Generator Pack** (+28 power output) · **Armor Backplate** (armor and stagger resistance; weaker climb) |
+| **Core** | Standard · Capacitor Bank (boost fuel and EN recovery) · Overclock Unit (BURST lasts 18 s) · Nano-Repair Core (mends 7 armor/s after 3 s without a hit) · Phase Governor (0.45 s dash invulnerability) · **Burst Siphon** (burst gauge fills 50% faster) · **Barrier Generator** (a 240-point barrier that soaks damage first and recharges 5 s after the last hit) |
+| **Pilot** | Rookie · Gunner (reload, fire rate) · Duelist (saber, dash invulnerability) · Engineer (half your armor back between waves) · Evader (cheap dashes, turning) · Veteran (stagger resistance, burst gain) · **Marksman** (gun damage +12%, bigger radar) · **Tactician** (harder, tighter missiles) · **Guardian** (stagger resistance, 5% absorption, extra wave repair) |
+| **Weapon** | Beam Rifle · Rapid Beam Gun (30 rounds, low damage) · Blast Bazooka (3 explosive shells) · Beam Sniper (very fast heavy beams) · Twin Sabers (no gun, big melee bonus, deflects some gunfire) · **Beam Shotgun** (seven pellets: brutal up close, thin at range) · **Seeker Rifle** (beams that curve onto your lock, or whatever is near the crosshair) · **Arc Lance** (a heavy beam that pierces every enemy in its line) · **Greatsword** (no gun, the biggest melee bonus and reach, deflects 28% of gunfire; heavy) |
+| **Off-hand** | Beam Shield (absorbs 22% of gunfire, missiles and shells) · Shoulder Cannon (`F`) · None (lighter) · **Parry Buckler** (12% absorption, light, a little melee) · **Tower Shield** (30% absorption and stagger resistance; heavy and slow) · **Micro-Missile Arm** (`F`: six small homing missiles, 9 s recharge) |
+| **Sub-weapon** | None · Head Vulcans (hold `V`: a stream of rounds that also **shoots down missiles**; overheats) · Decoy Flares (`V`: detonates every missile homing on you; 12 s recharge) · Repair Kit (`V`: 15% armor over 4 s, one use per wave) · **EN Injector** (`V`: refills boost fuel and clears an overheat; 16 s) · **Shock Pulse** (`V`: damages and staggers everything near you; 14 s) · **Aegis Field** (`V`: 2.5 s of total invulnerability; 22 s) |
 | **Paint** | Six schemes or your own four colours, plus energy colour (beams, saber, eyes) and thruster colour |
+
+Absorption from every source (shields, saber deflection, shoulder shells, emitters, guard arms, some pilots) adds up, capped at 35%. Missile
+charges cap at four, and the burst gauge never fills more than twice as fast. Parts you have not tried are the fun part: a barrier core with a
+tower shield and siege legs is a wall, but it is also heavy enough to be overloaded, and a shotgun brawler on a light frame
+is quick and lethal but one mistake from scrap.
 
 ### Two budgets and a tuning pool
 
@@ -125,7 +149,7 @@ saber).
   Weight scales your speed on its own (a stock build is the reference at 100%). Past the limit you also pay
   1.4% speed and dash speed per unit over, down to a floor of 55%. Tank legs carry the most, sprint legs the least.
 - **Power.** Your **torso supplies power** and most parts **draw** it (shown on the POWER bar). If the draw
-  exceeds the supply, EN recovery, weapon cycling and every cooldown (missiles, shoulder cannon, sub-weapon) slow
+  exceeds the supply, EN recovery, weapon cycling and every cooldown (missiles, off-hand ability, sub-weapon) slow
   down, and the penalty is steeper than the shortfall itself (never below 40%). The reactor
   torso supplies the most; stacking a booster, jump legs, a sniper and a cannon on a light frame will starve it.
 - **Tuning.** Twelve free points across four dials, at most six on one: **Plating** (+4% armor per point),
@@ -135,7 +159,7 @@ saber).
 The garage warns in red when you are overloaded or power-starved, and the HUD repeats the warning during a sortie.
 You can name your mech, press **Randomize** for ideas, or **Reset** to the stock Vanguard. Your build is saved in the
 browser (`localStorage`) and used for every sortie; saves from before a slot existed load with sensible defaults. Open
-the garage from the title screen or from the results screen.
+the garage from the title screen or from the results screen, or meet it again in the pit stop between waves.
 
 ## Project layout
 
@@ -154,11 +178,11 @@ src/camera.js             chase camera with lock-on framing and trauma shake
 src/input.js              keyboard, mouse and touch state in one key set (plus the analog stick axis)
 src/touch.js              on-screen touch controls: floating stick, look drag, tap-to-target, action buttons
 src/hud.js                DOM bars plus canvas reticle, radar and damage numbers
-src/missions.js           wave director
+src/missions.js           wave director; hands over to the pit stop between waves
 src/audio.js              synthesised sound effects and music
 src/data.js               enemy mech stats, palettes and wave definitions
 src/parts.js              garage parts catalogue, load/power budgets, tuning, stat derivation, build validation (no browser code)
-src/garage.js             the garage screen: tabs, option cards, stat bars with limit markers, tuning, paint, saved builds
+src/garage.js             the garage screen (also the pit stop): tabs, option cards, stat bars with limit markers, tuning, paint, saved builds
 vendor/three/             three.js r170 (MIT), vendored so the game runs offline
 scripts/test.mjs          end-to-end test suite (desktop)
 scripts/test-touch.mjs    phone test: real multi-touch in an emulated phone, layouts at several sizes
@@ -175,8 +199,12 @@ sanitising), then loads the game in headless Chromium and plays it: the garage U
 preview, paint, rename, random/reset, saved builds across a reload), movement, boosting, landing on roofs, building
 collision (including a randomised stress run), every weapon, the shield, shoulder cannon, missile pod and weight
 effects in actual combat (vulcans shooting down missiles, flares, the repair kit, regen core, overload and
-power shortfalls, tuning), 25 random builds through a short fight each, each enemy type and the boss, a full
-scripted playthrough to victory, a defeat and retry, and the pause/options UI. It fails on any console error.
+power shortfalls, tuning), each new part's mechanic in combat (shotgun pellets, the seeker curving onto a target,
+the lance piercing, the greatsword's reach, the barrier's soak and recharge, ECM jamming, micro-missiles, the EN
+injector, shock pulse and aegis field), the pit stop (the card, no free repairs, launching back to the same spot, the
+setting to turn it off, no pit after the boss), 25 random builds through a short fight each, each enemy type and the
+boss, a full scripted playthrough to victory through four pit stops, a defeat and retry, and the pause/options UI. It
+fails on any console error.
 
 `scripts/test-touch.mjs` does the same for phones: an emulated touch device with real multi-touch (both thumbs at once),
 the title, garage, HUD, pause and end screens at 844x390 and 667x375, every on-screen control, the analog stick, tap to

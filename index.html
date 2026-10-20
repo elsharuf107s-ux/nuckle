@@ -47,6 +47,7 @@
       <div id="build-flags"></div>
       <div class="meter"><span>ARMOR</span><div class="bar hp"><i id="hp-fill"></i></div><b id="hp-text">2600</b></div>
       <div class="meter"><span>BOOST</span><div class="bar en"><i id="en-fill"></i></div><b id="en-text">100</b></div>
+      <div class="meter" id="barrier-row"><span>BARRIER</span><div class="bar barrier"><i id="barrier-fill"></i></div><b id="barrier-text">0</b></div>
       <div class="meter"><span>BURST</span><div class="bar burst"><i id="burst-fill"></i></div><b id="burst-text">0%</b></div>
     </div>
 
@@ -62,7 +63,7 @@
         <div id="missile-pips"></div>
       </div>
       <div class="weapon" id="cannon-row">
-        <div class="wname"><span>SHOULDER CANNON</span> <kbd>F</kbd></div>
+        <div class="wname"><span id="cannon-name">SHOULDER CANNON</span> <kbd>F</kbd></div>
         <div class="bar cannon"><i id="cannon-fill"></i></div>
       </div>
       <div class="weapon" id="sub-row">
@@ -116,6 +117,7 @@
         <label>Look sensitivity <input id="opt-sens" type="range" min="0.4" max="2.5" step="0.05" value="1"></label>
         <label>Volume <input id="opt-volume" type="range" min="0" max="1" step="0.05" value="0.7"></label>
         <label>Shadows <input id="opt-shadows" type="checkbox" checked></label>
+        <label>Pit stops <input id="opt-pit" type="checkbox" checked></label>
         <label>Resolution
           <select id="opt-scale">
             <option value="1">100%</option>
@@ -146,6 +148,12 @@
   <div id="screen-garage" class="hidden">
     <div class="g-panel g-left">
       <div class="g-title">GARAGE</div>
+      <div id="g-pit" class="g-pit hidden">
+        <div class="p-head"><b>PIT STOP</b><span id="p-cleared">WAVE 1 CLEARED</span></div>
+        <div id="p-next" class="p-next">NEXT: WAVE 2</div>
+        <div id="p-hostiles" class="p-hostiles"></div>
+        <div id="p-status" class="p-status"></div>
+      </div>
       <label class="g-name">CALLSIGN <input id="g-name" type="text" maxlength="14" spellcheck="false" autocomplete="off"></label>
       <div id="g-tabs" class="g-tabs"></div>
       <div id="g-options" class="g-options"></div>
@@ -173,6 +181,7 @@
     </div>
   </div>
 
+  <div id="fade"></div>
   <div id="rotate"><div><b>ROTATE YOUR DEVICE</b><span>Steel Vanguard is played in landscape.</span></div></div>
 
   <script type="module" src="src/main.js"></script>

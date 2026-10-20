@@ -23,6 +23,7 @@ touch.onPause = () => pauseUI();
 const garage = new Garage(game, {
   onBack: () => closeGarage(),
   onSortie: () => {
+    if (garage.pit) { launchUI(); return; }
     garage.close();
     startUI();
   },
@@ -35,6 +36,14 @@ function updateTitleBuild(build = garage.build) {
   $('title-build').textContent = `CURRENT BUILD  ·  ${describeBuild(build)}`;
 }
 updateTitleBuild();
+
+// A quick fade-from-black masks the cut between the sortie and the pit stop.
+function flash() {
+  const f = $('fade');
+  f.classList.remove('go');
+  void f.offsetWidth; // restart the animation
+  f.classList.add('go');
+}
 
 function openGarage() {
   show('screen-title', false);
@@ -70,6 +79,21 @@ function resumeUI() {
   show('screen-pause', false);
   game.resume();
   lockPointer();
+}
+
+// The pit stop between waves: the game switches state, this puts the garage on screen over it.
+game.onIntermission = (info) => {
+  if (document.pointerLockElement) document.exitPointerLock();
+  touch.releaseAll();
+  garage.openPit(info);
+  flash();
+};
+
+function launchUI() {
+  garage.closePit();
+  game.leaveIntermission();
+  lockPointer();
+  flash();
 }
 
 function startUI() {
@@ -141,6 +165,7 @@ bindOption('opt-sens', 'sens', (v) => { game.rig.sensitivity = 0.0022 * Number(v
 bindOption('opt-volume', 'volume', (v) => game.audio.setVolume(Number(v)));
 bindOption('opt-shadows', 'shadows', (on) => game.applySettings({ shadows: on }), (el) => el.checked);
 bindOption('opt-scale', 'scale', (v) => game.applySettings({ scale: Number(v) }));
+bindOption('opt-pit', 'pit', (on) => { game.settings.pitStops = on; }, (el) => el.checked);
 bindOption('opt-assist', 'assist', (on) => { game.settings.aimAssist = on; }, (el) => el.checked);
 bindOption('opt-tscale', 'tscale', (v) => touch.setUserScale(v));
 
@@ -171,7 +196,7 @@ const spread = () => {
 };
 let lastSpread = 0;
 canvas.addEventListener('pointerdown', (e) => {
-  if (game.state !== 'garage') return;
+  if (!game.inGarage) return;
   fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   game.garageCam.dragging = true;
   canvas.setPointerCapture?.(e.pointerId);
@@ -179,7 +204,7 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 canvas.addEventListener('pointermove', (e) => {
   const f = fingers.get(e.pointerId);
-  if (!f || game.state !== 'garage') return;
+  if (!f || !game.inGarage) return;
   const dx = e.clientX - f.x, dy = e.clientY - f.y;
   f.x = e.clientX;
   f.y = e.clientY;
@@ -198,7 +223,7 @@ const endDrag = (e) => {
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 canvas.addEventListener('wheel', (e) => {
-  if (game.state !== 'garage') return;
+  if (!game.inGarage) return;
   e.preventDefault();
   game.garageZoom(e.deltaY);
 }, { passive: false });

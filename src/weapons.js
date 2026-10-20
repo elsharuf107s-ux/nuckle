@@ -67,7 +67,8 @@ export class Projectiles {
 
   /**
    * opts: type, team ('player'|'enemy'), source (Mech), pos, dir (unit), damage, color,
-   *       speed?, life?, radius?, knock?, target? (Mech, for homing), turn? (rad/s), splash? { radius, damage }
+   *       speed?, life?, radius?, knock?, target? (Mech, for homing), turn? (rad/s), splash? { radius, damage },
+   *       pierce? (passes through every mech it hits, once each), intercept? (point defence)
    */
   spawn(opts) {
     const base = TYPES[opts.type];
@@ -89,6 +90,7 @@ export class Projectiles {
       delay: opts.delay ?? 0,
       splash: opts.splash ?? null,
       intercept: opts.intercept ?? false, // point-defence rounds (head vulcans) that shoot down missiles
+      pierce: opts.pierce ? new Set() : null, // piercing shots remember who they have already hit
       dead: false,
       color: opts.color,
       trailT: 0,
@@ -118,7 +120,9 @@ export class Projectiles {
         const cos = Math.min(1, Math.max(-1, p.dir.dot(want)));
         const ang = Math.acos(cos);
         if (ang > 1e-4) {
-          const k = Math.min(1, (p.turn * dt) / ang);
+          // an ECM crown on the target dulls enemy missiles' turning
+          const turn = p.team === 'enemy' ? p.turn * (1 - (p.target.def?.jam ?? 0)) : p.turn;
+          const k = Math.min(1, (turn * dt) / ang);
           p.dir.lerp(want, k).normalize();
         }
       }
@@ -145,6 +149,11 @@ export class Projectiles {
         for (const m of mechs) {
           if (m.dead || m.team === p.team) continue;
           if (m.hitBySegment(a.x, a.y, a.z, b.x, b.y, b.z, p.radius)) {
+            if (p.pierce) {
+              // a piercing beam hurts each mech once and keeps going
+              if (!p.pierce.has(m)) { p.pierce.add(m); this._impact(p, b, m); }
+              continue;
+            }
             this._impact(p, b, m);
             hit = true;
             break;

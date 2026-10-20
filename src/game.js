@@ -20,7 +20,7 @@ export class Game {
   constructor(canvas) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.settings = { shadows: true, scale: 1, aimAssist: true }; // graphics options (see applySettings) and the touch aim assist
+    this.settings = { shadows: true, scale: 1, aimAssist: true, pitStops: true }; // graphics (see applySettings), touch aim assist, pit stops between waves
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -31,7 +31,7 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(66, 1, 0.5, 7000);
     this.rig = new CameraRig(this.camera);
 
-    this.state = 'title'; // title | garage | playing | paused | ended
+    this.state = 'title'; // title | garage | playing | paused | intermission (the pit stop between waves) | ended
     this.garageCam = { yaw: Math.PI * 0.82, pitch: 0.16, dist: 54, dragging: false };
     this.garagePose = 'idle'; // idle | saber | boost (preview only)
     this.time = 0;
@@ -46,6 +46,8 @@ export class Game {
     this.stats = this._freshStats();
     this.combo = { count: 0, t: 0 };
     this.onEnd = null; // set by main.js: (result) => void, called once the end-of-mission delay has passed
+    this.onIntermission = null; // set by main.js: (info) => void, called when the pit stop begins
+    this.pit = null;           // where the mech was standing when it went into the pit
     this._endShown = false;
 
     this.input = new Input();
@@ -245,7 +247,7 @@ export class Game {
     this._mechs.push(player.mech);
     for (const e of this.enemies) this._mechs.push(e.mech);
 
-    if (this.state === 'title' || this.state === 'garage') {
+    if (this.state === 'title' || this.inGarage) {
       this._updateShowroom(dt);
       this.world.update(dt, player.mech.pos, this.camera.position);
       this.fx.update(dt);
@@ -282,17 +284,93 @@ export class Game {
     this.rig.update(dt, player, this.world);
     this.world.update(dt, player.mech.pos, this.camera.position);
     this.audio.setListener(player.mech.pos.x, player.mech.pos.z, this.rig.yaw);
-    this.hud.update(dt);
+    if (this.state !== 'intermission') this.hud.update(dt); // the pit stop began this step: the HUD is already hidden
     this.input.endStep();
   }
 
   // ------------------------------------------------------------------ garage / showroom
 
-  /** Swap in a garage build (replaces the player's mech, stats and loadout). */
+  /** The garage screen is up: from the title or results screens, or in the pit stop between waves. */
+  get inGarage() {
+    return this.state === 'garage' || this.state === 'intermission';
+  }
+
+  /**
+   * Swap in a garage build (replaces the player's mech, stats and loadout). In the pit stop the new
+   * machine inherits the old one's share of armor, so swapping parts is not a free repair.
+   */
   setBuild(build) {
+    const old = this.player.mech;
+    const share = this.state === 'intermission' ? old.hp / old.maxHp : null;
     this.player.applyBuild(build);
+    if (share !== null) this.player.mech.hp = Math.max(1, this.player.mech.maxHp * share);
     this.player.mech.update(STEP, {});
     this.hud.configure();
+  }
+
+  // ------------------------------------------------------------------ pit stop
+
+  /** What the pit-stop screen shows: the wave just cleared, the next one, and the state of the machine. */
+  pitInfo() {
+    const m = this.player.mech;
+    return {
+      ...this.missions.pitInfo(),
+      armor: Math.round((m.hp / m.maxHp) * 100),
+      score: this.stats.score,
+      kills: this.stats.kills,
+    };
+  }
+
+  /** Between waves: drop into the garage. Armor and position are kept; ammo is restocked by any build change. */
+  enterIntermission() {
+    if (this.state !== 'playing') return;
+    const p = this.player, m = p.mech;
+    this.pit = { x: m.pos.x, z: m.pos.z, yaw: m.yaw };
+    for (const e of this.enemies) e.mech.destroy();
+    this.enemies.length = 0;
+    this.projectiles.clear();
+    this.fx.clear();
+    this.state = 'intermission';
+    this.input.enabled = false;
+    this.input.clear();
+    this.audio.setBoost(0);
+    this.audio.setSaber(false);
+    this.audio.setMusicLevel(0.12);
+    this.hud.show(false);
+    this.world.setGarage(true);
+    this.garagePose = 'idle';
+    this.garageCam.dragging = false;
+    p.lock = null;
+    p.melee = null;
+    p.fieldT = 0;
+    m.setSaber(false);
+    m.tintColor = null;
+    m.place(0, 0, 0, 0);
+    this.onIntermission?.(this.pitInfo());
+  }
+
+  /** Back out of the pit: the mech returns to where it stood and the next wave begins. */
+  leaveIntermission() {
+    if (this.state !== 'intermission') return;
+    const p = this.player, m = p.mech, pit = this.pit;
+    this.world.setGarage(false);
+    m.setSaber(false);
+    m.place(pit.x, pit.z, 0, pit.yaw);
+    this.garagePose = 'idle';
+    this.rig.reset(pit.yaw);
+    p.lock = null;
+    p.lockEnabled = true;
+    p.resupply(0); // a full loadout whatever was fitted
+    this.pit = null;
+    this.input.clear();
+    this.input.enabled = true;
+    this.state = 'playing';
+    this.hud.show(true);
+    this.hud.configure();
+    this.audio.setMusicLevel(0.3);
+    this.acc = 0;
+    this.last = performance.now();
+    this.missions.resume();
   }
 
   enterGarage() {
@@ -328,7 +406,7 @@ export class Game {
     const mech = this.player.mech;
     const c = mech.pos;
     const cam = this.camera;
-    const garage = this.state === 'garage';
+    const garage = this.inGarage;
     const fov = garage ? 42 : 66;
     if (Math.abs(cam.fov - fov) > 0.01) {
       cam.fov = fov;
@@ -431,6 +509,13 @@ export class Game {
       this.audio.playerHit();
       this.shake(clamp(amount / 350, 0.15, 0.9));
     }
+  }
+
+  /** A barrier soaked part of a hit: a cyan spark and a tick, without the red flash of real damage. */
+  onBarrierHit(mech, amount, info) {
+    this.fx.sparks(info.point ?? mech.center(), null, 10, [0.4, 0.9, 1]);
+    this.audio.hit(mech.pos);
+    if (mech.team === 'player') this.shake(clamp(amount / 600, 0.05, 0.4));
   }
 
   onDestroyed(mech) {

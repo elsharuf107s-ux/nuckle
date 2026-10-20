@@ -16,6 +16,8 @@ export class Hud {
       root: $('hud'), waveTitle: $('wave-title'), enemies: $('enemies-left'), score: $('score'), clock: $('clock'),
       hpFill: $('hp-fill'), hpText: $('hp-text'), hpBar: $('hp-fill').parentElement,
       enFill: $('en-fill'), enText: $('en-text'), enBar: $('en-fill').parentElement,
+      barrierRow: $('barrier-row'), barrierFill: $('barrier-fill'), barrierText: $('barrier-text'), barrierBar: $('barrier-fill').parentElement,
+      cannonName: $('cannon-name'),
       burstFill: $('burst-fill'), burstText: $('burst-text'), burstBar: $('burst-fill').parentElement, burstReady: $('burst-ready'),
       ammo: $('ammo-pips'), ammoCount: $('ammo-count'), missiles: $('missile-pips'), reload: $('reload-note'),
       weaponName: $('weapon-name'), weaponKey: $('weapon-key'), gunRow: $('gun-row'), saberRow: $('saber-row'),
@@ -62,6 +64,8 @@ export class Hud {
     e.reload.style.display = saberOnly ? 'none' : '';
     e.saberRow.style.display = saberOnly ? 'none' : '';
     e.cannonRow.style.display = p.ability ? '' : 'none';
+    if (p.ability) e.cannonName.textContent = p.ability.name;
+    e.barrierRow.classList.toggle('on', p.stats.barrier > 0);
     e.subRow.style.display = p.sub ? '' : 'none';
     if (p.sub) e.subName.textContent = p.sub.name;
 
@@ -84,6 +88,7 @@ export class Hud {
 
   show(on) {
     this.el.root.classList.toggle('hidden', !on);
+    this.canvas.style.visibility = on ? '' : 'hidden'; // belt and braces: nothing can show through even if a frame is stale
     if (!on) this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
@@ -151,6 +156,11 @@ export class Hud {
     e.hpBar.classList.toggle('low', hpK < 0.25);
     e.hpText.textContent = String(Math.ceil(mech.hp));
     e.enFill.style.width = `${(mech.en / mech.maxEn) * 100}%`;
+    if (mech.barrierMax > 0) {
+      e.barrierFill.style.width = `${(mech.barrier / mech.barrierMax) * 100}%`;
+      e.barrierText.textContent = String(Math.round(mech.barrier));
+      e.barrierBar.classList.toggle('down', mech.barrier <= 0);
+    }
     e.enBar.classList.toggle('overheat', mech.overheat);
     e.enText.textContent = mech.overheat ? 'HEAT' : String(Math.ceil(mech.en));
     const burstK = player.burstActive ? player.burstT / 12 : player.burst / 100;
@@ -219,9 +229,10 @@ export class Hud {
       k = player.subHeat;
       danger = player.subLocked;
       text = danger ? 'OVERHEATED' : k > 0.02 ? 'HEAT' : 'READY';
-    } else if (sub.kind === 'flare') {
+    } else if (sub.kind === 'flare' || sub.kind === 'injector' || sub.kind === 'pulse' || sub.kind === 'field') {
       k = 1 - player.subCd / sub.cooldown;
       text = player.subCd > 0 ? `RECHARGING ${Math.ceil(player.subCd)}s` : 'READY';
+      if (sub.kind === 'field' && player.fieldT > 0) { k = player.fieldT / sub.duration; text = 'FIELD UP'; }
     } else {
       k = player.repairT > 0 ? player.repairT / sub.duration : player.repairCharges > 0 ? 1 : 0;
       text = player.repairT > 0 ? 'REPAIRING' : player.repairCharges > 0 ? `${player.repairCharges} USE LEFT` : 'USED';

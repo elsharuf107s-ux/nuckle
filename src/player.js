@@ -54,6 +54,7 @@ export class Player {
 
     this._v = new THREE.Vector3();
     this._w = new THREE.Vector3();
+    this._d = new THREE.Vector3();
     this._a = new THREE.Vector3();
     this._muzzle = new THREE.Vector3();
     this._lunge = new THREE.Vector3();
@@ -105,6 +106,7 @@ export class Player {
     this.subCd = 0;
     this.repairCharges = this.sub?.kind === 'repair' ? this.sub.charges : 0;
     this.repairT = 0;
+    this.fieldT = 0;        // aegis field: seconds of invulnerability left
     this.melee = null;
     this.saberHold = 0;
   }
@@ -115,6 +117,7 @@ export class Player {
     m.place(x, z, 0, 0);
     m.hp = m.maxHp;
     m.en = m.maxEn;
+    m.barrier = m.barrierMax;
     m.dead = false;
     m.overheat = false;
     m.stagger = m.invuln = m.dashT = m.flashT = 0;
@@ -322,6 +325,9 @@ export class Player {
     if (this.burstT > 0) {
       const pulse = 0.5 + 0.5 * Math.sin(game.time * 12);
       mech.tintColor = [0.04 + 0.05 * pulse, 0.28 + 0.22 * pulse, 0.42 + 0.2 * pulse];
+    } else if (this.fieldT > 0) {
+      const pulse = 0.5 + 0.5 * Math.sin(game.time * 16);
+      mech.tintColor = [0.02, 0.22 + 0.2 * pulse, 0.38 + 0.2 * pulse];
     } else if (mech.tintColor) {
       mech.tintColor = null;
     }
@@ -425,29 +431,36 @@ export class Player {
     this.game.audio.reload();
   }
 
-  /** Fire the equipped gun: beam rifle, rapid gun, bazooka or sniper (see parts.js). */
+  /** Fire the equipped gun: rifle, rapid gun, bazooka, sniper, shotgun, seeker or lance (see parts.js). */
   _fireWeapon() {
     const game = this.game;
     const mech = this.mech;
     const w = this.weapon;
     mech.model.muzzleWorld(this._muzzle);
-    const dir = this._aimDir(this._muzzle, w.speed, this._w);
+    const aim = this._aimDir(this._muzzle, w.speed, this._w);
     // never shoot backwards through our own body when the crosshair is very close
-    if (dir.dot(mech.forward()) < -0.2) dir.copy(mech.forward());
-    if (w.spread) {
-      dir.x += rand(-w.spread, w.spread);
-      dir.y += rand(-w.spread, w.spread);
-      dir.z += rand(-w.spread, w.spread);
-      dir.normalize();
-    }
+    if (aim.dot(mech.forward()) < -0.2) aim.copy(mech.forward());
 
+    // a seeker curves onto your lock, or onto whatever is near the crosshair; ordinary beams only nudge toward a lock
+    const pellets = w.pellets ?? 1;
+    const target = w.homing ? this.lock ?? this._missileTarget() : this.lock;
+    const turn = w.homing ? w.homing : this.lock && w.kind === 'beam' && pellets === 1 ? 0.9 : 0;
     const color = w.kind === 'cannon' ? 0xffa040 : this.energy.beam;
-    game.projectiles.spawn({
-      type: w.kind, team: 'player', source: mech, pos: this._muzzle, dir,
-      damage: w.damage * this.dmgMul, color, knock: w.knock, speed: w.speed, radius: w.radius,
-      target: this.lock, turn: this.lock && w.kind === 'beam' ? 0.9 : 0,
-      splash: w.splash ? { radius: w.splash.radius, damage: w.splash.damage * this.dmgMul } : null,
-    });
+    for (let i = 0; i < pellets; i++) {
+      const dir = this._d.copy(aim);
+      if (w.spread) {
+        dir.x += rand(-w.spread, w.spread);
+        dir.y += rand(-w.spread, w.spread);
+        dir.z += rand(-w.spread, w.spread);
+        dir.normalize();
+      }
+      game.projectiles.spawn({
+        type: w.kind, team: 'player', source: mech, pos: this._muzzle, dir,
+        damage: w.damage * this.dmgMul, color, knock: w.knock, speed: w.speed, radius: w.radius, life: w.life,
+        target, turn, pierce: w.pierce,
+        splash: w.splash ? { radius: w.splash.radius, damage: w.splash.damage * this.dmgMul } : null,
+      });
+    }
     const m = this._muzzle;
     const c = rgb(color);
     game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.09, w.kind === 'cannon' ? 12 : 8, 3, [1, 1, 1], c, 0.9);
@@ -465,7 +478,8 @@ export class Player {
 
   _updateSub(dt, input) {
     const sub = this.sub;
-    this.subCd = Math.max(0, this.subCd - dt * this.stats.powerFactor); // flare recharge and vulcan fire interval
+    this.subCd = Math.max(0, this.subCd - dt * this.stats.powerFactor); // cooldowns of every sub-weapon, and the vulcan fire interval
+    this.fieldT = Math.max(0, this.fieldT - dt);
     if (this.repairT > 0) {
       const amount = (sub.heal * this.mech.maxHp * Math.min(dt, this.repairT)) / sub.duration;
       this.mech.heal(amount);
@@ -488,6 +502,12 @@ export class Player {
       }
     } else if (sub.kind === 'flare' && input.pressed('KeyV') && this.subCd <= 0) {
       this._fireFlares();
+    } else if (sub.kind === 'injector' && input.pressed('KeyV') && this.subCd <= 0) {
+      this._fireInjector();
+    } else if (sub.kind === 'pulse' && input.pressed('KeyV') && this.subCd <= 0 && !this.melee) {
+      this._firePulse();
+    } else if (sub.kind === 'field' && input.pressed('KeyV') && this.subCd <= 0) {
+      this._fireField();
     } else if (sub.kind === 'repair' && input.pressed('KeyV') && this.repairCharges > 0 && this.repairT <= 0 && this.mech.hp < this.mech.maxHp) {
       this.repairCharges--;
       this.repairT = sub.duration;
@@ -528,6 +548,66 @@ export class Player {
     if (n > 0) game.hud.message(n > 1 ? `${n} MISSILES DECOYED` : 'MISSILE DECOYED', 'good');
   }
 
+  /** EN injector: refill boost fuel and clear an overheat (not worth firing when the tank is already near full). */
+  _fireInjector() {
+    const mech = this.mech;
+    if (mech.en > mech.maxEn * 0.85 && !mech.overheat) return;
+    mech.en = mech.maxEn;
+    mech.overheat = false;
+    this.subCd = this.sub.cooldown;
+    const c = mech.center(this._v);
+    for (let i = 0; i < 12; i++) {
+      this.game.fx.glow.spawn(c.x + rand(-3, 3), c.y + rand(-6, 2), c.z + rand(-3, 3), rand(-20, 20), rand(15, 50), rand(-20, 20),
+        rand(0.4, 0.8), 2.0, 0.3, [0.7, 1, 1], [0.2, 0.7, 1], 1, -20, 0.6);
+    }
+    this.game.audio.repair();
+    this.game.hud.message('BOOST FUEL RESTORED', 'good');
+  }
+
+  /** Shock pulse: damages, shoves and staggers every enemy close to us. */
+  _firePulse() {
+    const game = this.game;
+    const mech = this.mech;
+    const sub = this.sub;
+    this.subCd = sub.cooldown;
+    const c = mech.center(this._v);
+    let hit = 0;
+    for (const e of game.enemies) {
+      const m = e.mech;
+      if (m.dead) continue;
+      const away = m.center(this._w).sub(c);
+      const d = away.length() - m.radius;
+      if (d > sub.radius) continue;
+      away.y = 0;
+      away.normalize().multiplyScalar(90 * (1 - Math.max(0, d) / sub.radius * 0.5));
+      m.takeDamage(sub.damage * this.dmgMul, { source: mech, knock: away, kind: 'pulse', stagger: true, point: m.center(new THREE.Vector3()) });
+      hit++;
+    }
+    for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * Math.PI * 2;
+      game.fx.glow.spawn(c.x, c.y - 4, c.z, Math.cos(a) * 120, 0, Math.sin(a) * 120, 0.5, 3.2, 0.5, [0.8, 1, 1], [0.2, 0.7, 1], 1);
+    }
+    game.fx.explosion(new THREE.Vector3(mech.pos.x, mech.pos.y, mech.pos.z), 14, { sound: false, shake: 0.4 });
+    game.audio.cannon(mech.pos);
+    game.shake(0.5);
+    if (hit > 0) game.hitstop(0.05);
+  }
+
+  /** Aegis field: a short spell of total invulnerability. */
+  _fireField() {
+    const mech = this.mech;
+    this.subCd = this.sub.cooldown;
+    this.fieldT = this.sub.duration;
+    mech.invuln = Math.max(mech.invuln, this.sub.duration);
+    const c = mech.center(this._v);
+    for (let i = 0; i < 16; i++) {
+      this.game.fx.glow.spawn(c.x + rand(-5, 5), c.y + rand(-7, 7), c.z + rand(-5, 5), rand(-25, 25), rand(-10, 25), rand(-25, 25),
+        rand(0.5, 1.0), 2.4, 0.4, [0.7, 1, 1], [0.2, 0.6, 1], 1, 0, 0.6);
+    }
+    this.game.audio.flare();
+    this.game.hud.message('AEGIS FIELD', 'good');
+  }
+
   /** Always-on core effects: the nano-repair core mends armor once you have been left alone for a moment. */
   _updatePassives(dt) {
     const mech = this.mech;
@@ -538,6 +618,7 @@ export class Player {
 
   /** The shoulder cannon (off-hand): one heavy splash shell, then a cooldown. */
   _fireShoulderCannon() {
+    if (this.ability.kind === 'swarm') { this._fireSwarm(); return; }
     const game = this.game;
     const mech = this.mech;
     const a = this.ability;
@@ -559,19 +640,30 @@ export class Player {
 
   // ------------------------------------------------------------------ missiles
 
+  /** Where homing weapons go: the lock, else whatever is closest to the crosshair (null if nothing is near it). */
+  _missileTarget() {
+    if (this.lock) return this.lock;
+    const list = this._candidates();
+    const target = list.length ? this._bestTarget(list) : null;
+    if (!target) return null;
+    const v = target.center(this._v).sub(this.game.camera.position).normalize();
+    return v.dot(this.game.rig.forward) < 0.8 ? null : target;
+  }
+
+  /** Micro-missile arm: a quick volley of small homing missiles from the shoulder. */
+  _fireSwarm() {
+    const a = this.ability;
+    const target = this._missileTarget();
+    for (let i = 0; i < a.count; i++) this.missileQueue.push({ t: i * 0.07, side: i % 2 ? 1 : -1, target, micro: true });
+    this.cannonCd = a.cooldown;
+    this.lastFired = this.game.time;
+    this.game.audio.missile(this.mech.pos);
+  }
+
   _fireMissiles() {
     this.missiles--;
     if (this.missiles === this.stats.missileCharges - 1) this.missileT = 0;
-    // target: lock, else whatever is closest to the crosshair
-    let target = this.lock;
-    if (!target) {
-      const list = this._candidates();
-      target = list.length ? this._bestTarget(list) : null;
-      if (target) {
-        const v = target.center(this._v).sub(this.game.camera.position).normalize();
-        if (v.dot(this.game.rig.forward) < 0.8) target = null;
-      }
-    }
+    const target = this._missileTarget();
     for (let i = 0; i < MISSILES_PER_SALVO; i++) {
       this.missileQueue.push({ t: i * 0.09, side: i % 2 ? 1 : -1, target });
     }
@@ -583,6 +675,20 @@ export class Player {
     const game = this.game;
     const fwd = mech.forward(this._v).clone();
     const right = new THREE.Vector3(Math.cos(mech.yaw), 0, -Math.sin(mech.yaw));
+    if (q.micro) {
+      // micro-missiles leave the shoulder launcher in a fan
+      const a = this.ability;
+      mech.model.shoulderMuzzleWorld(this._muzzle);
+      const dir = new THREE.Vector3(0, 0.35, 0).addScaledVector(fwd, 1)
+        .addScaledVector(right, q.side * rand(0.1, 0.45)).add(new THREE.Vector3(0, rand(0, 0.4), 0)).normalize();
+      game.projectiles.spawn({
+        type: 'missile', team: 'player', source: mech, pos: this._muzzle, dir, color: 0xffd070,
+        damage: a.damage * this.dmgMul, speed: 130, maxSpeed: 290, delay: 0.18, turn: 6.2 + this.stats.missileTurn, target: q.target,
+        splash: { radius: a.splash.radius, damage: a.splash.damage * this.dmgMul }, knock: 8, life: 4.5, radius: 1.5,
+      });
+      game.audio.missile(this._muzzle);
+      return;
+    }
     const pos = new THREE.Vector3(mech.pos.x, mech.pos.y + 15, mech.pos.z).addScaledVector(right, q.side * 4.5).addScaledVector(fwd, -1);
     const dir = new THREE.Vector3(0, 0.9, 0)
       .addScaledVector(fwd, 0.7)
@@ -699,7 +805,7 @@ export class Player {
       if (m.dead) continue;
       const v = m.center(this._v).sub(mech.center(new THREE.Vector3()));
       const dist = v.length();
-      if (dist > 30 + m.radius) continue;
+      if (dist > this.stats.reach + m.radius) continue;
       v.y = 0;
       if (v.lengthSq() > 1e-4 && v.normalize().dot(fwd) < 0.2) continue;
       const knock = fwd.clone().multiplyScalar(def.stagger ? 130 : 45);

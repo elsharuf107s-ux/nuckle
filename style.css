@@ -52,6 +52,10 @@ kbd {
 .bar.en i { background: linear-gradient(90deg, #2aa8ff, #7be3ff); }
 .bar.en.overheat i { background: var(--red); }
 .bar.burst i { background: linear-gradient(90deg, #ff6ad5, #ffb0ec); }
+.bar.barrier i { background: linear-gradient(90deg, #3ab6ff, #c4f3ff); }
+.bar.barrier.down i { opacity: 0.35; }
+#barrier-row { display: none; }
+#barrier-row.on { display: grid; }
 .bar.burst.ready { animation: pulse 0.6s infinite alternate; }
 .bar.boss { height: 12px; }
 .bar.boss i { background: linear-gradient(90deg, #ff2e57, #ff8a5a); }
@@ -248,6 +252,7 @@ button.secondary { margin-left: 10px; }
 .g-tab { padding: 7px 2px; font-size: 9px; }
 
 .tune-left { font-size: 13px; letter-spacing: 0.14em; color: var(--text); margin-bottom: 6px; }
+.paint-section .o-desc, .tune-row .o-desc { font-family: var(--sans); font-size: 11px; line-height: 1.45; color: var(--dim); margin-top: 4px; }
 .tune-row { padding: 10px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(120, 220, 255, 0.16); margin-bottom: 7px; }
 .tune-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .tune-name { font-size: 12px; letter-spacing: 0.16em; font-weight: 700; }
@@ -258,6 +263,22 @@ button.secondary { margin-left: 10px; }
 .tune-pips { display: flex; gap: 3px; }
 .tune-pips i { width: 12px; height: 12px; background: rgba(255, 255, 255, 0.1); transform: skewX(-18deg); }
 .tune-pips i.on { background: var(--cyan); box-shadow: 0 0 6px rgba(82, 224, 255, 0.6); }
+
+/* ---------- the pit stop (the garage between waves) ---------- */
+#fade { position: fixed; inset: 0; z-index: 40; background: #02030a; opacity: 0; pointer-events: none; }
+#fade.go { animation: fadein 0.75s ease-out; }
+@keyframes fadein { from { opacity: 1; } to { opacity: 0; } }
+.g-pit { border: 1px solid rgba(255, 182, 46, 0.55); background: rgba(255, 182, 46, 0.07); padding: 8px 10px; margin-bottom: 10px; font-size: 11px; line-height: 1.5; }
+.g-pit .p-head { display: flex; justify-content: space-between; gap: 10px; letter-spacing: 0.2em; font-size: 10px; color: var(--amber); }
+.g-pit .p-head b { font-weight: 700; }
+.g-pit .p-head span { color: var(--dim); letter-spacing: 0.12em; }
+.g-pit .p-next { margin-top: 4px; font-size: 12px; letter-spacing: 0.1em; font-weight: 700; color: var(--text); }
+.g-pit .p-next.boss { color: var(--red); }
+.g-pit .p-hostiles { color: var(--dim); font-family: var(--sans); font-size: 11px; }
+.g-pit .p-status { margin-top: 3px; letter-spacing: 0.1em; font-size: 10px; color: var(--green); }
+.g-pit .p-status.low { color: var(--red); }
+#screen-garage.pit #g-back, #screen-garage.pit .g-name { display: none; }
+#screen-garage.pit .g-title { color: var(--amber); }
 
 /* ---------- touch and small screens ---------- */
 html:not(.touch) .touch-only, html.touch .no-touch { display: none !important; }
@@ -389,6 +410,10 @@ html.touch .g-tabs { touch-action: pan-x; }
   .g-left { left: calc(var(--ins-left, 0px) + 8px); width: min(300px, 44vw); }
   .g-right { right: calc(var(--ins-right, 0px) + 8px); width: min(238px, 36vw); overflow-y: auto; }
   .g-title { display: none; }
+  .g-pit { padding: 5px 8px; margin-bottom: 6px; font-size: 10px; line-height: 1.35; }
+  .g-pit .p-next { font-size: 11px; margin-top: 2px; }
+  .g-pit .p-hostiles { font-size: 10px; }
+  .g-pit .p-status { margin-top: 1px; font-size: 9px; }
   .g-name { margin-bottom: 6px; }
   .g-name input { padding: 4px 8px; }
   .g-tabs { display: flex; overflow-x: auto; gap: 5px; margin-bottom: 6px; padding-bottom: 4px; flex: none; scrollbar-width: none; }

@@ -32,7 +32,7 @@ const BUTTONS = [
   ['switch', 'SWITCH', 'Tab', 'util'],
   ['reload', 'RELOAD', 'KeyR', 'util'],
 ];
-const SUB_LABEL = { vulcan: 'VULCAN', flare: 'FLARE', repair: 'REPAIR' };
+const SUB_LABEL = { vulcan: 'VULCAN', flare: 'FLARE', repair: 'REPAIR', injector: 'INJECT', pulse: 'PULSE', field: 'FIELD' };
 
 export class TouchControls {
   constructor(game) {
@@ -302,7 +302,7 @@ export class TouchControls {
     if (!show) return;
 
     const p = g.player;
-    const shape = `${p.meleeOnly}|${!!p.ability}|${p.sub?.kind ?? ''}`;
+    const shape = `${p.meleeOnly}|${p.ability?.kind ?? ''}|${p.sub?.kind ?? ''}`;
     if (shape !== this._shape) {
       this._shape = shape;
       this._hide('saber', p.meleeOnly);
@@ -311,6 +311,7 @@ export class TouchControls {
       this._hide('sub', !p.sub);
       this._text('fire', 'label', p.meleeOnly ? 'SABER' : 'FIRE');
       this._text('sub', 'label', SUB_LABEL[p.sub?.kind] ?? 'SUB');
+      this._text('cannon', 'label', p.ability?.kind === 'swarm' ? 'SWARM' : 'CANNON');
     }
     if (this.boostLatched && p.mech.overheat) {
       // out of boost fuel: the latch lets go on its own
@@ -334,7 +335,8 @@ export class TouchControls {
       const el = g.hud.el;
       this._text('sub', 'sub', el.subState.textContent.replace(/^RECHARGING /, ''));
       this._gauge('sub', (parseFloat(el.subFill.style.width) || 0) / 100);
-      this._flag('sub', 'empty', el.subBar.classList.contains('danger') || (p.sub.kind === 'flare' && p.subCd > 0));
+      const cooling = p.sub.kind !== 'vulcan' && p.sub.kind !== 'repair' && p.subCd > 0;
+      this._flag('sub', 'empty', el.subBar.classList.contains('danger') || cooling);
     }
     const burstReady = p.burst >= 100 && p.burstT <= 0;
     this._hide('burst', !burstReady);

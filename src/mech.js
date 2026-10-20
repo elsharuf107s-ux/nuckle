@@ -25,6 +25,9 @@ const CEILING = 230;
  *   velocity      THREE.Vector3 that overrides all movement this update (sabre lunges)
  *   hover         true to cancel gravity gently (floating during a melee swing)
  */
+const BARRIER_DELAY = 5;  // seconds without a hit before the barrier recharges
+const BARRIER_RATE = 70;  // barrier points restored per second once it does
+
 export class Mech {
   /** `defOverride` lets the garage field a custom build (see parts.js deriveMech) instead of a stock mech. */
   constructor(game, type, team, defOverride = null) {
@@ -64,6 +67,8 @@ export class Mech {
     this.stagger = 0;
     this.flashT = 0;
     this.lastHitAt = -99;
+    this.barrierMax = this.barrier = this.def.barrier ?? 0; // barrier core: soaks damage first, then recharges
+    this.barrierHitAt = -99;
     this.dead = false;
     this.saberOut = false;
     this.tintColor = null; // [r, g, b] steady glow, e.g. burst aura
@@ -104,6 +109,9 @@ export class Mech {
 
     this.invuln = Math.max(0, this.invuln - dt);
     this.stagger = Math.max(0, this.stagger - dt);
+    if (this.barrierMax > 0 && this.barrier < this.barrierMax && this.game.time - this.barrierHitAt > BARRIER_DELAY) {
+      this.barrier = Math.min(this.barrierMax, this.barrier + BARRIER_RATE * dt);
+    }
     this.flashT = Math.max(0, this.flashT - dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.enDelay = Math.max(0, this.enDelay - dt);
@@ -257,6 +265,17 @@ export class Mech {
     if (this.team === 'player' && this.game.cheat.invincible) return 0;
     // a shield soaks a share of everything except saber hits
     if (this.def.guard && info.kind && info.kind !== 'saber') amount *= 1 - this.def.guard;
+    if (this.barrierMax > 0) {
+      this.barrierHitAt = this.game.time; // any hit restarts the recharge delay
+      if (this.barrier > 0) {
+        const soaked = Math.min(this.barrier, amount);
+        this.barrier -= soaked;
+        amount -= soaked;
+        this.lastHitAt = this.game.time;
+        this.game.onBarrierHit(this, soaked, info);
+        if (amount <= 0) return 0;
+      }
+    }
     this.hp -= amount;
     this.flashT = 0.12;
     this.lastHitAt = this.game.time; // the nano-repair core waits for a lull

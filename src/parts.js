@@ -8,7 +8,7 @@
 // Two budgets make the choices bite:
 //   LOAD   the legs carry a weight limit; going over it slows the mech down.
 //   POWER  the torso supplies power; parts draw it; a shortfall slows EN recovery, weapon cycling and
-//          every cooldown (missiles, shoulder cannon, sub-weapon).
+//          every cooldown (missiles, off-hand ability, sub-weapon).
 //
 // This module has no browser or three.js dependency, so it can be unit-tested in plain Node.
 
@@ -29,6 +29,8 @@ const BASE = {
   dashInvuln: 0.2,    // seconds of invulnerability at the start of a dash
   radar: 420,         // radar range
   resupplyHeal: 0.25, // fraction of armor repaired between waves
+  jam: 0,             // fraction of the turning rate enemy missiles lose against this mech
+  barrier: 0,         // energy barrier that soaks damage before armor, then recharges
   supply: 0, draw: 0, load: 0, // power budget (torso supplies, parts draw) and weight limit (legs)
 };
 
@@ -41,6 +43,10 @@ const POWER_FLOOR = 0.4;     // a deficit never cuts the whole kit below 40% spe
 const POWER_CURVE = 1.4;     // a shortfall bites harder than it looks: factor = (supply / draw) ^ curve
 const GUARD_CAP = 0.35;      // shield, saber deflection and shoulder shells together never absorb more than this
 const MELEE_SOFT_CAP = 1.6;  // melee bonuses stack multiplicatively; beyond this each extra point counts half
+const GUN_SOFT_CAP = 1.3;    // likewise for gun damage bonuses
+const BURST_GAIN_CAP = 2.0;  // the burst gauge never fills more than twice as fast
+const MAX_MISSILE_CHARGES = 4;
+const PELLET_COVERAGE = 0.8; // share of a shotgun's pellets that land on a typical target (for the firepower bar)
 
 /** Tuning: spend points on four dials. Each point is a small flat bonus. */
 export const TUNING_MAX = 6;   // per dial
@@ -56,7 +62,8 @@ export const TUNING = [
 
 /*
  * add keys:  any BASE key (hp, weight, en, ascendSpeed, dashCost, staggerAt, missileCharges, supply, draw, load, ...)
- * mul keys:  mobility (walk + air speed), dash (dash speed), melee, fireRate, reload, missileDamage, burstGain
+ * mul keys:  mobility (walk + air speed), dash (dash speed), melee, fireRate, reload, gunDamage, missileDamage, burstGain
+ * guard:      share of gunfire, missiles and shells absorbed; every part's guard adds up (capped)
  * `model` is the style handed to the model builder. `draw` is the power a part consumes.
  */
 export const PARTS = {
@@ -71,6 +78,10 @@ export const PARTS = {
       add: { hp: 260, weight: 8, staggerAt: 60, draw: 7 } },
     { id: 'recon', name: 'RECON ARRAY', model: 'recon', desc: 'Sensor dish: the radar sees much farther and missiles track a little tighter. Power hungry.',
       add: { hp: 90, weight: 6, missileTurn: 0.8, radar: 250, draw: 12 } },
+    { id: 'ace', name: 'ACE VISOR', model: 'ace', desc: 'Sleek helm of a top pilot: a quicker trigger finger, a faster burst gauge and a little more saber damage. Power hungry.',
+      add: { hp: 110, weight: 5, draw: 10 }, mul: { fireRate: 1.06, burstGain: 1.15, melee: 1.04 } },
+    { id: 'jammer', name: 'ECM CROWN', model: 'jammer', desc: 'Electronic warfare crown: enemy missiles lose 40% of their turning, so most of them miss.',
+      add: { hp: 80, weight: 5, draw: 14, jam: 0.4 } },
   ],
   torso: [
     { id: 'std', name: 'STANDARD CHEST', model: 'std', bulk: 1.0, desc: 'Well-rounded chassis. Power output 100.',
@@ -81,9 +92,13 @@ export const PARTS = {
       add: { hp: 1400, weight: 40, staggerAt: 120, supply: 108 } },
     { id: 'reactor', name: 'REACTOR CORE', model: 'reactor', bulk: 1.05, desc: 'Oversized reactor: big power output, more boost fuel, faster EN recovery, quicker burst.',
       add: { hp: 1000, weight: 28, en: 25, enGround: 10, enAir: 4, supply: 132 }, mul: { burstGain: 1.2 } },
+    { id: 'bay', name: 'MISSILE BAY CHEST', model: 'bay', bulk: 1.08, desc: 'Armoured chest with missile bays: an extra missile charge and harder-hitting missiles, for a little less armour.',
+      add: { hp: 1000, weight: 29, missileCharges: 1, supply: 104 }, mul: { missileDamage: 1.1 } },
+    { id: 'command', name: 'COMMAND CHEST', model: 'command', bulk: 1.02, desc: 'Command-grade chassis with a sensor mast: bigger radar, a faster burst gauge and extra armor repaired between waves.',
+      add: { hp: 1050, weight: 27, radar: 100, resupplyHeal: 0.1, supply: 112 }, mul: { burstGain: 1.2 } },
   ],
   arms: [
-    { id: 'std', name: 'STANDARD ARMS', model: 'std', desc: 'Balanced servos.',
+    { id: 'std', name: 'STANDARD ARMS', model: 'std', desc: 'Balanced servos: a reliable all-round pair of arms.',
       add: { hp: 220, weight: 12, draw: 6 } },
     { id: 'assault', name: 'ASSAULT BRACERS', model: 'assault', desc: 'Armoured bracers. Extra armour and a stronger saber, but slower reloads.',
       add: { hp: 380, weight: 18, draw: 8 }, mul: { melee: 1.1, reload: 0.9 } },
@@ -91,6 +106,10 @@ export const PARTS = {
       add: { hp: 150, weight: 9, draw: 10 }, mul: { fireRate: 1.1, reload: 1.15 } },
     { id: 'blade', name: 'BLADE ARMS', model: 'blade', desc: 'Forearm blade fins. Heavy saber damage; the gun cycles a touch slower.',
       add: { hp: 240, weight: 13, draw: 9 }, mul: { melee: 1.3, fireRate: 0.95 } },
+    { id: 'guard', name: 'GUARD ARMS', model: 'guard', desc: 'Broad vambraces: extra armour, steadier under fire and a little gunfire absorption.',
+      add: { hp: 300, weight: 17, staggerAt: 30, draw: 7 }, guard: 0.04 },
+    { id: 'recoil', name: 'HEAVY RECOIL ARMS', model: 'recoil', desc: 'Piston-braced forearms: your gun hits 12% harder but cycles a little slower.',
+      add: { hp: 260, weight: 16, draw: 9 }, mul: { gunDamage: 1.12, fireRate: 0.94 } },
   ],
   legs: [
     { id: 'std', name: 'STANDARD LEGS', model: 'std', desc: 'Balanced locomotion. Load limit 115.',
@@ -101,6 +120,10 @@ export const PARTS = {
       add: { hp: 650, weight: 36, staggerAt: 100, draw: 6, load: 160 }, mul: { mobility: 0.92 } },
     { id: 'jump', name: 'JUMP LEGS', model: 'jump', desc: 'Calf boosters: stronger ascent and faster EN recovery in the air. Power hungry.',
       add: { hp: 340, weight: 20, ascendSpeed: 10, enAir: 14, draw: 14, load: 108 } },
+    { id: 'strider', name: 'STRIDER LEGS', model: 'strider', desc: 'Long-striding legs: quicker on foot and a longer dash, with a middling load limit.',
+      add: { hp: 360, weight: 19, ascendSpeed: 4, dashSpeed: 20, draw: 9, load: 112 }, mul: { mobility: 1.06 } },
+    { id: 'siege', name: 'SIEGE LEGS', model: 'siege', desc: 'Braced stabiliser stance: very hard to stagger and steadier on the gun, but slow.',
+      add: { hp: 520, weight: 32, staggerAt: 160, draw: 7, load: 140 }, mul: { mobility: 0.95, reload: 1.1, fireRate: 1.04 } },
   ],
   shoulder: [
     { id: 'std', name: 'STANDARD PAULDRONS', model: 'std', desc: 'Light shoulder plates.',
@@ -111,6 +134,10 @@ export const PARTS = {
       add: { hp: 120, weight: 9, draw: 4 }, mul: { melee: 1.12 } },
     { id: 'vernier', name: 'VERNIER SHOULDERS', model: 'vernier', desc: 'Thruster shoulders: sharper turning and faster, cheaper dashes. Power hungry.',
       add: { weight: 7, turn: 3, dashSpeed: 25, dashCost: -2, draw: 12 } },
+    { id: 'rack', name: 'MISSILE RACKS', model: 'rack', desc: 'Racks on the shoulders: an extra missile charge and tighter homing. Power hungry.',
+      add: { weight: 14, missileCharges: 1, missileTurn: 1.0, draw: 16 } },
+    { id: 'aegis', name: 'AEGIS EMITTERS', model: 'aegis', desc: 'Field emitters absorb 10% of incoming gunfire, missiles and shells. Power hungry.',
+      add: { hp: 60, weight: 10, draw: 16 }, guard: 0.10 },
   ],
   backpack: [
     { id: 'std', name: 'STANDARD PACK', model: 'std', desc: 'Basic thrusters and a saber rack.',
@@ -121,6 +148,10 @@ export const PARTS = {
       add: { weight: 16, missileCharges: 1, en: -10, draw: 20 }, mul: { missileDamage: 1.25 } },
     { id: 'wing', name: 'WING VERNIER', model: 'wing', desc: 'Vector wings: faster, cheaper dashes and sharper turning. Fragile.',
       add: { weight: 9, hp: -80, dashSpeed: 40, dashCost: -6, turn: 2, draw: 18 } },
+    { id: 'gen', name: 'GENERATOR PACK', model: 'gen', desc: 'Auxiliary reactor: +28 power output, so hungry parts keep running at full speed.',
+      add: { weight: 20, en: 10, supply: 28, draw: 4 } },
+    { id: 'plate', name: 'ARMOR BACKPLATE', model: 'plate', desc: 'Slab plate over the thrusters: lots of armour and stagger resistance, but a weaker climb.',
+      add: { hp: 260, weight: 22, staggerAt: 50, ascendSpeed: -6, draw: 4 } },
   ],
   core: [
     { id: 'std', name: 'STANDARD CORE', model: 'std', desc: 'A plain reactor governor.',
@@ -133,6 +164,10 @@ export const PARTS = {
       add: { weight: 10, regen: 7, draw: 15 } },
     { id: 'phase', name: 'PHASE GOVERNOR', model: 'phase', desc: 'Dashes grant 0.45 s of invulnerability instead of 0.2 s.',
       add: { weight: 7, dashInvuln: 0.25, draw: 16 } },
+    { id: 'siphon', name: 'BURST SIPHON', model: 'siphon', desc: 'Feeds the burst gauge: it fills 50% faster.',
+      add: { weight: 6, draw: 14 }, mul: { burstGain: 1.5 } },
+    { id: 'barrier', name: 'BARRIER GENERATOR', model: 'barrier', desc: 'Projects an energy barrier that soaks 240 damage before armor, then recharges after 5 seconds without a hit.',
+      add: { weight: 9, draw: 20, barrier: 240 } },
   ],
   pilot: [
     { id: 'rookie', name: 'ROOKIE', model: 'none', desc: 'No special training: no bonuses, no habits.',
@@ -147,6 +182,12 @@ export const PARTS = {
       add: { dashCost: -3, turn: 3 }, mul: { mobility: 1.04 } },
     { id: 'veteran', name: 'VETERAN', model: 'none', desc: 'Iron nerves: much harder to stagger, and the burst gauge fills faster.',
       add: { staggerAt: 80 }, mul: { burstGain: 1.1 } },
+    { id: 'marksman', name: 'MARKSMAN', model: 'none', desc: 'Deadeye: your gun hits 12% harder and the radar reaches a little farther.',
+      add: { radar: 60 }, mul: { gunDamage: 1.12 } },
+    { id: 'tactician', name: 'TACTICIAN', model: 'none', desc: 'Missile specialist: harder-hitting, tighter-homing missiles.',
+      add: { missileTurn: 1.2 }, mul: { missileDamage: 1.2 } },
+    { id: 'guardian', name: 'GUARDIAN', model: 'none', desc: 'Bodyguard: steadier on the feet, absorbs 5% of gunfire and gets extra armor back between waves.',
+      add: { staggerAt: 40, resupplyHeal: 0.1 }, guard: 0.05 },
   ],
   weapon: [
     { id: 'rifle', name: 'BEAM RIFLE', model: 'rifle', desc: 'Reliable all-rounder: accurate, 8-round magazine.',
@@ -165,6 +206,18 @@ export const PARTS = {
     { id: 'sabers', name: 'TWIN SABERS', model: 'saber', desc: 'No gun: both mouse buttons swing the saber combo. Big melee bonus, deflects 20% of gunfire, cheaper dashes.',
       add: { weight: 6, enGround: 8, dashCost: -4, draw: 10 }, mul: { melee: 1.4 }, guard: 0.2,
       weapon: { name: 'TWIN SABERS', kind: 'melee', damage: 0, cooldown: 0, mag: 0, reload: 0, speed: 0, spread: 0, knock: 0, shake: 0 } },
+    { id: 'scatter', name: 'BEAM SHOTGUN', model: 'scatter', desc: 'Seven pellets per shot: brutal up close, thin at range. Six rounds.',
+      add: { weight: 11, draw: 18 },
+      weapon: { name: 'BEAM SHOTGUN', kind: 'beam', damage: 55, pellets: 7, cooldown: 0.75, mag: 6, reload: 2.0, speed: 700, spread: 0.07, life: 0.5, radius: 1.6, knock: 8, shake: 0.2 } },
+    { id: 'seeker', name: 'SEEKER RIFLE', model: 'seeker', desc: 'Slower beams that curve onto your target (lock on, or aim near an enemy). Ten rounds.',
+      add: { weight: 9, draw: 17 },
+      weapon: { name: 'SEEKER RIFLE', kind: 'beam', damage: 165, cooldown: 0.3, mag: 10, reload: 2.1, speed: 520, spread: 0, homing: 3.2, knock: 5, shake: 0.06 } },
+    { id: 'lance', name: 'ARC LANCE', model: 'lance', desc: 'A heavy beam that pierces every enemy in its line. Three rounds.',
+      add: { weight: 13, draw: 22 },
+      weapon: { name: 'ARC LANCE', kind: 'beam', damage: 460, cooldown: 0.9, mag: 3, reload: 2.2, speed: 1000, spread: 0, pierce: true, radius: 2.2, knock: 12, shake: 0.2 } },
+    { id: 'greatsword', name: 'GREATSWORD', model: 'greatsword', desc: 'No gun: both mouse buttons swing a huge blade. The biggest melee bonus and longest reach, deflects 28% of gunfire, but heavy.',
+      add: { weight: 12, draw: 8 }, mul: { melee: 1.55 }, guard: 0.28,
+      weapon: { name: 'GREATSWORD', kind: 'melee', damage: 0, cooldown: 0, mag: 0, reload: 0, speed: 0, spread: 0, knock: 0, shake: 0, reach: 37 } },
   ],
   offhand: [
     { id: 'shield', name: 'BEAM SHIELD', model: 'shield', desc: 'Absorbs 22% of incoming gunfire, missiles and shells (not saber hits).',
@@ -174,6 +227,13 @@ export const PARTS = {
       ability: { name: 'SHOULDER CANNON', kind: 'cannon', damage: 380, cooldown: 7, speed: 320, knock: 50, splash: { radius: 24, damage: 190 } } },
     { id: 'none', name: 'NO OFF-HAND', model: 'none', desc: 'Lighter and quicker on its feet.',
       add: { weight: 0, enGround: 8 }, mul: { mobility: 1.03 } },
+    { id: 'buckler', name: 'PARRY BUCKLER', model: 'buckler', desc: 'Small arm shield: absorbs 12% of gunfire and leaves the saber arm free (+5% melee).',
+      add: { weight: 5, draw: 2 }, guard: 0.12, mul: { melee: 1.05 } },
+    { id: 'tower', name: 'TOWER SHIELD', model: 'tower', desc: 'Full-length shield: absorbs 30% of gunfire, missiles and shells and resists stagger, but heavy and slow.',
+      add: { weight: 20, staggerAt: 60, draw: 5 }, guard: 0.30, mul: { mobility: 0.96 } },
+    { id: 'swarm', name: 'MICRO-MISSILE ARM', model: 'swarm', desc: 'Press F: six small homing missiles. Recharges in 9 seconds.',
+      add: { weight: 13, draw: 18 },
+      ability: { name: 'MICRO-MISSILES', kind: 'swarm', count: 6, damage: 70, cooldown: 9, splash: { radius: 12, damage: 30 } } },
   ],
   sub: [
     { id: 'none', name: 'NO SUB-WEAPON', model: 'none', desc: 'Nothing mounted: no extra weight or power draw.',
@@ -187,6 +247,15 @@ export const PARTS = {
     { id: 'repair', name: 'REPAIR KIT', model: 'repair', desc: 'Press V: repairs 15% of your armor over 4 seconds. One use per wave.',
       add: { weight: 6, draw: 10 },
       sub: { name: 'REPAIR KIT', kind: 'repair', charges: 1, heal: 0.15, duration: 4 } },
+    { id: 'injector', name: 'EN INJECTOR', model: 'injector', desc: 'Press V: instantly refills boost fuel and clears an overheat. 16 second recharge.',
+      add: { weight: 4, draw: 6 },
+      sub: { name: 'EN INJECTOR', kind: 'injector', cooldown: 16 } },
+    { id: 'pulse', name: 'SHOCK PULSE', model: 'pulse', desc: 'Press V: a shockwave that damages and staggers everything near you. 14 second recharge.',
+      add: { weight: 6, draw: 12 },
+      sub: { name: 'SHOCK PULSE', kind: 'pulse', cooldown: 14, radius: 60, damage: 240 } },
+    { id: 'field', name: 'AEGIS FIELD', model: 'field', desc: 'Press V: 2.5 seconds of total invulnerability. 22 second recharge. Power hungry.',
+      add: { weight: 7, draw: 18 },
+      sub: { name: 'AEGIS FIELD', kind: 'field', cooldown: 22, duration: 2.5 } },
   ],
 };
 
@@ -302,7 +371,8 @@ function sustainedDps(w, melee, damage) {
   if (w.kind === 'melee') return Math.round(340 * melee * damage); // a combo's raw 600 dps, discounted for the need to stay in reach
   const cycle = w.mag * w.cooldown + w.reload;
   const splashBonus = w.splash ? w.splash.damage * 0.3 : 0;
-  return Math.round(((w.damage + splashBonus) * damage * w.mag) / cycle);
+  const pellets = w.pellets ? w.pellets * PELLET_COVERAGE : 1;
+  return Math.round(((w.damage * pellets + splashBonus) * damage * w.mag) / cycle);
 }
 
 /** Above `cap`, each extra point of a stacking multiplier counts half. */
@@ -313,7 +383,7 @@ export function deriveStats(build) {
   const b = sanitizeBuild(build);
   const parts = SLOTS.map((slot) => partOf(slot, b[slot]));
   const s = { ...BASE };
-  const mul = { mobility: 1, dash: 1, melee: 1, fireRate: 1, reload: 1, missileDamage: 1, burstGain: 1 };
+  const mul = { mobility: 1, dash: 1, melee: 1, fireRate: 1, reload: 1, gunDamage: 1, missileDamage: 1, burstGain: 1 };
   for (const p of parts) {
     for (const [k, v] of Object.entries(p.add ?? {})) s[k] = (s[k] ?? 0) + v;
     for (const [k, v] of Object.entries(p.mul ?? {})) mul[k] *= v;
@@ -340,9 +410,9 @@ export function deriveStats(build) {
   const w = { ...weaponPart.weapon };
   w.cooldown = w.cooldown / mul.fireRate / powerFactor;
   w.reload = w.reload / mul.reload / powerFactor;
+  if (w.kind !== 'melee') w.damage *= softCap(mul.gunDamage, GUN_SOFT_CAP);
 
   const offPart = partOf('offhand', b.offhand);
-  const shoulderPart = partOf('shoulder', b.shoulder);
   const subPart = partOf('sub', b.sub);
   const stats = {
     hp: Math.round(s.hp),
@@ -367,16 +437,19 @@ export function deriveStats(build) {
     dashInvuln: s.dashInvuln,
     turn: s.turn * move,
     staggerAt: s.staggerAt,
-    // shield, saber deflection and shoulder shells stack, capped
-    guard: Math.min(GUARD_CAP, (offPart.guard ?? 0) + (weaponPart.guard ?? 0) + (shoulderPart.guard ?? 0)),
+    // every part that absorbs fire (shields, saber deflection, shells, emitters, some arms and pilots) stacks, capped
+    guard: Math.min(GUARD_CAP, parts.reduce((n, part) => n + (part.guard ?? 0), 0)),
     melee: softCap(mul.melee, MELEE_SOFT_CAP),
     damage,
-    burstGain: mul.burstGain,
+    burstGain: Math.min(BURST_GAIN_CAP, mul.burstGain),
     burstTime: s.burstTime,
     regen: s.regen,
+    jam: Math.min(0.8, s.jam),
+    barrier: s.barrier,
+    reach: w.reach ?? 30,
     radar: s.radar,
     resupplyHeal: Math.min(0.9, s.resupplyHeal),
-    missileCharges: s.missileCharges,
+    missileCharges: clamp(s.missileCharges, 1, MAX_MISSILE_CHARGES),
     missileDamage: mul.missileDamage,
     missileTurn: s.missileTurn,
     weapon: w,
@@ -417,7 +490,7 @@ export function deriveMech(build) {
     speed: stats.speed, airSpeed: stats.airSpeed, ascendSpeed: stats.ascendSpeed, ascendCost: stats.ascendCost,
     dashSpeed: stats.dashSpeed, dashTime: stats.dashTime, dashCost: stats.dashCost,
     enGround: stats.enGround, enAir: stats.enAir, dashInvuln: stats.dashInvuln, turn: stats.turn,
-    staggerAt: stats.staggerAt, guard: stats.guard, score: 0,
+    staggerAt: stats.staggerAt, guard: stats.guard, jam: stats.jam, barrier: stats.barrier, score: 0,
   };
   return { build: b, stats, spec, def, energy: ENERGY[b.energy] };
 }

@@ -76,10 +76,11 @@ const ADD_LABELS = {
   staggerAt: ['STAGGER RESIST', 1], missileCharges: ['MISSILES', 1], missileTurn: ['HOMING', 1],
   supply: ['POWER OUTPUT', 1], load: ['LOAD LIMIT', 1], regen: ['REPAIR /s', 1], burstTime: ['BURST TIME', 1, (v) => `+${v}s`],
   dashInvuln: ['DASH INVULN', 1, (v) => `+${v}s`], radar: ['RADAR', 1], resupplyHeal: ['WAVE REPAIR', 1, (v) => `+${Math.round(v * 100)}%`],
+  jam: ['MISSILE JAMMING', 1, (v) => `${Math.round(v * 100)}%`], barrier: ['BARRIER', 1],
 };
 const MUL_LABELS = {
   mobility: 'SPEED', dash: 'DASH', melee: 'MELEE', fireRate: 'FIRE RATE', reload: 'RELOAD SPEED',
-  missileDamage: 'MISSILE DMG', burstGain: 'BURST GAIN',
+  gunDamage: 'GUN DAMAGE', missileDamage: 'MISSILE DMG', burstGain: 'BURST GAIN',
 };
 
 function chipsFor(slot, part) {
@@ -99,16 +100,27 @@ function chipsFor(slot, part) {
   if (part.guard) chips.push([`${Math.round(part.guard * 100)}% ${slot === 'weapon' ? 'DEFLECT' : 'GUARD'}`, 'up']);
   if (slot === 'weapon' && part.weapon.kind !== 'melee') {
     const w = part.weapon;
-    chips.push([`DMG ${w.damage}`, '']);
+    chips.push([w.pellets ? `DMG ${w.damage} ×${w.pellets}` : `DMG ${w.damage}`, '']);
     chips.push([`MAG ${w.mag}`, '']);
     chips.push([`${(1 / w.cooldown).toFixed(1)}/s`, '']);
     if (w.splash) chips.push(['BLAST', 'up']);
+    if (w.pellets) chips.push(['SHORT RANGE', 'down'], ['SPREAD', '']);
+    if (w.homing) chips.push(['HOMING', 'up']);
+    if (w.pierce) chips.push(['PIERCES', 'up']);
   }
-  if (slot === 'offhand' && part.ability) chips.push([`F: ${part.ability.damage} DMG · ${part.ability.cooldown}s`, 'up']);
+  if (slot === 'weapon' && part.weapon.kind === 'melee' && part.weapon.reach) chips.push([`REACH ${part.weapon.reach}`, 'up']);
+  if (slot === 'offhand' && part.ability) {
+    const a = part.ability;
+    chips.push([a.kind === 'swarm' ? `F: ${a.count} × ${a.damage} DMG · ${a.cooldown}s` : `F: ${a.damage} DMG · ${a.cooldown}s`, 'up']);
+    if (a.kind === 'swarm') chips.push(['HOMING', 'up']);
+  }
   if (slot === 'sub' && part.sub) {
     const u = part.sub;
     if (u.kind === 'vulcan') chips.push([`DMG ${u.damage}`, ''], [`${(1 / u.interval).toFixed(0)}/s`, ''], ['SHOOTS DOWN MISSILES', 'up']);
     else if (u.kind === 'flare') chips.push([`RECHARGE ${u.cooldown}s`, ''], ['DECOYS MISSILES', 'up']);
+    else if (u.kind === 'injector') chips.push([`RECHARGE ${u.cooldown}s`, ''], ['REFILLS BOOST', 'up']);
+    else if (u.kind === 'pulse') chips.push([`RECHARGE ${u.cooldown}s`, ''], [`DMG ${u.damage}`, ''], ['STAGGERS', 'up']);
+    else if (u.kind === 'field') chips.push([`RECHARGE ${u.cooldown}s`, ''], [`${u.duration}s INVULNERABLE`, 'up']);
     else chips.push([`HEAL ${Math.round(u.heal * 100)}%`, 'up'], [`${u.charges} USE / WAVE`, '']);
   }
   return chips;
@@ -131,6 +143,7 @@ export class Garage {
     this.summaryEl = document.getElementById('g-summary');
     this.nameEl = document.getElementById('g-name');
     this.build = loadBuild();
+    this.pit = false; // true while the screen is the pit stop between waves
     this.tab = 'head';
     this._statRefs = null;
     this._paintRaf = 0;
@@ -143,6 +156,7 @@ export class Garage {
   // ------------------------------------------------------------------ open / close
 
   open() {
+    this._setPit(null);
     this.game.enterGarage();
     this.root.classList.remove('hidden');
     this._showStats(false);
@@ -150,6 +164,45 @@ export class Garage {
     this._setPose('idle');
     this._renderOptions();
     this._renderStats();
+  }
+
+  /**
+   * The pit stop between waves: the same garage, over the same turntable, but there is no way back to the
+   * title: the only exit launches the next wave. The game has already moved to its 'intermission' state.
+   */
+  openPit(info) {
+    this._setPit(info);
+    this.root.classList.remove('hidden');
+    this.nameEl.value = this.build.name;
+    this._setPose('idle');
+    this._showStats(false);
+    this._renderOptions();
+    this._renderStats();
+  }
+
+  closePit() {
+    this.root.classList.add('hidden');
+    this._setPit(null);
+  }
+
+  /** Switch the pit card, the exit button and the screen's styling between garage and pit-stop mode. */
+  _setPit(info) {
+    this.pit = !!info;
+    this.root.classList.toggle('pit', this.pit);
+    const card = document.getElementById('g-pit');
+    card.classList.toggle('hidden', !this.pit);
+    const go = document.getElementById('g-go');
+    go.textContent = info?.next ? `LAUNCH WAVE ${info.next.number}` : 'SORTIE';
+    if (!info) return;
+    const set = (id, text) => { document.getElementById(id).textContent = text; };
+    set('p-cleared', `WAVE ${info.cleared} OF ${info.total} CLEARED`);
+    const next = document.getElementById('p-next');
+    next.classList.toggle('boss', !!info.next?.boss);
+    next.textContent = info.next ? `NEXT: WAVE ${info.next.number}  ·  ${info.next.title}${info.next.boss ? '  ·  BOSS' : ''}` : '';
+    set('p-hostiles', info.next ? info.next.hostiles.map((h) => `${h.count} × ${h.name}`).join('  ·  ') : '');
+    const status = document.getElementById('p-status');
+    status.classList.toggle('low', info.armor < 40);
+    status.textContent = `ARMOR ${info.armor}%  ·  SCORE ${info.score.toLocaleString('en-US')}  ·  ${info.kills} KILLS`;
   }
 
   _showStats(on) {
@@ -492,7 +545,10 @@ export class Garage {
     // the two budgets first: these are the problems a builder needs to notice
     if (stats.overload > 0) line('OVERLOADED', `${stats.overload} over the limit: speed and dash −${Math.round((1 - stats.loadFactor) * 100)}%`, 'warn');
     if (stats.powerFactor < 1) line('POWER SHORT', `${stats.draw} drawn from ${stats.supply}: EN recovery, weapon speed and cooldowns −${Math.round((1 - stats.powerFactor) * 100)}%`, 'warn');
-    line('WEAPON', w.weapon.kind === 'melee' ? `${w.name}: LMB and RMB swing the saber` : `${w.name}: ${w.weapon.mag} rounds, ${w.weapon.damage} per shot`);
+    const per = stats.weapon.pellets ? `${Math.round(stats.weapon.damage)} × ${stats.weapon.pellets} pellets` : `${Math.round(stats.weapon.damage)} per shot`;
+    line('WEAPON', w.weapon.kind === 'melee' ? `${w.name}: LMB and RMB swing the saber` : `${w.name}: ${w.weapon.mag} rounds, ${per}`);
+    if (stats.barrier > 0) line('BARRIER', `soaks ${stats.barrier} damage, recharges 5s after the last hit`);
+    if (stats.jam > 0) line('ECM', `enemy missiles lose ${Math.round(stats.jam * 100)}% of their turning`);
     line('OFF-HAND', o.name);
     if (build.sub !== 'none') line('SUB-WEAPON', `${u.name} (V)`);
     line('MOBILITY', `weight ${stats.weight} gives ${Math.round(stats.weightFactor * stats.loadFactor * 100)}% of base speed`);
