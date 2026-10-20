@@ -7,6 +7,7 @@ export default [
       globals: {
         window: 'readonly', document: 'readonly', localStorage: 'readonly', Event: 'readonly', HTMLCanvasElement: 'readonly', performance: 'readonly', console: 'readonly',
         requestAnimationFrame: 'readonly', cancelAnimationFrame: 'readonly', setInterval: 'readonly', clearInterval: 'readonly', setTimeout: 'readonly',
+        clearTimeout: 'readonly', navigator: 'readonly', location: 'readonly', screen: 'readonly', getComputedStyle: 'readonly', URLSearchParams: 'readonly', PointerEvent: 'readonly',
         process: 'readonly',
       },
     },

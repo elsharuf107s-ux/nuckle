@@ -16,6 +16,10 @@ const MELEE = [
   { kind: 'slash3', dur: 0.72, damage: 470, stagger: true },
 ];
 const LOCK_RANGE = 800;
+// Touch aim assist: with no lock-on, shots bend toward the enemy nearest the crosshair
+const ASSIST_CONE = 0.14;   // radians off the crosshair (less the target's own angular size)
+const ASSIST_PULL = 0.8;    // how far toward the target the shot is pulled (0 = none, 1 = dead centre)
+const ASSIST_RANGE = 650;
 
 const rgb = (hex) => [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
 
@@ -45,10 +49,12 @@ export class Player {
     this.lockEnabled = true;
     this.lastFired = -10;
     this.aimPoint = new THREE.Vector3();
+    this.assistTarget = null; // enemy the soft aim is pulling toward this frame (touch only)
     this.dmgMul = 1;
 
     this._v = new THREE.Vector3();
     this._w = new THREE.Vector3();
+    this._a = new THREE.Vector3();
     this._muzzle = new THREE.Vector3();
     this._lunge = new THREE.Vector3();
 
@@ -119,7 +125,13 @@ export class Player {
     this.burstT = 0;
     this.lock = null;
     this.lockEnabled = true;
+    this.assistTarget = null;
     this.dmgMul = 1;
+  }
+
+  /** Touch players get a soft aim (see _updateAimPoint) when the option is on. */
+  get assistOn() {
+    return !!(this.game.touch?.active && this.game.settings.aimAssist);
   }
 
   get burstActive() {
@@ -194,6 +206,24 @@ export class Player {
     }
   }
 
+  /** Lock onto the enemy drawn nearest a screen point (a tap). Returns whether one was close enough. */
+  pickTarget(x, y, radius = 64) {
+    const hud = this.game.hud;
+    const s = this._pick || (this._pick = { x: 0, y: 0, visible: false, dist: 0 });
+    let best = null, bestD = radius;
+    for (const m of this._candidates()) {
+      hud.toScreen(m.center(this._v), s);
+      if (!s.visible) continue;
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d < bestD) { bestD = d; best = m; }
+    }
+    if (!best) return false;
+    this.lock = best;
+    this.lockEnabled = true;
+    this.game.audio.lockOn();
+    return true;
+  }
+
   // ------------------------------------------------------------------ aiming
 
   /** World point under the crosshair: first building, ground or enemy along the camera ray. */
@@ -213,16 +243,40 @@ export class Player {
       if (d2 < r * r) t = proj;
     }
     this.aimPoint.set(cam.x + f.x * t, cam.y + f.y * t, cam.z + f.z * t);
+
+    // soft aim: the enemy closest to the crosshair that is in the open (not behind a building)
+    this.assistTarget = null;
+    if (!this.lock && this.assistOn) {
+      let bestOff = ASSIST_CONE;
+      for (const e of this.game.enemies) {
+        const m = e.mech;
+        if (m.dead) continue;
+        const c = m.center(this._v);
+        const ox = c.x - cam.x, oy = c.y - cam.y, oz = c.z - cam.z;
+        const len = Math.hypot(ox, oy, oz);
+        if (len < 30 || len > ASSIST_RANGE) continue;
+        const off = Math.acos(clamp((ox * f.x + oy * f.y + oz * f.z) / len, -1, 1)) - m.radius / len;
+        if (off >= bestOff) continue;
+        if (this.game.world.raycast(cam.x, cam.y, cam.z, ox / len, oy / len, oz / len, len) < len - m.radius) continue;
+        bestOff = off;
+        this.assistTarget = m;
+      }
+    }
   }
 
   /** Unit direction from `from` toward where a shot should go (lead-compensated when locked on). */
   _aimDir(from, speed, out) {
-    if (this.lock) {
-      const c = this.lock.center(out);
+    const target = this.lock ?? this.assistTarget;
+    if (target) {
+      const c = target.center(out);
       const dist = c.distanceTo(from);
       const t = dist / speed;
-      c.addScaledVector(this.lock.vel, t * 0.85);
-      return c.sub(from).normalize();
+      c.addScaledVector(target.vel, t * 0.85);
+      const toTarget = c.sub(from).normalize();
+      if (this.lock) return toTarget;
+      // soft aim: blend the two directions, so the shot closes most of the gap however far the crosshair point is
+      const toCrosshair = this._a.copy(this.aimPoint).sub(from).normalize();
+      return toTarget.lerp(toCrosshair, 1 - ASSIST_PULL).normalize();
     }
     return out.copy(this.aimPoint).sub(from).normalize();
   }
@@ -330,8 +384,9 @@ export class Player {
   _moveIntent(input) {
     const mech = this.mech;
     const rig = this.game.rig;
-    const fz = (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0);
-    const rx = (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
+    // keys give -1/0/1; the touch stick adds an analog axis on top of them
+    const fz = clamp((input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0) + input.axis.y, -1, 1);
+    const rx = clamp((input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0) + input.axis.x, -1, 1);
     const sy = Math.sin(rig.yaw), cy = Math.cos(rig.yaw);
     // camera-relative: forward = (-sin, -cos), right = (cos, -sin)
     const moveX = -sy * fz + cy * rx;

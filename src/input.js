@@ -3,14 +3,17 @@
 //
 // `pressed()` is an edge trigger that stays set until `endStep()` runs, which the game calls
 // after each fixed simulation step, so no press is lost or double-counted when the render
-// rate and the simulation rate disagree.
+// rate and the simulation rate disagree. For the same reason a key released before any step has
+// seen it stays down until the end of that step: a quick tap on a slow frame still counts.
 
 export class Input {
   constructor() {
     this.keys = new Set();
     this.edges = new Set();
+    this.pendingUp = new Set(); // released before a step saw them; let go at the next endStep()
     this.dx = 0;
     this.dy = 0;
+    this.axis = { x: 0, y: 0 }; // analog move stick (touch): x right, y forward, each -1..1
     this.enabled = false; // only gather look input while the game is running
   }
 
@@ -35,10 +38,12 @@ export class Input {
   keyDown(code) {
     if (!this.keys.has(code)) this.edges.add(code);
     this.keys.add(code);
+    this.pendingUp.delete(code);
   }
 
   keyUp(code) {
-    this.keys.delete(code);
+    if (this.edges.has(code)) this.pendingUp.add(code);
+    else this.keys.delete(code);
   }
 
   addLook(dx, dy) {
@@ -64,13 +69,18 @@ export class Input {
 
   endStep() {
     this.edges.clear();
+    for (const code of this.pendingUp) this.keys.delete(code);
+    this.pendingUp.clear();
   }
 
   clear() {
     this.keys.clear();
     this.edges.clear();
+    this.pendingUp.clear();
     this.dx = 0;
     this.dy = 0;
+    this.axis.x = 0;
+    this.axis.y = 0;
   }
 }
 

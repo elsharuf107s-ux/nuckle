@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "start": "python3 serve.py",
-    "test": "node scripts/test.mjs",
+    "test": "node scripts/test.mjs && node scripts/test-touch.mjs",
+    "test:desktop": "node scripts/test.mjs",
+    "test:touch": "node scripts/test-touch.mjs",
     "lint": "eslint src scripts"
   }
 }

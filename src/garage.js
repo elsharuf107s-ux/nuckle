@@ -145,10 +145,16 @@ export class Garage {
   open() {
     this.game.enterGarage();
     this.root.classList.remove('hidden');
+    this._showStats(false);
     this.nameEl.value = this.build.name;
     this._setPose('idle');
     this._renderOptions();
     this._renderStats();
+  }
+
+  _showStats(on) {
+    this.root.classList.toggle('show-stats', on);
+    document.getElementById('g-stats-toggle').textContent = on ? 'PARTS' : 'STATS';
   }
 
   close() {
@@ -177,6 +183,8 @@ export class Garage {
 
   _wire() {
     document.getElementById('g-back').addEventListener('click', () => this.hooks.onBack());
+    // narrow screens have room for one panel at a time: this swaps the parts list and the stat bars
+    document.getElementById('g-stats-toggle').addEventListener('click', () => this._showStats(!this.root.classList.contains('show-stats')));
     document.getElementById('g-go').addEventListener('click', () => this.hooks.onSortie());
     document.getElementById('g-random').addEventListener('click', () => this.commit(randomBuild()));
     document.getElementById('g-reset').addEventListener('click', () => this.commit({

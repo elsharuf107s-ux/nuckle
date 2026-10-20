@@ -1,6 +1,6 @@
 # Steel Vanguard
 
-A 3D third-person mobile-suit combat game that runs in the browser. **Build your own mech piece by piece** in the
+A 3D third-person mobile-suit combat game that runs in the browser, on desktop and on phones. **Build your own mech piece by piece** in the
 garage (eleven slots, tuning points and paint, balanced by a load limit and a power budget), then take it through a dusk-lit colony city:
 boost over rooftops, lock on, burn enemies down with your weapon, homing missiles and a three-hit beam-saber combo,
 and survive five waves ending in a fight with the **Crimson Baron**.
@@ -17,7 +17,8 @@ python3 serve.py          # http://localhost:8000   (or: python3 serve.py 3000)
 Any static file server works. The only requirement is that it serves `.js` files with a JavaScript MIME type
 (ES modules). Open the page and click **SORTIE** to launch with your current build (the stock VG-01 Vanguard the first time), or
 **GARAGE** to build your own first. The game captures your mouse when a sortie starts. Press **Esc** to pause.
-Desktop browsers with WebGL only: there is no touch or gamepad support.
+Any browser with WebGL works: desktop with keyboard and mouse, or a phone or tablet with the touch controls
+described below. There is no gamepad support.
 
 ### Controls
 
@@ -61,8 +62,40 @@ Between waves your ammo and missiles are restocked and 25% of your armor is repa
 gives a rank (S/A/B/C) from combat score, clear time and remaining armor. Kills in quick succession build a score
 multiplier.
 
-The pause menu has mouse sensitivity, volume, a shadows toggle and a resolution scale. Lower the last two if
+The pause menu has look sensitivity, volume, a shadows toggle and a resolution scale. Lower the last two if
 the game runs slowly on integrated graphics. Settings are remembered in `localStorage`.
+
+### Playing on a phone or tablet
+
+Open the page on a touch device (landscape; upright shows a rotate prompt and pauses the sortie) and the touch
+interface switches on by itself. Nothing is captured, so there is no pointer lock. Every control feeds the same input
+layer as the keyboard, so the game plays identically.
+
+| Touch | Action |
+| --- | --- |
+| Left thumb, anywhere on the left | Floating **move stick**, analog (a half push walks slower) |
+| Drag on the right | Look around (when not locked on) |
+| Tap an enemy | Lock onto it |
+| **FIRE** (hold) | Your gun. With Twin Sabers it is the saber button |
+| **SABER** | Beam saber, tap again to chain the combo |
+| **MISSILE** | Missile salvo, shows charges and a recharge fill |
+| **DASH** | Quick-boost dash |
+| **BOOST** | Tap to latch boost on, tap again to stop; or hold it to boost only while held |
+| **LOCK** / **SWITCH** / **RELOAD** | Lock-on on/off, next target, reload |
+| **CANNON** / **SUB** / **BURST** | Appear only when you fitted a shoulder cannon or sub-weapon, or the burst gauge is full |
+| **II** (top, by the radar) | Pause |
+
+- **Aim assist** (on by default, switch it off in the pause menu): lock-on already starts by itself on the nearest
+  enemy and tracks it, and with no lock, shots bend toward the enemy closest to your crosshair (a dashed amber ring
+  shows which one). It only applies to the touch interface; desktop aiming is untouched.
+- **Control size** in the pause menu scales the buttons. The layout respects notches and rounded corners.
+- Phones start with shadows off and 75% resolution; raise them in the pause menu if your device copes.
+- The garage works with fingers too: drag to turn the mech, pinch to zoom, and on narrow screens a **STATS / PARTS**
+  button swaps between the parts list and the stat bars. The title screen has a **FULLSCREEN** button where the browser
+  allows it (not iPhone Safari; use Share, then Add to Home Screen for the same effect).
+- The touch controls are chosen by a coarse pointer, by the first finger that touches the page (touch laptops), or
+  forced with `?touch=1` in the address (handy for trying them with a mouse; `?touch=0` forces them off). A mouse click
+  between sorties switches a touch laptop back to desktop controls.
 
 ## The garage
 
@@ -118,6 +151,8 @@ src/ai.js                 Drone / Striker / Bulwark / Baron behaviours
 src/weapons.js            projectiles with swept collision and homing
 src/fx.js                 particles, explosions, debris, saber arcs
 src/camera.js             chase camera with lock-on framing and trauma shake
+src/input.js              keyboard, mouse and touch state in one key set (plus the analog stick axis)
+src/touch.js              on-screen touch controls: floating stick, look drag, tap-to-target, action buttons
 src/hud.js                DOM bars plus canvas reticle, radar and damage numbers
 src/missions.js           wave director
 src/audio.js              synthesised sound effects and music
@@ -125,7 +160,8 @@ src/data.js               enemy mech stats, palettes and wave definitions
 src/parts.js              garage parts catalogue, load/power budgets, tuning, stat derivation, build validation (no browser code)
 src/garage.js             the garage screen: tabs, option cards, stat bars with limit markers, tuning, paint, saved builds
 vendor/three/             three.js r170 (MIT), vendored so the game runs offline
-scripts/test.mjs          end-to-end test suite
+scripts/test.mjs          end-to-end test suite (desktop)
+scripts/test-touch.mjs    phone test: real multi-touch in an emulated phone, layouts at several sizes
 serve.py                  tiny static server
 ```
 
@@ -142,9 +178,16 @@ effects in actual combat (vulcans shooting down missiles, flares, the repair kit
 power shortfalls, tuning), 25 random builds through a short fight each, each enemy type and the boss, a full
 scripted playthrough to victory, a defeat and retry, and the pause/options UI. It fails on any console error.
 
+`scripts/test-touch.mjs` does the same for phones: an emulated touch device with real multi-touch (both thumbs at once),
+the title, garage, HUD, pause and end screens at 844x390 and 667x375, every on-screen control, the analog stick, tap to
+lock on, the soft aim (including a shot that only lands with the assist), the pause and rotate behaviour, and that the
+desktop page is unchanged.
+
 ```bash
 npm i -D playwright       # once; a Chromium build must be available to Playwright
-npm test                  # SHOTS=0 to skip screenshots, DEBUG=1 for the raw numbers
+npm test                  # both suites; SHOTS=0 to skip screenshots, DEBUG=1 for the raw numbers
+npm run test:desktop      # just the desktop suite
+npm run test:touch        # just the phone suite
 npm run lint              # needs eslint
 ```
 

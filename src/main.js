@@ -1,7 +1,8 @@
-// Entry point: builds the game and wires up the title / pause / end screens and pointer lock.
+// Entry point: builds the game and wires up the title / pause / end screens, pointer lock and touch.
 
 import { Game } from './game.js';
 import { Garage, describeBuild } from './garage.js';
+import { TouchControls } from './touch.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (id, on) => $(id).classList.toggle('hidden', !on);
@@ -15,6 +16,8 @@ try {
   throw err;
 }
 window.__game = game; // handy for debugging and used by scripts/test.mjs
+const touch = new TouchControls(game); // also registers itself as game.touch
+touch.onPause = () => pauseUI();
 
 // ---- garage: the saved build is fielded at startup so SORTIE always uses what you last built
 const garage = new Garage(game, {
@@ -48,6 +51,7 @@ function closeGarage() {
 
 let wasLocked = false;
 function lockPointer() {
+  if (touch.active) return; // fingers have nothing to capture
   try {
     const p = game.canvas.requestPointerLock();
     if (p && p.catch) p.catch(() => {});
@@ -92,6 +96,23 @@ $('btn-quit').addEventListener('click', () => {
   show('screen-title', true);
 });
 
+// Fullscreen (where the browser offers it): hides the browser bars and asks for landscape.
+const fsRoot = document.documentElement;
+const fsRequest = fsRoot.requestFullscreen ?? fsRoot.webkitRequestFullscreen;
+if (fsRequest) $('btn-full').classList.remove('hidden');
+$('btn-full').addEventListener('click', async () => {
+  try {
+    if (document.fullscreenElement ?? document.webkitFullscreenElement) {
+      await (document.exitFullscreen ?? document.webkitExitFullscreen).call(document);
+    } else {
+      await fsRequest.call(fsRoot, { navigationUI: 'hide' });
+      await screen.orientation?.lock?.('landscape').catch(() => {});
+    }
+  } catch {
+    // fullscreen refused: nothing to do
+  }
+});
+
 // Options persist between visits (storage can be unavailable, e.g. in private windows).
 const store = {
   get(key) { try { return localStorage.getItem(`steel-vanguard.${key}`); } catch { return null; } },
@@ -111,10 +132,21 @@ function bindOption(id, key, apply, read = (el) => el.value) {
   apply(read(el));
 }
 
+// Phones start lighter (no shadows, 75% resolution) unless the player already chose something.
+if (touch.active) {
+  if (store.get('shadows') === null) $('opt-shadows').checked = false;
+  if (store.get('scale') === null) $('opt-scale').value = '0.75';
+}
 bindOption('opt-sens', 'sens', (v) => { game.rig.sensitivity = 0.0022 * Number(v); });
 bindOption('opt-volume', 'volume', (v) => game.audio.setVolume(Number(v)));
 bindOption('opt-shadows', 'shadows', (on) => game.applySettings({ shadows: on }), (el) => el.checked);
 bindOption('opt-scale', 'scale', (v) => game.applySettings({ scale: Number(v) }));
+bindOption('opt-assist', 'assist', (on) => { game.settings.aimAssist = on; }, (el) => el.checked);
+bindOption('opt-tscale', 'tscale', (v) => touch.setUserScale(v));
+
+// The game is played in landscape: turning a touch device upright pauses the sortie.
+const portrait = window.matchMedia('(orientation: portrait)');
+portrait.addEventListener?.('change', () => { if (touch.active && portrait.matches) pauseUI(); });
 
 // Losing the pointer lock (Esc) pauses the game.
 document.addEventListener('pointerlockchange', () => {
@@ -130,17 +162,39 @@ window.addEventListener('keydown', (e) => {
   else pauseUI(); // when the pointer was not locked
 });
 
-// ---- garage turntable: drag to rotate, scroll to zoom
+// ---- garage turntable: drag to rotate, scroll or pinch to zoom
 const canvas = game.canvas;
+const fingers = new Map(); // active pointers on the canvas (one drags, two pinch)
+const spread = () => {
+  const [a, b] = [...fingers.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+let lastSpread = 0;
 canvas.addEventListener('pointerdown', (e) => {
   if (game.state !== 'garage') return;
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   game.garageCam.dragging = true;
   canvas.setPointerCapture?.(e.pointerId);
+  if (fingers.size === 2) lastSpread = spread();
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (game.state === 'garage' && game.garageCam.dragging) game.garageLook(e.movementX, e.movementY);
+  const f = fingers.get(e.pointerId);
+  if (!f || game.state !== 'garage') return;
+  const dx = e.clientX - f.x, dy = e.clientY - f.y;
+  f.x = e.clientX;
+  f.y = e.clientY;
+  if (fingers.size >= 2) {
+    const d = spread();
+    game.garageZoom((lastSpread - d) * 2.5); // spreading the fingers brings the camera in
+    lastSpread = d;
+  } else {
+    game.garageLook(dx, dy);
+  }
 });
-const endDrag = () => { game.garageCam.dragging = false; };
+const endDrag = (e) => {
+  fingers.delete(e.pointerId);
+  if (fingers.size === 0) game.garageCam.dragging = false;
+};
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 canvas.addEventListener('wheel', (e) => {

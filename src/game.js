@@ -20,7 +20,7 @@ export class Game {
   constructor(canvas) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.settings = { shadows: true, scale: 1 }; // graphics options, see applySettings()
+    this.settings = { shadows: true, scale: 1, aimAssist: true }; // graphics options (see applySettings) and the touch aim assist
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -233,6 +233,7 @@ export class Game {
   }
 
   render() {
+    this.touch?.update();
     this.fx.setView(this.renderer.domElement.height, this.camera.fov);
     this.renderer.render(this.scene, this.camera);
   }

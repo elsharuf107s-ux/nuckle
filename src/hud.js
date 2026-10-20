@@ -289,6 +289,21 @@ export class Hud {
     ctx.fillStyle = ctx.strokeStyle;
     ctx.fillRect(cx - 1, cy - 1, 2, 2);
 
+    // soft aim (touch): a dashed ring shows which enemy your shots are being pulled toward
+    const assist = this.game.player.assistTarget;
+    if (assist) {
+      const s = this.toScreen(assist.center(this._c), this._s);
+      if (s.visible) {
+        ctx.strokeStyle = 'rgba(255,182,46,0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 20, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
     if (this.hitMarker > 0) {
       this.hitMarker -= dt;
       ctx.strokeStyle = '#fff';
@@ -382,10 +397,18 @@ export class Hud {
     ctx.fillRect(s.x - size, s.y + size + 8, size * 2 * (m.hp / m.maxHp), 5);
   }
 
+  /** Radar circle: smaller and tucked into the corner (clear of notches) when the touch controls are up. */
+  radarGeom() {
+    const t = this.game.touch;
+    if (!t?.active) return { R: 72, cx: this.w - 72 - 26, cy: 72 + 26 };
+    const R = Math.round(46 * Math.max(0.85, t.scale));
+    return { R, cx: this.w - R - 12 - t.inset.right, cy: R + 10 + t.inset.top };
+  }
+
   _drawRadar(ctx) {
     const g = this.game;
-    const R = 72, range = this.game.player.stats.radar;
-    const cx = this.w - R - 26, cy = R + 26;
+    const range = this.game.player.stats.radar;
+    const { R, cx, cy } = this.radarGeom();
     const yaw = g.rig.yaw;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
     const me = g.player.mech.pos;
