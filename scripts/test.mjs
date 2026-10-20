@@ -38,6 +38,62 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
 };
 
+// ---------------------------------------------------------------- parts logic (plain Node, no browser)
+
+{
+  const P = await import(path.join(root, 'src', 'parts.js'));
+  const def = P.deriveStats(P.DEFAULT_BUILD);
+  const vary = (slot, id) => P.deriveStats({ ...P.DEFAULT_BUILD, [slot]: id });
+
+  check('default build matches the original Vanguard', Math.abs(def.hp - 2600) <= 50 && def.speed === 40 && def.en === 100 && def.weapon.mag === 8, `armor ${def.hp}`);
+
+  const every = [];
+  for (const slot of P.SLOTS) for (const part of P.PARTS[slot]) every.push([slot, part.id, vary(slot, part.id)]);
+  const finite = every.every(([, , s]) => [s.hp, s.speed, s.airSpeed, s.en, s.dashSpeed, s.dashCost, s.dps, s.melee, s.weight, s.turn].every(Number.isFinite) && s.hp > 0 && s.speed > 0);
+  check('every part yields finite, positive stats', finite, `${every.length} parts`);
+
+  const dir = (label, ok) => check(`part effect: ${label}`, ok);
+  dir('heavy torso: more armor, slower', vary('torso', 'heavy').hp > def.hp && vary('torso', 'heavy').speed < def.speed);
+  dir('light torso: less armor, faster', vary('torso', 'light').hp < def.hp && vary('torso', 'light').speed > def.speed);
+  dir('reactor torso: more boost fuel and burst gain', vary('torso', 'reactor').en > def.en && vary('torso', 'reactor').burstGain > 1);
+  dir('tank legs: armor and stagger resistance, slow', vary('legs', 'tank').hp > def.hp && vary('legs', 'tank').staggerAt > def.staggerAt && vary('legs', 'tank').speed < def.speed);
+  dir('sprint legs: faster, cheaper dashes', vary('legs', 'sprint').speed > def.speed && vary('legs', 'sprint').dashCost < def.dashCost);
+  dir('jump legs: stronger climb and air EN regen', vary('legs', 'jump').ascendSpeed > def.ascendSpeed && vary('legs', 'jump').enAir > def.enAir);
+  dir('booster pack: more boost fuel', vary('backpack', 'booster').en > def.en);
+  dir('missile pod: third charge and stronger missiles', vary('backpack', 'pod').missileCharges === 3 && vary('backpack', 'pod').missileDamage > 1);
+  dir('wing pack: faster, cheaper dash', vary('backpack', 'wing').dashSpeed > def.dashSpeed && vary('backpack', 'wing').dashCost < def.dashCost);
+  dir('visor head: tougher and harder to stagger', vary('head', 'visor').hp > def.hp && vary('head', 'visor').staggerAt > def.staggerAt);
+  dir('scout head: tighter missile homing', vary('head', 'scout').missileTurn > 0);
+  dir('commander head: faster burst gain', vary('head', 'horn').burstGain > 1);
+  dir('blade arms: heavy melee', vary('arms', 'blade').melee > 1.2);
+  dir('precision arms: faster weapon cycling', vary('arms', 'precision').weapon.cooldown < def.weapon.cooldown && vary('arms', 'precision').weapon.reload < def.weapon.reload);
+  dir('assault arms: more armor, slower reload', vary('arms', 'assault').hp > def.hp && vary('arms', 'assault').weapon.reload > def.weapon.reload);
+  dir('twin sabers: melee-only with a melee bonus', vary('weapon', 'sabers').weapon.kind === 'melee' && vary('weapon', 'sabers').melee > 1.3);
+  dir('shield guards, no off-hand is lighter', vary('offhand', 'shield').guard > 0 && vary('offhand', 'none').weight < def.weight && vary('offhand', 'none').guard === 0);
+  dir('shoulder cannon grants an ability', !!vary('offhand', 'cannon').ability && vary('offhand', 'cannon').ability.cooldown > 0);
+  dir('weapon kinds differ as advertised', vary('weapon', 'mg').weapon.kind === 'bullet' && vary('weapon', 'bazooka').weapon.kind === 'cannon' && !!vary('weapon', 'bazooka').weapon.splash && vary('weapon', 'sniper').weapon.speed > vary('weapon', 'rifle').weapon.speed);
+
+  // weight really is what slows a mech down: the heaviest build is slower than the lightest
+  const heavy = P.deriveStats({ ...P.DEFAULT_BUILD, head: 'visor', torso: 'heavy', arms: 'assault', legs: 'tank', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon' });
+  const light = P.deriveStats({ ...P.DEFAULT_BUILD, head: 'scout', torso: 'light', arms: 'precision', legs: 'sprint', backpack: 'wing', weapon: 'rifle', offhand: 'none' });
+  check('heaviest build is slower than the lightest', heavy.speed < def.speed && light.speed > def.speed && heavy.weight > light.weight && heavy.hp > light.hp, `${heavy.speed.toFixed(1)} vs ${light.speed.toFixed(1)}`);
+
+  // sanitising: bad saved data can never break the game
+  const dirty = P.sanitizeBuild({ name: '<script>x</script> mech', head: 'nope', torso: 'heavy', legs: 7, paint: { main: 'red', sub: '#ABCDEF', accent: null }, energy: 'x', thruster: 'green', extra: 1 });
+  check('sanitizeBuild repairs invalid data', dirty.head === 'vfin' && dirty.torso === 'heavy' && dirty.legs === 'std' && dirty.paint.main === P.DEFAULT_BUILD.paint.main && dirty.paint.sub === '#abcdef'
+    && dirty.energy === 'pink' && dirty.thruster === 'green' && !('extra' in dirty) && /^[A-Z0-9 -]{1,14}$/.test(dirty.name), JSON.stringify(dirty.name));
+  check('sanitizeBuild is idempotent and tolerates junk', JSON.stringify(P.sanitizeBuild(dirty)) === JSON.stringify(dirty) && ['x', 5, null, undefined, [], {}].every((j) => P.sanitizeBuild(j).head === 'vfin'));
+  let seed = 7;
+  const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const randoms = Array.from({ length: 200 }, () => P.randomBuild(rng));
+  check('random builds are always valid', randoms.every((b) => JSON.stringify(P.sanitizeBuild(b)) === JSON.stringify(b) && Number.isFinite(P.deriveStats(b).hp)));
+  check('random builds actually vary', new Set(randoms.map((b) => JSON.stringify(b))).size > 150);
+  const r = P.statRanges();
+  check('stat ranges are sane', Object.values(r).every((v) => v.max > v.min), JSON.stringify(Object.fromEntries(Object.entries(r).map(([k, v]) => [k, [Math.round(v.min), Math.round(v.max)]]))));
+  const d = P.deriveMech(P.DEFAULT_BUILD);
+  check('deriveMech yields a full mech def', d.def.hp === d.stats.hp && d.def.spec.palette.main === 0xeceff6 && d.def.spec.head === 'v' && d.def.spec.offhand === 'shield' && d.def.guard > 0);
+}
+
 // ---------------------------------------------------------------- start server + browser
 
 const port = await freePort();
@@ -82,6 +138,105 @@ try {
   await page.waitForTimeout(1500);
   check('page boots without console errors', problems.length === 0, problems.slice(0, 3).join(' | '));
   check('title screen is visible', await page.isVisible('#screen-title'));
+
+  // ------------------------------------------------------------ garage UI (real clicks)
+  const counts = { head: 4, torso: 4, arms: 4, legs: 4, backpack: 4, weapon: 5, offhand: 3 };
+  await page.click('#btn-garage');
+  const opened = await page.evaluate(() => ({ state: window.__game.state, shown: !document.getElementById('screen-garage').classList.contains('hidden'), titleHidden: document.getElementById('screen-title').classList.contains('hidden') }));
+  check('GARAGE button opens the garage', opened.state === 'garage' && opened.shown && opened.titleHidden);
+  check('garage has all eight tabs', (await page.$$('.g-tab')).length === 8);
+
+  const tabIds = ['head', 'torso', 'arms', 'legs', 'backpack', 'weapon', 'offhand'];
+  const optionCounts = {};
+  for (const id of tabIds) {
+    await page.click(`.g-tab[data-tab="${id}"]`);
+    optionCounts[id] = (await page.$$('.opt')).length;
+  }
+  check('every slot lists all its parts', tabIds.every((id) => optionCounts[id] === counts[id]), JSON.stringify(optionCounts));
+
+  // equip a part by clicking it: the build, stats and live model all change
+  await page.click('.g-tab[data-tab="torso"]');
+  const armorText = () => page.$eval('#g-stats .stat:nth-child(1) .s-head b', (e) => e.firstChild.textContent);
+  const armorBefore = Number(await armorText());
+  await page.click('.opt[data-id="heavy"]');
+  const eq = await page.evaluate(() => {
+    const g = window.__game;
+    return { torso: g.player.build.torso, spec: g.player.mech.def.spec.torso, hp: g.player.mech.maxHp, statHp: g.player.stats.hp,
+      selected: document.querySelector('.opt.selected')?.dataset.id, tag: document.querySelector('.opt.selected .o-tag')?.textContent,
+      stored: JSON.parse(localStorage.getItem('steel-vanguard.build') || '{}').torso };
+  });
+  const armorAfter = Number(await armorText());
+  check('clicking a part equips it and rebuilds the mech', eq.torso === 'heavy' && eq.spec === 'heavy' && eq.hp === eq.statHp && eq.hp > 2600 && eq.selected === 'heavy' && eq.tag === 'EQUIPPED', JSON.stringify(eq));
+  check('stat bars update with the build', armorAfter > armorBefore, `${armorBefore} -> ${armorAfter}`);
+  check('the build is saved on every change', eq.stored === 'heavy');
+
+  // hovering previews without equipping
+  await page.hover('.opt[data-id="light"]');
+  const hover = await page.evaluate(() => ({ build: window.__game.player.build.torso, delta: document.querySelector('#g-stats .stat:nth-child(1) .d')?.textContent, text: document.querySelector('#g-stats .stat:nth-child(1) .s-head b').firstChild.textContent }));
+  check('hover previews a part without equipping it', hover.build === 'heavy' && /−/.test(hover.delta) && Number(hover.text) < armorAfter, JSON.stringify(hover));
+  await page.mouse.move(700, 120);
+  await page.waitForTimeout(100);
+  const unhover = await page.evaluate(() => document.querySelector('#g-stats .stat:nth-child(1) .d')?.textContent);
+  check('moving off a part clears the preview', unhover === '');
+
+  // paint
+  await page.click('.g-tab[data-tab="paint"]');
+  check('paint tab offers schemes, colour pickers and swatches', (await page.$$('.preset')).length === 6 && (await page.$$('input[type=color]')).length === 4 && (await page.$$('.swatch')).length === 11);
+  await page.click('.preset:nth-child(2)'); // CRIMSON
+  const paint = await page.evaluate(() => {
+    const g = window.__game;
+    return { main: g.player.build.paint.main, mat: g.player.mech.model.flashMats[0].color.getHex() };
+  });
+  check('a paint scheme recolours the model', paint.main === '#c0282f' && paint.mat === 0xc0282f, JSON.stringify(paint));
+  await page.evaluate(() => {
+    const i = document.querySelectorAll('input[type=color]')[1];
+    i.value = '#00ff00';
+    i.dispatchEvent(new Event('input'));
+  });
+  // the picker applies on the next animation frame (drag events are coalesced), so wait for it
+  await page.waitForFunction(() => window.__game.player.build.paint.sub === '#00ff00', null, { timeout: 10000 }).catch(() => {});
+  const custom = await page.evaluate(() => ({ sub: window.__game.player.build.paint.sub, mat: window.__game.player.mech.model.flashMats[1].color.getHex() }));
+  check('a custom colour applies live', custom.sub === '#00ff00' && custom.mat === 0x00ff00, JSON.stringify(custom));
+  await page.click('.swatch:nth-of-type(3)');
+  check('energy and thruster swatches change the build', (await page.evaluate(() => window.__game.player.build.energy)) === 'green');
+
+  // name, pose, randomise, reset
+  await page.fill('#g-name', 'tank-01 <b>!!');
+  await page.keyboard.press('Enter');
+  check('callsign is sanitised', (await page.evaluate(() => window.__game.player.build.name)) === 'TANK-01 B');
+  await page.click('.pose[data-pose="boost"]');
+  check('preview pose can be switched', (await page.evaluate(() => window.__game.garagePose)) === 'boost');
+  await page.click('.pose[data-pose="idle"]');
+  const rand1 = await page.evaluate(() => { document.getElementById('g-random').click(); return JSON.stringify(window.__game.player.build); });
+  const rand2 = await page.evaluate(() => { document.getElementById('g-random').click(); return JSON.stringify(window.__game.player.build); });
+  check('RANDOMIZE produces different valid builds', rand1 !== rand2);
+  await page.click('#g-reset');
+  const reset = await page.evaluate(() => { const b = window.__game.player.build; return { head: b.head, torso: b.torso, weapon: b.weapon, name: b.name }; });
+  check('RESET restores the stock Vanguard build', reset.head === 'vfin' && reset.torso === 'std' && reset.weapon === 'rifle' && reset.name === 'AEGIS-01');
+
+  // persistence across a reload, and the title screen reflects it
+  await page.click('.g-tab[data-tab="weapon"]');
+  await page.click('.opt[data-id="sniper"]');
+  await page.fill('#g-name', 'longshot');
+  await page.keyboard.press('Enter');
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__game && window.__garage);
+  const persisted = await page.evaluate(() => ({ weapon: window.__game.player.build.weapon, name: window.__game.player.build.name, title: document.getElementById('title-build').textContent,
+    hudName: window.__game.player.weapon.name }));
+  check('the saved build is restored after a reload', persisted.weapon === 'sniper' && persisted.name === 'LONGSHOT' && /LONGSHOT/.test(persisted.title) && persisted.hudName === 'BEAM SNIPER', JSON.stringify(persisted));
+
+  // navigation: Esc goes back, SORTIE from the garage launches with the build
+  await page.click('#btn-garage');
+  await page.keyboard.press('Escape');
+  const back = await page.evaluate(() => ({ state: window.__game.state, title: !document.getElementById('screen-title').classList.contains('hidden'), garage: document.getElementById('screen-garage').classList.contains('hidden') }));
+  check('Esc leaves the garage for the title screen', back.state === 'title' && back.title && back.garage);
+  await page.click('#btn-garage');
+  await page.click('#g-go');
+  await page.waitForTimeout(200);
+  const launched = await page.evaluate(() => ({ state: window.__game.state, name: document.getElementById('mech-name').textContent, weapon: document.getElementById('weapon-name').textContent, garage: document.getElementById('screen-garage').classList.contains('hidden') }));
+  check('SORTIE from the garage launches with the built mech', launched.state === 'playing' && launched.name === 'LONGSHOT' && launched.weapon === 'BEAM SNIPER' && launched.garage, JSON.stringify(launched));
+  // return to the stock build for the rest of the suite
+  await page.evaluate(() => { window.__game.toTitle(); window.__garage.commit({ ...window.__garage.build, name: 'AEGIS-01', weapon: 'rifle' }); document.getElementById('screen-title').classList.remove('hidden'); });
 
   // Install helpers inside the page: a scripted pilot, and building-collision invariants.
   await page.evaluate(() => {
@@ -340,6 +495,220 @@ try {
   check('sabre deals melee damage', weapons.sabreDamage >= 700, `${weapons.sabreDamage} dmg`);
   check('missile salvo launches and hits', weapons.missilesInFlight === 4 && weapons.missileDamage >= 300 && weapons.chargeSpent === 1, `${weapons.missileDamage} dmg`);
 
+  // ------------------------------------------------------------ 5b. custom loadouts change how the mech fights
+  const loadouts = await page.evaluate(async () => {
+    const g = window.__game, T = window.__t;
+    const P = await import('/src/parts.js');
+    const { createEnemy } = await import('/src/ai.js');
+    const out = {};
+    const fresh = (patch) => {
+      g.cheat.invincible = true;
+      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, ...patch });
+      g.startMission();
+      g.manual = true;
+      g.missions.state = 'idle'; // no waves: we place our own dummies
+      g.hud.reset();
+      g.player.mech.place(0, 0, 0, 0);
+      g.rig.reset(0);
+    };
+    const dummy = (x, z) => {
+      const e = createEnemy(g, 'bulwark', 1);
+      e.mech.place(x, z, 0, 0);
+      e.think = () => ({ faceYaw: 0 });
+      e.def_dodge = 0;
+      e.mech.hp = e.mech.maxHp = 100000;
+      g.enemies.push(e);
+      return e;
+    };
+    const dealt = (e) => e.mech.maxHp - e.mech.hp;
+    const playerShots = () => g.projectiles.list.filter((p) => p.team === 'player');
+
+    // --- each gun fires its own kind of projectile
+    out.guns = {};
+    for (const wid of ['rifle', 'mg', 'bazooka', 'sniper']) {
+      fresh({ weapon: wid });
+      const d = dummy(0, -80);
+      g.step(3);
+      const kinds = new Set(), speeds = new Set();
+      let ammoMin = g.player.ammo;
+      T.keys(['Mouse0']);
+      for (let i = 0; i < 100; i++) {
+        g.step(1);
+        for (const p of playerShots()) { kinds.add(p.type); speeds.add(Math.round(p.speed)); }
+        ammoMin = Math.min(ammoMin, g.player.ammo);
+      }
+      T.keys([], ['Mouse0']);
+      g.step(120); // let the last shots land
+      out.guns[wid] = { kinds: [...kinds], speeds: [...speeds], dealt: dealt(d), mag: g.player.magSize, ammoMin, name: g.player.weapon.name };
+    }
+
+    // --- bazooka shells explode: a bystander next to the target takes splash damage
+    fresh({ weapon: 'bazooka' });
+    const a = dummy(0, -80);
+    const b = dummy(14, -80);
+    g.step(3);
+    T.keys(['Mouse0']); g.step(2); T.keys([], ['Mouse0']);
+    g.step(120);
+    out.splash = { target: dealt(a), bystander: dealt(b) };
+
+    // --- rapid gun: big magazine drains, then reloads
+    fresh({ weapon: 'mg' });
+    g.step(3);
+    out.mgMag = g.player.ammo;
+    g.player.ammo = 1; g.player.fireCd = 0;
+    T.keys(['Mouse0']); g.step(12); T.keys([], ['Mouse0']);
+    out.mgReload = { reloading: g.player.reloadT > 0, ammo: g.player.ammo };
+    g.step(60 * 3);
+    out.mgReloaded = g.player.ammo;
+
+    // --- twin sabers: no gun, left mouse swings the blade
+    fresh({ weapon: 'sabers' });
+    const s = dummy(0, -26);
+    g.step(3);
+    let swung = false, stages = new Set();
+    // tap, then tap again during each swing so the combo chains: stage 0 -> 1 -> 2
+    for (const wait of [15, 30, 45]) {
+      T.tap('Mouse0');
+      for (let i = 0; i < wait; i++) { g.step(1); if (g.player.melee) { swung = true; stages.add(g.player.melee.stage); } }
+    }
+    g.step(60);
+    out.sabers = {
+      swung, dealt: dealt(s), noProjectiles: playerShots().every((p) => p.type === 'missile'), stages: [...stages],
+      meleeOnly: g.player.meleeOnly, gunRowShown: document.getElementById('ammo-pips').style.display !== 'none',
+      key: document.getElementById('weapon-key').textContent, saberRowHidden: document.getElementById('saber-row').style.display === 'none',
+    };
+    // the same build deals more melee damage than the stock one
+    fresh({});
+    const s2 = dummy(0, -26);
+    g.step(3);
+    T.tap('Mouse2'); g.step(40);
+    const stockHit = dealt(s2);
+    fresh({ weapon: 'sabers' });
+    const s3 = dummy(0, -26);
+    g.step(3);
+    T.tap('Mouse2'); g.step(40);
+    out.meleeBonus = { stock: stockHit, sabers: dealt(s3) };
+
+    // --- shoulder cannon (F): fires once, then cools down
+    fresh({ offhand: 'cannon' });
+    const c = dummy(0, -90);
+    g.step(3);
+    out.cannonRowShown = document.getElementById('cannon-row').style.display !== 'none';
+    T.tap('KeyF');
+    g.step(4);
+    out.cannon = { shells: playerShots().filter((p) => p.type === 'cannon').length, cd: g.player.cannonCd };
+    T.tap('KeyF'); g.step(3);
+    out.cannonSecond = playerShots().filter((p) => p.type === 'cannon').length; // still just the one
+    g.step(120);
+    out.cannonDealt = dealt(c);
+    fresh({ offhand: 'shield' });
+    out.noCannonRow = document.getElementById('cannon-row').style.display === 'none';
+
+    // --- shield guard soaks gunfire but not saber hits
+    const hitFor = (offhand, kind) => {
+      fresh({ offhand });
+      g.cheat.invincible = false;
+      const m = g.player.mech;
+      m.invuln = 0;
+      const before = m.hp;
+      m.takeDamage(100, { kind });
+      return before - m.hp;
+    };
+    out.guard = { shieldBullet: hitFor('shield', 'bullet'), shieldSaber: hitFor('shield', 'saber'), noneBullet: hitFor('none', 'bullet') };
+    g.cheat.invincible = true;
+
+    // --- missile pod: three charges, harder hits; scout head: tighter homing
+    fresh({ backpack: 'pod', head: 'scout' });
+    dummy(0, -120);
+    g.step(3);
+    out.pod = { charges: g.player.missiles, pips: document.getElementById('missile-pips').children.length };
+    T.tap('KeyE'); g.step(26);
+    const missile = g.projectiles.list.find((p) => p.type === 'missile');
+    out.podMissile = missile ? { damage: missile.damage, turn: missile.turn } : null;
+    fresh({});
+    out.stockMissile = (() => { dummy(0, -120); g.step(3); T.tap('KeyE'); g.step(26); const m2 = g.projectiles.list.find((p) => p.type === 'missile'); return m2 ? { damage: m2.damage, turn: m2.turn } : null; })();
+
+    // --- build stats reach the mech: armor, boost fuel and dash cost
+    fresh({ torso: 'heavy', legs: 'tank', backpack: 'booster' });
+    const m1 = g.player.mech;
+    out.heavyMech = { hp: m1.maxHp, en: m1.maxEn, speed: m1.def.speed, stagger: m1.def.staggerAt };
+    fresh({ backpack: 'wing' });
+    out.wingMech = { dashCost: g.player.mech.def.dashCost, dashSpeed: g.player.mech.def.dashSpeed };
+
+    // --- weight is felt on the ground: a light sprinter outruns a heavy tank over the same time
+    const sprintDistance = (patch) => {
+      fresh(patch);
+      g.rig.yaw = 0;
+      g.step(10);
+      const z0 = g.player.mech.pos.z;
+      T.keys(['KeyW']); g.step(90); T.keys([], ['KeyW']);
+      return z0 - g.player.mech.pos.z;
+    };
+    out.run = {
+      sprinter: sprintDistance({ torso: 'light', legs: 'sprint', backpack: 'wing', offhand: 'none', head: 'scout' }),
+      tank: sprintDistance({ torso: 'heavy', legs: 'tank', backpack: 'booster', offhand: 'cannon', head: 'visor', weapon: 'bazooka' }),
+    };
+    return out;
+  });
+  dump('loadouts', loadouts);
+  const G = loadouts.guns;
+  check('beam rifle fires beams', G.rifle.kinds.includes('beam') && G.rifle.dealt > 300, `${G.rifle.dealt} dmg`);
+  check('rapid gun fires a stream of light bullets', G.mg.kinds.includes('bullet') && G.mg.dealt > 300 && G.mg.mag === 30 && G.mg.ammoMin < 24, `${G.mg.dealt} dmg, ammo down to ${G.mg.ammoMin}`);
+  check('bazooka lobs slow explosive shells', G.bazooka.kinds.includes('cannon') && G.bazooka.speeds.every((v) => v === 300) && G.bazooka.dealt > 400 && G.bazooka.ammoMin >= 0, `${G.bazooka.dealt} dmg`);
+  check('sniper fires very fast heavy beams', G.sniper.kinds.includes('beam') && G.sniper.speeds.some((v) => v >= 1300) && G.sniper.dealt > 400, `${G.sniper.dealt} dmg`);
+  check('bazooka splash hurts bystanders', loadouts.splash.target > 500 && loadouts.splash.bystander > 150, `target ${Math.round(loadouts.splash.target)}, bystander ${Math.round(loadouts.splash.bystander)}`);
+  check('rapid gun reloads its big magazine', loadouts.mgMag === 30 && loadouts.mgReload.reloading && loadouts.mgReloaded === 30);
+  check('twin sabers: LMB swings a 3-stage combo and there is no gun', loadouts.sabers.swung && loadouts.sabers.stages.length === 3 && loadouts.sabers.dealt > 500 && loadouts.sabers.noProjectiles && loadouts.sabers.meleeOnly, JSON.stringify(loadouts.sabers.stages));
+  check('twin sabers HUD hides the ammo row and shows LMB / RMB', !loadouts.sabers.gunRowShown && loadouts.sabers.key === 'LMB / RMB' && loadouts.sabers.saberRowHidden);
+  check('twin sabers hit harder than the stock saber', loadouts.meleeBonus.sabers > loadouts.meleeBonus.stock * 1.2, `${Math.round(loadouts.meleeBonus.sabers)} vs ${Math.round(loadouts.meleeBonus.stock)}`);
+  check('shoulder cannon: F fires one shell then cools down', loadouts.cannonRowShown && loadouts.cannon.shells === 1 && loadouts.cannon.cd > 6 && loadouts.cannonSecond === 1 && loadouts.cannonDealt > 300 && loadouts.noCannonRow, JSON.stringify(loadouts.cannon));
+  check('shield absorbs gunfire but not saber hits', Math.abs(loadouts.guard.shieldBullet - 78) < 1 && loadouts.guard.shieldSaber === 100 && loadouts.guard.noneBullet === 100, JSON.stringify(loadouts.guard));
+  check('missile pod adds a charge and hits harder; scout head homes tighter',
+    loadouts.pod.charges === 3 && loadouts.pod.pips === 3 && loadouts.podMissile && loadouts.stockMissile && loadouts.podMissile.damage > loadouts.stockMissile.damage * 1.2 && loadouts.podMissile.turn > loadouts.stockMissile.turn,
+    JSON.stringify([loadouts.podMissile, loadouts.stockMissile]));
+  check('build stats reach the mech (armor, boost fuel, stagger)', loadouts.heavyMech.hp >= 3400 && loadouts.heavyMech.en > 140 && loadouts.heavyMech.stagger > 300, JSON.stringify(loadouts.heavyMech));
+  check('wing pack makes dashes cheaper and faster', loadouts.wingMech.dashCost < 22 && loadouts.wingMech.dashSpeed > 230, JSON.stringify(loadouts.wingMech));
+  check('a light sprinter outruns a heavy tank', loadouts.run.sprinter > loadouts.run.tank * 1.25, `${loadouts.run.sprinter.toFixed(1)} vs ${loadouts.run.tank.toFixed(1)}`);
+
+  // random builds: field 25 of them through a short, busy fight each; nothing may throw or go non-finite
+  const smoke = await page.evaluate(async () => {
+    const g = window.__game, T = window.__t;
+    const P = await import('/src/parts.js');
+    const { createEnemy } = await import('/src/ai.js');
+    let bad = 0, shots = 0, rendered = 0;
+    for (let n = 0; n < 25; n++) {
+      g.cheat.invincible = true;
+      g.setBuild(P.randomBuild());
+      g.startMission();
+      g.manual = true;
+      g.missions.state = 'idle';
+      for (const type of ['drone', 'striker']) {
+        const e = createEnemy(g, type, 1);
+        e.mech.place((type === 'drone' ? 1 : -1) * 40, -70, 0, 0);
+        g.enemies.push(e);
+      }
+      for (let i = 0; i < 150; i++) {
+        T.pilot({ lastDash: -1 });
+        if (i % 40 === 0) { T.tap('KeyF'); T.tap('Mouse0'); }
+        g.step(1);
+        if (!T.allFinite()) { bad++; break; }
+        shots += g.projectiles.list.filter((p) => p.team === 'player').length ? 1 : 0;
+      }
+      g.render();
+      rendered++;
+    }
+    T.keys([], ['Mouse0', 'KeyA', 'KeyD', 'KeyW', 'KeyS', 'Space', 'Mouse2']);
+    return { bad, rendered, shots };
+  });
+  check('25 random builds fight and render without errors', smoke.bad === 0 && smoke.rendered === 25, JSON.stringify(smoke));
+  await page.evaluate(() => { // back to a stock mech for the rest of the suite
+    const g = window.__game;
+    g.setBuild(window.__garage.build.name ? { ...window.__garage.build, head: 'vfin', torso: 'std', arms: 'std', legs: 'std', backpack: 'std', weapon: 'rifle', offhand: 'shield' } : null);
+    g.startMission(); g.manual = true; g.missions.state = 'idle'; g.hud.reset();
+    for (const e of g.enemies) e.mech.destroy();
+    g.enemies.length = 0; g.projectiles.clear();
+  });
+
   // ------------------------------------------------------------ 6. enemies fight back
   const enemies = await page.evaluate(async () => {
     const g = window.__game, p = g.player, m = p.mech;
@@ -442,6 +811,15 @@ try {
   });
   check('an idle pilot is destroyed and the mission fails', !!defeat.r && defeat.r.victory === false && defeat.dead, defeat.r ? 'defeat reported' : 'never died');
   await shot('04_defeat');
+
+  // the results screen leads to the garage, and SORTIE from there starts a fresh run with the same build
+  await page.click('#btn-garage-end');
+  const fromEnd = await page.evaluate(() => ({ state: window.__game.state, garage: !document.getElementById('screen-garage').classList.contains('hidden'),
+    endHidden: document.getElementById('screen-end').classList.contains('hidden'), dead: window.__game.player.mech.dead }));
+  check('results screen GARAGE button opens the garage with a repaired mech', fromEnd.state === 'garage' && fromEnd.garage && fromEnd.endHidden && !fromEnd.dead, JSON.stringify(fromEnd));
+  await page.click('#g-go');
+  const relaunch = await page.evaluate(() => ({ state: window.__game.state, enemies: window.__game.enemies.length, hp: window.__game.player.mech.hp, max: window.__game.player.mech.maxHp }));
+  check('SORTIE from the garage after a defeat starts a clean run', relaunch.state === 'playing' && relaunch.enemies === 0 && relaunch.hp === relaunch.max, JSON.stringify(relaunch));
 
   // ------------------------------------------------------------ 9. restart + pause flow
   await page.evaluate(() => { document.getElementById('screen-end').classList.add('hidden'); });

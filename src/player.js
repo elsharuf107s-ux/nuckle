@@ -1,15 +1,13 @@
 // The pilot: turns keyboard/mouse input into mech intent, and owns the player's weapons —
-// beam rifle, homing missiles, a three-hit beam-sabre combo, lock-on and the BURST mode.
+// the equipped gun, homing missiles, a three-hit beam-sabre combo, an optional shoulder cannon,
+// lock-on and the BURST mode. Everything about the mech itself comes from the garage build
+// (see parts.js), so applyBuild() swaps the whole machine and its loadout.
 
 import * as THREE from 'three';
 import { Mech } from './mech.js';
+import { DEFAULT_BUILD, deriveMech } from './parts.js';
 import { clamp, rand, yawToward } from './util.js';
 
-const RIFLE_DAMAGE = 210;
-const RIFLE_COOLDOWN = 0.34;
-const MAG_SIZE = 8;
-const RELOAD_TIME = 1.9;
-const MISSILE_CHARGES = 2;
 const MISSILE_RECHARGE = 7;
 const MISSILES_PER_SALVO = 4;
 const MELEE = [
@@ -20,18 +18,21 @@ const MELEE = [
 const BURST_TIME = 12;
 const LOCK_RANGE = 800;
 
+const rgb = (hex) => [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
+
 export class Player {
   constructor(game) {
     this.game = game;
-    this.mech = new Mech(game, 'vanguard', 'player');
+    this.mech = null;
 
-    this.ammo = MAG_SIZE;
+    this.ammo = 0;
     this.reloadT = 0;
-    this.reloadDur = RELOAD_TIME;
+    this.reloadDur = 1;
     this.fireCd = 0;
-    this.missiles = MISSILE_CHARGES;
+    this.missiles = 0;
     this.missileT = 0;
     this.missileQueue = []; // seconds until each queued missile launches
+    this.cannonCd = 0;      // shoulder cannon cooldown (0 = ready)
     this.melee = null;
     this.saberHold = 0;
     this.burst = 0;      // 0..100 gauge
@@ -46,6 +47,50 @@ export class Player {
     this._w = new THREE.Vector3();
     this._muzzle = new THREE.Vector3();
     this._lunge = new THREE.Vector3();
+
+    this.applyBuild(DEFAULT_BUILD);
+  }
+
+  /**
+   * Field a (new) garage build: replaces the mech model, stats, weapon and off-hand.
+   * Only meant for between sorties: the mech is put back on its feet with a full loadout.
+   */
+  applyBuild(build) {
+    const d = deriveMech(build);
+    const old = this.mech;
+    const keep = old ? { x: old.pos.x, z: old.pos.z, yaw: old.yaw } : { x: 0, z: 0, yaw: 0 };
+    if (old) old.destroy();
+
+    this.build = d.build;
+    this.stats = d.stats;
+    this.weapon = d.stats.weapon;
+    this.ability = d.stats.ability;
+    this.energy = d.energy;
+    this.mech = new Mech(this.game, 'custom', 'player', d.def);
+    this.mech.place(keep.x, keep.z, 0, keep.yaw);
+    this.lock = null;
+    this._resetLoadout();
+  }
+
+  get magSize() {
+    return this.weapon.mag;
+  }
+
+  /** Twin sabers: no gun, the left mouse button swings the saber too. */
+  get meleeOnly() {
+    return this.weapon.kind === 'melee';
+  }
+
+  _resetLoadout() {
+    this.ammo = this.magSize;
+    this.reloadT = 0;
+    this.fireCd = 0;
+    this.missiles = this.stats.missileCharges;
+    this.missileT = 0;
+    this.missileQueue.length = 0;
+    this.cannonCd = 0;
+    this.melee = null;
+    this.saberHold = 0;
   }
 
   reset(x, z) {
@@ -59,13 +104,7 @@ export class Player {
     m.stagger = m.invuln = m.dashT = m.flashT = 0;
     m.setSaber(false);
     m.tintColor = null;
-    this.ammo = MAG_SIZE;
-    this.reloadT = 0;
-    this.fireCd = 0;
-    this.missiles = MISSILE_CHARGES;
-    this.missileT = 0;
-    this.missileQueue.length = 0;
-    this.melee = null;
+    this._resetLoadout();
     this.burst = 0;
     this.burstT = 0;
     this.lock = null;
@@ -79,9 +118,10 @@ export class Player {
 
   /** Restock between waves: ammo and missiles refill, armour is partly repaired. */
   resupply(healFraction) {
-    this.ammo = MAG_SIZE;
+    this.ammo = this.magSize;
     this.reloadT = 0;
-    this.missiles = MISSILE_CHARGES;
+    this.missiles = this.stats.missileCharges;
+    this.cannonCd = 0;
     this.mech.en = this.mech.maxEn;
     this.mech.overheat = false;
     this.mech.heal(this.mech.maxHp * healFraction);
@@ -190,10 +230,11 @@ export class Player {
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.burstT = Math.max(0, this.burstT - dt);
     this.dmgMul = this.burstT > 0 ? 1.5 : 1;
-    if (this.missiles < MISSILE_CHARGES) {
+    if (this.missiles < this.stats.missileCharges) {
       this.missileT += dt * (this.burstT > 0 ? 1.8 : 1);
       if (this.missileT >= MISSILE_RECHARGE) { this.missiles++; this.missileT = 0; }
     }
+    this.cannonCd = Math.max(0, this.cannonCd - dt * (this.burstT > 0 ? 1.8 : 1));
     if (this.saberHold > 0) {
       this.saberHold -= dt;
       if (this.saberHold <= 0 && !this.melee) mech.setSaber(false);
@@ -220,13 +261,14 @@ export class Player {
     // ---- reload
     if (this.reloadT > 0) {
       this.reloadT -= dt;
-      if (this.reloadT <= 0) { this.ammo = MAG_SIZE; game.audio.reload(); }
-    } else if (input.pressed('KeyR') && this.ammo < MAG_SIZE) {
+      if (this.reloadT <= 0) { this.ammo = this.magSize; game.audio.reload(); }
+    } else if (input.pressed('KeyR') && this.ammo < this.magSize) {
       this._startReload();
     }
 
     // ---- missiles
     if (input.pressed('KeyE') && this.missiles > 0 && !this.melee) this._fireMissiles();
+    if (input.pressed('KeyF') && this.ability && this.cannonCd <= 0 && !this.melee) this._fireShoulderCannon();
     for (let i = this.missileQueue.length - 1; i >= 0; i--) {
       this.missileQueue[i].t -= dt;
       if (this.missileQueue[i].t <= 0) {
@@ -238,15 +280,15 @@ export class Player {
     // ---- melee state machine
     const dashPressed = input.pressed('ShiftLeft') || input.pressed('ShiftRight');
     if (this.melee && dashPressed && this.melee.t > this.melee.dur * 0.5) this._endMelee(); // dash-cancel the recovery
-    if (input.pressed('Mouse2')) this._pressMelee();
+    if (input.pressed('Mouse2') || (this.meleeOnly && input.pressed('Mouse0'))) this._pressMelee();
     const meleeIntent = this._updateMelee(dt);
 
     // ---- movement intent
     const it = meleeIntent ?? this._moveIntent(input);
 
-    // ---- rifle
-    if (!this.melee && input.down('Mouse0') && this.fireCd <= 0 && this.reloadT <= 0) {
-      if (this.ammo > 0) this._fireRifle();
+    // ---- gun
+    if (!this.meleeOnly && !this.melee && input.down('Mouse0') && this.fireCd <= 0 && this.reloadT <= 0) {
+      if (this.ammo > 0) this._fireWeapon();
       else this._startReload();
     }
     if (this.lock && !this.melee) {
@@ -300,44 +342,79 @@ export class Player {
     return it;
   }
 
-  // ------------------------------------------------------------------ rifle
+  // ------------------------------------------------------------------ gun
 
   _startReload() {
-    if (this.reloadT > 0) return;
-    const missing = MAG_SIZE - this.ammo;
-    this.reloadDur = this.ammo === 0 ? RELOAD_TIME : Math.max(0.8, (RELOAD_TIME * missing) / MAG_SIZE);
+    if (this.reloadT > 0 || this.meleeOnly) return;
+    const w = this.weapon;
+    const missing = w.mag - this.ammo;
+    this.reloadDur = this.ammo === 0 ? w.reload : Math.max(0.8, (w.reload * missing) / w.mag);
     this.reloadT = this.reloadDur;
     this.game.audio.reload();
   }
 
-  _fireRifle() {
+  /** Fire the equipped gun: beam rifle, rapid gun, bazooka or sniper (see parts.js). */
+  _fireWeapon() {
     const game = this.game;
     const mech = this.mech;
+    const w = this.weapon;
     mech.model.muzzleWorld(this._muzzle);
-    const dir = this._aimDir(this._muzzle, 780, this._w);
+    const dir = this._aimDir(this._muzzle, w.speed, this._w);
     // never shoot backwards through our own body when the crosshair is very close
     if (dir.dot(mech.forward()) < -0.2) dir.copy(mech.forward());
+    if (w.spread) {
+      dir.x += rand(-w.spread, w.spread);
+      dir.y += rand(-w.spread, w.spread);
+      dir.z += rand(-w.spread, w.spread);
+      dir.normalize();
+    }
 
+    const color = w.kind === 'cannon' ? 0xffa040 : this.energy.beam;
     game.projectiles.spawn({
-      type: 'beam', team: 'player', source: mech, pos: this._muzzle, dir,
-      damage: RIFLE_DAMAGE * this.dmgMul, color: 0xff6ad5, knock: 6,
-      target: this.lock, turn: this.lock ? 0.9 : 0,
+      type: w.kind, team: 'player', source: mech, pos: this._muzzle, dir,
+      damage: w.damage * this.dmgMul, color, knock: w.knock, speed: w.speed, radius: w.radius,
+      target: this.lock, turn: this.lock && w.kind === 'beam' ? 0.9 : 0,
+      splash: w.splash ? { radius: w.splash.radius, damage: w.splash.damage * this.dmgMul } : null,
     });
     const m = this._muzzle;
-    game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.09, 8, 3, [1, 0.8, 1], [1, 0.3, 0.8], 0.9);
-    game.audio.beam();
-    game.shake(0.07);
+    const c = rgb(color);
+    game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.09, w.kind === 'cannon' ? 12 : 8, 3, [1, 1, 1], c, 0.9);
+    if (w.kind === 'beam') game.audio.beam();
+    else if (w.kind === 'bullet') game.audio.gun();
+    else game.audio.cannon();
+    game.shake(w.shake);
     this.ammo--;
-    this.fireCd = RIFLE_COOLDOWN * (this.burstT > 0 ? 0.6 : 1);
+    this.fireCd = w.cooldown * (this.burstT > 0 ? 0.6 : 1);
     this.lastFired = game.time;
     if (this.ammo <= 0) this._startReload();
+  }
+
+  /** The shoulder cannon (off-hand): one heavy splash shell, then a cooldown. */
+  _fireShoulderCannon() {
+    const game = this.game;
+    const mech = this.mech;
+    const a = this.ability;
+    mech.model.shoulderMuzzleWorld(this._muzzle);
+    const dir = this._aimDir(this._muzzle, a.speed, this._w);
+    if (dir.dot(mech.forward()) < -0.2) dir.copy(mech.forward());
+    game.projectiles.spawn({
+      type: 'cannon', team: 'player', source: mech, pos: this._muzzle, dir,
+      damage: a.damage * this.dmgMul, color: 0xffa040, knock: a.knock, speed: a.speed,
+      splash: { radius: a.splash.radius, damage: a.splash.damage * this.dmgMul },
+    });
+    const m = this._muzzle;
+    game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.12, 14, 4, [1, 1, 1], [1, 0.55, 0.2], 0.9);
+    game.audio.cannon();
+    game.shake(0.4);
+    this.cannonCd = a.cooldown;
+    this.lastFired = game.time;
   }
 
   // ------------------------------------------------------------------ missiles
 
   _fireMissiles() {
     this.missiles--;
-    if (this.missiles === MISSILE_CHARGES - 1) this.missileT = 0;
+    if (this.missiles === this.stats.missileCharges - 1) this.missileT = 0;
     // target: lock, else whatever is closest to the crosshair
     let target = this.lock;
     if (!target) {
@@ -366,8 +443,9 @@ export class Player {
       .normalize();
     game.projectiles.spawn({
       type: 'missile', team: 'player', source: mech, pos, dir, color: 0xffb060,
-      damage: 150 * this.dmgMul, speed: 120, maxSpeed: 270, delay: 0.3, turn: 5.6, target: q.target,
-      splash: { radius: 16, damage: 70 * this.dmgMul }, knock: 14,
+      damage: 150 * this.stats.missileDamage * this.dmgMul, speed: 120, maxSpeed: 270, delay: 0.3,
+      turn: 5.6 + this.stats.missileTurn, target: q.target,
+      splash: { radius: 16, damage: 70 * this.stats.missileDamage * this.dmgMul }, knock: 14,
       life: 5,
     });
     game.audio.missile(pos);
@@ -450,7 +528,7 @@ export class Player {
 
     if (!melee.arcDone && p >= 0.28) {
       melee.arcDone = true;
-      game.fx.slashArc(mech, def.kind, 0xff7fdc);
+      game.fx.slashArc(mech, def.kind, this.energy.blade);
       game.audio.slash(mech.pos);
     }
     if (!melee.hitDone && p >= 0.45) {
@@ -479,7 +557,7 @@ export class Player {
       if (v.lengthSq() > 1e-4 && v.normalize().dot(fwd) < 0.2) continue;
       const knock = fwd.clone().multiplyScalar(def.stagger ? 130 : 45);
       knock.y = def.stagger ? 40 : 0;
-      m.takeDamage(def.damage * this.dmgMul, { source: mech, knock, kind: 'saber', stagger: def.stagger, point: m.center(new THREE.Vector3()) });
+      m.takeDamage(def.damage * this.stats.melee * this.dmgMul, { source: mech, knock, kind: 'saber', stagger: def.stagger, point: m.center(new THREE.Vector3()) });
       game.fx.sparks(m.center(new THREE.Vector3()), fwd, 22, [1, 0.6, 0.95]);
       landed = true;
     }

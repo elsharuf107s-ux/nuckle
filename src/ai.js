@@ -9,6 +9,7 @@ import { Mech } from './mech.js';
 import { angleDiff, clamp, pick, rand, randSign, yawToward } from './util.js';
 
 const SLASHES = ['slash1', 'slash2', 'slash3'];
+const DODGEABLE = new Set(['beam', 'bullet', 'cannon']);
 
 class Enemy {
   constructor(game, type, skill = 1) {
@@ -90,14 +91,14 @@ class Enemy {
     if (this.hopT > 0 && !m.overheat) it.ascend = true;
   }
 
-  /** React to an incoming beam shot by dashing sideways. */
+  /** React to an incoming shot (beam, bullet or shell) by dashing sideways. */
   _dodge(dt, it) {
     const m = this.mech;
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     const chance = this.def_dodge ?? 0;
     if (chance <= 0 || this.dodgeCd > 0 || it.dash || m.dashT > 0 || m.stagger > 0) return;
     for (const pr of this.game.projectiles.list) {
-      if (pr.team === m.team || pr.type !== 'beam') continue;
+      if (pr.team === m.team || !DODGEABLE.has(pr.type)) continue; // beams, bullet streams and shells; not homing missiles
       const to = m.center(this._tmp).sub(pr.pos);
       const d = to.length();
       if (d > 170 || d < 25) continue;

@@ -14,6 +14,7 @@ import { World } from './world.js';
 import { clamp, fmtTime } from './util.js';
 
 const STEP = 1 / 60;
+const ZERO = new THREE.Vector3();
 
 export class Game {
   constructor(canvas) {
@@ -30,7 +31,9 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(66, 1, 0.5, 7000);
     this.rig = new CameraRig(this.camera);
 
-    this.state = 'title'; // title | playing | paused | ended
+    this.state = 'title'; // title | garage | playing | paused | ended
+    this.garageCam = { yaw: Math.PI * 0.82, pitch: 0.16, dist: 54, dragging: false };
+    this.garagePose = 'idle'; // idle | saber | boost (preview only)
     this.time = 0;
     this.acc = 0;
     this.timeScale = 1;
@@ -99,6 +102,7 @@ export class Game {
     this.stats = this._freshStats();
     this.combo = { count: 0, t: 0 };
     this.player.reset(0, 0);
+    this.hud.configure();
     this.rig.reset(0);
     this.timeScale = 1;
     this.hitstopT = this.slowmoT = this.endTimer = 0;
@@ -240,17 +244,9 @@ export class Game {
     this._mechs.push(player.mech);
     for (const e of this.enemies) this._mechs.push(e.mech);
 
-    if (this.state === 'title') {
-      // slow flyaround of the idle mech behind the title screen
-      player.mech.update(dt, {});
-      const a = this.time * 0.15;
-      const c = player.mech.pos;
-      const cx = Math.cos(a), cz = Math.sin(a);
-      this.camera.position.set(c.x + cx * 62, 16, c.z + cz * 62);
-      // aim left of the mech so it sits on the right of the frame, clear of the title text
-      this.camera.lookAt(c.x - cz * 26, 11, c.z + cx * 26);
-      this.camera.updateMatrixWorld(true);
-      this.world.update(dt, c, this.camera.position);
+    if (this.state === 'title' || this.state === 'garage') {
+      this._updateShowroom(dt);
+      this.world.update(dt, player.mech.pos, this.camera.position);
       this.fx.update(dt);
       this.input.endStep();
       return;
@@ -287,6 +283,93 @@ export class Game {
     this.audio.setListener(player.mech.pos.x, player.mech.pos.z, this.rig.yaw);
     this.hud.update(dt);
     this.input.endStep();
+  }
+
+  // ------------------------------------------------------------------ garage / showroom
+
+  /** Swap in a garage build (replaces the player's mech, stats and loadout). */
+  setBuild(build) {
+    this.player.applyBuild(build);
+    this.player.mech.update(STEP, {});
+    this.hud.configure();
+  }
+
+  enterGarage() {
+    this.state = 'garage';
+    this.input.enabled = false;
+    this.world.setGarage(true);
+    this.garagePose = 'idle';
+    this.player.mech.place(0, 0, 0, 0);
+    this.garageCam.dragging = false;
+  }
+
+  exitGarage() {
+    this.state = 'title';
+    this.world.setGarage(false);
+    this.garagePose = 'idle';
+    this.player.mech.setSaber(false);
+    this.player.mech.place(0, 0, 0, 0);
+  }
+
+  garageLook(dx, dy) {
+    const c = this.garageCam;
+    c.yaw -= dx * 0.008;
+    c.pitch = clamp(c.pitch + dy * 0.006, -0.15, 0.75);
+  }
+
+  garageZoom(delta) {
+    const c = this.garageCam;
+    c.dist = clamp(c.dist + delta * 0.04, 30, 95);
+  }
+
+  /** Idle flyaround on the title; a draggable turntable with preview poses in the garage. */
+  _updateShowroom(dt) {
+    const mech = this.player.mech;
+    const c = mech.pos;
+    const cam = this.camera;
+    const garage = this.state === 'garage';
+    const fov = garage ? 42 : 66;
+    if (Math.abs(cam.fov - fov) > 0.01) {
+      cam.fov = fov;
+      cam.updateProjectionMatrix();
+    }
+
+    if (!garage) {
+      mech.update(dt, {});
+      const a = this.time * 0.15;
+      const cx = Math.cos(a), cz = Math.sin(a);
+      cam.position.set(c.x + cx * 62, 16, c.z + cz * 62);
+      // aim left of the mech so it sits on the right of the frame, clear of the title text
+      cam.lookAt(c.x - cz * 26, 11, c.z + cx * 26);
+    } else {
+      const g = this.garageCam;
+      if (!g.dragging) g.yaw += dt * 0.3;
+      this._garagePose(dt);
+      const cp = Math.cos(g.pitch);
+      cam.position.set(c.x + Math.sin(g.yaw) * cp * g.dist, 10 + Math.sin(g.pitch) * g.dist, c.z + Math.cos(g.yaw) * cp * g.dist);
+      cam.lookAt(c.x, c.y + 10, c.z);
+    }
+    cam.updateMatrixWorld(true);
+  }
+
+  _garagePose(dt) {
+    const m = this.player.mech;
+    if (this.garagePose === 'saber') {
+      if (!m.saberOut) m.setSaber(true);
+      const kinds = ['slash1', 'slash2', 'slash3'];
+      const period = 1.7;
+      m.pos.y = 0;
+      m.update(dt, { attack: { kind: kinds[Math.floor(this.time / period) % 3], t: (this.time % period) / period } });
+      return;
+    }
+    if (m.saberOut) m.setSaber(false);
+    if (this.garagePose === 'boost') {
+      m.pos.y = 7; // hover with the thrusters lit
+      m.update(dt, { velocity: ZERO });
+      return;
+    }
+    m.pos.y = 0;
+    m.update(dt, {});
   }
 
   /** Mechs are solid: push overlapping bodies apart. */
@@ -338,7 +421,7 @@ export class Game {
     if (mech.team === 'enemy') {
       this.stats.damageDealt += amount;
       const p = this.player;
-      if (!p.burstActive) p.burst = Math.min(100, p.burst + amount * 0.035);
+      if (!p.burstActive) p.burst = Math.min(100, p.burst + amount * 0.035 * p.stats.burstGain);
       this.hud.damageNumber(info.point ?? mech.center(), amount, info.kind === 'saber' ? 'saber' : 'enemy');
       this.hud.enemyHit();
     } else {

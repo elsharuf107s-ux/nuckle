@@ -24,6 +24,7 @@ export class World {
     this._buildGround();
     this._buildCity();
     this._buildFarCity();
+    this._buildGarage();
   }
 
   // ------------------------------------------------------------------ sky
@@ -336,6 +337,46 @@ export class World {
       group.add(m);
     }
     this.scene.add(group);
+  }
+
+  // ------------------------------------------------------------------ garage platform
+
+  /** A lit turntable the mech stands on while you work in the garage. Hidden during sorties. */
+  _buildGarage() {
+    const g = new THREE.Group();
+    const disc = new THREE.Mesh(
+      new THREE.CylinderGeometry(19, 19.8, 0.9, 56),
+      new THREE.MeshStandardMaterial({ color: 0x1b2029, metalness: 0.75, roughness: 0.35 }),
+    );
+    disc.position.y = -0.37; // top face sits a hair above the street so feet never sink in
+    disc.receiveShadow = true;
+    g.add(disc);
+    const glow = (r, tube, color) => {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(r, tube, 8, 72),
+        new THREE.MeshBasicMaterial({ color, fog: false }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.12;
+      g.add(ring);
+    };
+    glow(17.6, 0.3, 0x52e0ff);
+    glow(11.5, 0.12, 0x2a7f99);
+    glow(5.5, 0.1, 0x2a7f99);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 1.6), new THREE.MeshBasicMaterial({ color: 0x52e0ff, fog: false }));
+      tick.position.set(Math.cos(a) * 14.6, 0.1, Math.sin(a) * 14.6);
+      tick.rotation.y = -a;
+      g.add(tick);
+    }
+    g.visible = false;
+    this.garage = g;
+    this.scene.add(g);
+  }
+
+  setGarage(on) {
+    this.garage.visible = on;
   }
 
   // ------------------------------------------------------------------ per-frame

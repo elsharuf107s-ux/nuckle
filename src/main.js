@@ -1,6 +1,7 @@
 // Entry point: builds the game and wires up the title / pause / end screens and pointer lock.
 
 import { Game } from './game.js';
+import { Garage, describeBuild } from './garage.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (id, on) => $(id).classList.toggle('hidden', !on);
@@ -14,6 +15,36 @@ try {
   throw err;
 }
 window.__game = game; // handy for debugging and used by scripts/test.mjs
+
+// ---- garage: the saved build is fielded at startup so SORTIE always uses what you last built
+const garage = new Garage(game, {
+  onBack: () => closeGarage(),
+  onSortie: () => {
+    garage.close();
+    startUI();
+  },
+  onChange: (build) => updateTitleBuild(build),
+});
+game.setBuild(garage.build);
+window.__garage = garage;
+
+function updateTitleBuild(build = garage.build) {
+  $('title-build').textContent = `CURRENT BUILD  ·  ${describeBuild(build)}`;
+}
+updateTitleBuild();
+
+function openGarage() {
+  show('screen-title', false);
+  show('screen-end', false);
+  show('screen-pause', false);
+  garage.open();
+}
+
+function closeGarage() {
+  garage.close();
+  show('screen-title', true);
+  updateTitleBuild();
+}
 
 let wasLocked = false;
 function lockPointer() {
@@ -46,6 +77,12 @@ function startUI() {
 }
 
 $('btn-start').addEventListener('click', startUI);
+$('btn-garage').addEventListener('click', openGarage);
+$('btn-garage-end').addEventListener('click', () => {
+  show('screen-end', false);
+  game.toTitle();
+  openGarage();
+});
 $('btn-again').addEventListener('click', startUI);
 $('btn-resume').addEventListener('click', resumeUI);
 $('btn-quit').addEventListener('click', () => {
@@ -88,8 +125,29 @@ document.addEventListener('pointerlockchange', () => {
   }
 });
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape') pauseUI(); // when the pointer was not locked
+  if (e.code !== 'Escape') return;
+  if (game.state === 'garage') closeGarage();
+  else pauseUI(); // when the pointer was not locked
 });
+
+// ---- garage turntable: drag to rotate, scroll to zoom
+const canvas = game.canvas;
+canvas.addEventListener('pointerdown', (e) => {
+  if (game.state !== 'garage') return;
+  game.garageCam.dragging = true;
+  canvas.setPointerCapture?.(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (game.state === 'garage' && game.garageCam.dragging) game.garageLook(e.movementX, e.movementY);
+});
+const endDrag = () => { game.garageCam.dragging = false; };
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('wheel', (e) => {
+  if (game.state !== 'garage') return;
+  e.preventDefault();
+  game.garageZoom(e.deltaY);
+}, { passive: false });
 window.addEventListener('blur', pauseUI);
 document.addEventListener('visibilitychange', () => { if (document.hidden) pauseUI(); });
 

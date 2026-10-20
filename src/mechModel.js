@@ -102,34 +102,72 @@ export function buildMech(spec) {
     return g;
   };
 
+  // leg styles change widths and add armour; heights stay put so the feet always meet the ground
+  const LEG = {
+    std:    { x: 1.8,  thigh: [2.1, 3.7, 2.3], shin: [2.2, 4.0, 2.6], foot: [2.4, 1.0, 4.2] },
+    sprint: { x: 1.7,  thigh: [1.7, 3.7, 1.9], shin: [1.8, 4.0, 2.1], foot: [2.0, 1.0, 4.4] },
+    tank:   { x: 2.15, thigh: [2.7, 3.7, 2.9], shin: [2.9, 4.0, 3.3], foot: [3.1, 1.0, 4.6] },
+    jump:   { x: 1.85, thigh: [2.0, 3.7, 2.2], shin: [2.2, 4.0, 2.6], foot: [2.4, 1.0, 4.2] },
+  };
+  const legStyle = spec.legs && LEG[spec.legs] ? spec.legs : 'std';
+  const L = LEG[legStyle];
+
   for (const s of [-1, 1]) {
-    const leg = group(hips, s * 1.8, -0.5, 0);
+    const leg = group(hips, s * L.x, -0.5, 0);
     add(leg, sphGeo(1.0), M.dark);
-    add(leg, boxGeo(2.1, 3.7, 2.3), M.main, 0, -2.0, 0, { edge: true });
-    add(leg, boxGeo(1.9, 1.0, 0.5), M.sub, 0, -3.5, -1.3, { edge: true });
+    add(leg, boxGeo(...L.thigh), M.main, 0, -2.0, 0, { edge: true });
+    add(leg, boxGeo(L.thigh[0] - 0.2, 1.0, 0.5), M.sub, 0, -3.5, -(L.thigh[2] / 2 + 0.15), { edge: true });
     const shin = group(leg, 0, -4.0, 0);
-    add(shin, cylGeo(0.95, 0.95, 2.0), M.dark, 0, 0, 0, { rz: Math.PI / 2 });
-    add(shin, boxGeo(2.2, 4.0, 2.6), M.main, 0, -2.3, 0.2, { edge: true });
-    add(shin, boxGeo(1.8, 2.6, 1.2), M.sub, 0, -2.0, 1.8, { edge: true });
-    add(shin, boxGeo(1.6, 2.6, 0.4), M.accent, 0, -2.4, -1.3, { edge: true });
+    add(shin, cylGeo(0.95, 0.95, L.thigh[0] - 0.1), M.dark, 0, 0, 0, { rz: Math.PI / 2 });
+    add(shin, boxGeo(...L.shin), M.main, 0, -2.3, 0.2, { edge: true });
+    add(shin, boxGeo(L.shin[0] - 0.4, 2.6, 1.2), M.sub, 0, -2.0, L.shin[2] / 2 + 0.5, { edge: true });
+    add(shin, boxGeo(L.shin[0] - 0.6, 2.6, 0.4), M.accent, 0, -2.4, -(L.shin[2] / 2), { edge: true });
     add(shin, boxGeo(1.4, 0.8, 1.6), M.dark, 0, -4.4, 0);
     const foot = group(shin, 0, -4.8, 0);
-    add(foot, boxGeo(2.4, 1.0, 4.2), M.sub, 0, -0.1, -0.7, { edge: true });
-    add(foot, boxGeo(2.0, 0.7, 1.2), M.main, 0, 0, -3.0, { edge: true });
-    add(foot, boxGeo(1.6, 0.8, 0.9), M.main, 0, 0, 1.4);
-    // calf thruster (points down and back)
-    makeFlame(shin, 0, -3.4, 2.4, Math.PI - 0.35, 0.55, 3.6);
+    add(foot, boxGeo(...L.foot), M.sub, 0, -0.1, -0.7, { edge: true });
+    add(foot, boxGeo(L.foot[0] - 0.4, 0.7, 1.2), M.main, 0, 0, -3.0, { edge: true });
+    add(foot, boxGeo(L.foot[0] - 0.8, 0.8, 0.9), M.main, 0, 0, 1.4);
+
+    if (legStyle === 'sprint') {
+      add(foot, boxGeo(0.4, 1.4, 1.8), M.trim, 0, 0.2, 2.3, { rx: 0.45 });            // heel spur
+      add(shin, boxGeo(0.3, 3.0, 0.5), M.trim, 0, -2.3, -(L.shin[2] / 2 + 0.1));      // shin stripe
+    } else if (legStyle === 'tank') {
+      add(leg, boxGeo(L.thigh[0] + 0.2, 1.7, 1.1), M.accent, 0, -3.7, -(L.thigh[2] / 2 + 0.2), { edge: true }); // knee armour
+      add(shin, boxGeo(L.shin[0] + 0.4, 0.8, L.shin[2] + 0.4), M.dark, 0, -3.9, 0.2);                          // ankle skirt
+      add(foot, boxGeo(L.foot[0], 0.5, 1.6), M.accent, 0, 0.45, -2.7, { edge: true });                          // toe plate
+    } else if (legStyle === 'jump') {
+      add(shin, cylGeo(1.1, 1.3, 3.6, 10), M.metal, 0, -2.1, 3.0);                    // calf booster pod
+      add(shin, cylGeo(1.15, 1.15, 0.4, 10), M.accent, 0, -0.8, 3.0);
+    }
+
+    // calf thruster (points down and back); jump legs carry a much bigger one
+    if (legStyle === 'jump') makeFlame(shin, 0, -3.9, 3.0, Math.PI - 0.2, 0.95, 4.8);
+    else makeFlame(shin, 0, -3.4, 2.4, Math.PI - 0.35, 0.55, 3.6);
     legs.push({ leg, shin, foot, side: s });
   }
 
   // ---- torso
+  const torsoStyle = spec.torso ?? 'std';
   const torso = group(hips, 0, 0.8, 0);
+  const depth = torsoStyle === 'light' ? 3.2 : 3.7;
+  const zf = -(depth / 2 + 0.1); // chest front face
   add(torso, cylGeo(1.8, 2.0, 1.0), M.dark, 0, 0.3, 0);
-  add(torso, boxGeo(5.2 * bulk, 3.2, 3.7), M.sub, 0, 2.1, 0, { edge: true });
-  add(torso, boxGeo(5.5 * bulk, 1.0, 3.9), M.main, 0, 4.1, 0, { edge: true });
-  for (const s of [-1, 1]) add(torso, boxGeo(1.4, 0.9, 0.3), M.trim, s * 1.4 * bulk, 2.6, -1.95, { edge: true });
-  add(torso, boxGeo(1.7, 1.5, 0.3), M.accent, 0, 1.1, -1.95, { edge: true });
+  add(torso, boxGeo(5.2 * bulk, 3.2, depth), M.sub, 0, 2.1, 0, { edge: true });
+  add(torso, boxGeo(5.5 * bulk, 1.0, depth + 0.2), M.main, 0, 4.1, 0, { edge: true });
+  for (const s of [-1, 1]) add(torso, boxGeo(1.4, 0.9, 0.3), M.trim, s * 1.4 * bulk, 2.6, zf, { edge: true });
+  add(torso, boxGeo(1.7, 1.5, 0.3), M.accent, 0, 1.1, zf, { edge: true });
   add(torso, cylGeo(0.6, 0.7, 0.8), M.dark, 0, 4.8, 0);
+  if (torsoStyle === 'light') {
+    for (let i = 0; i < 3; i++) add(torso, boxGeo(3.4 * bulk, 0.22, 0.3), M.dark, 0, 1.6 + i * 0.55, zf + 0.15);
+  } else if (torsoStyle === 'heavy') {
+    add(torso, boxGeo(4.6 * bulk, 2.4, 0.7), M.main, 0, 2.3, zf - 0.3, { edge: true });             // slab armour
+    add(torso, boxGeo(6.0 * bulk, 0.5, depth + 0.4), M.accent, 0, 4.85, 0, { edge: true });         // collar
+    for (const s of [-1, 1]) add(torso, boxGeo(0.9, 2.8, 2.6), M.dark, s * 3.0 * bulk, 2.0, 0);      // side cheeks
+  } else if (torsoStyle === 'reactor') {
+    add(torso, boxGeo(2.3, 2.3, 0.4), M.dark, 0, 2.3, zf - 0.05, { edge: true });
+    add(torso, boxGeo(1.4, 1.4, 0.5), glowMat, 0, 2.3, zf - 0.2, { shadow: false });                 // glowing core
+    for (const s of [-1, 1]) add(torso, boxGeo(0.4, 2.2, 1.7), M.trim, s * 2.75 * bulk, 2.1, -0.4, { edge: true });
+  }
 
   // ---- head
   const head = group(torso, 0, 5.2, 0);
@@ -143,6 +181,13 @@ export function buildMech(spec) {
     for (const s of [-1, 1]) add(head, cylGeo(0.2, 0.2, 1.5), M.dark, s * 1.0, 0.7, 0.6, { rx: -0.5 });
     add(head, cylGeo(0.05, 0.05, 2.2), M.dark, -0.7, 2.3, 0.2);
     if (spec.blade) add(head, boxGeo(0.15, 1.9, 1.0), M.trim, 0, 2.2, 0.0, { rx: -0.25 });
+  } else if (spec.head === 'visor') {
+    add(head, boxGeo(2.3, 1.9, 2.3), M.main, 0, 0.95, 0, { edge: true });
+    add(head, boxGeo(2.1, 0.85, 0.4), M.dark, 0, 0.95, -1.15);
+    add(head, boxGeo(1.8, 0.3, 0.14), glowMat, 0, 1.0, -1.38, { shadow: false });                    // wide visor slit
+    add(head, boxGeo(1.2, 0.5, 0.6), M.accent, 0, 0.2, -1.15, { edge: true });
+    add(head, boxGeo(0.3, 0.8, 1.9), M.trim, 0, 2.1, 0.1, { edge: true });                           // crest
+    for (const s of [-1, 1]) add(head, boxGeo(0.45, 1.3, 1.8), M.sub, s * 1.3, 0.9, 0.05, { rz: s * 0.08, edge: true });
   } else {
     add(head, boxGeo(2.1, 1.8, 2.2), M.main, 0, 0.9, 0, { edge: true });
     add(head, boxGeo(1.5, 1.0, 0.35), M.dark, 0, 0.8, -1.15);
@@ -158,23 +203,52 @@ export function buildMech(spec) {
   }
 
   // ---- backpack, thrusters and sabre hilts
-  const packW = spec.backpack === 'heavy' ? 4.6 : 3.6;
+  const pack = spec.backpack ?? 'std';
+  const packW = { std: 3.6, heavy: 4.6, booster: 4.4, pod: 4.0, wing: 3.6 }[pack] ?? 3.6;
+  const big = pack === 'booster'; // oversized nozzles and flames
   add(torso, boxGeo(packW, 3.6, 1.5), M.dark, 0, 2.4, 2.3, { edge: true });
-  if (spec.backpack === 'heavy') {
+  if (pack === 'heavy') {
     for (const s of [-1, 1]) add(torso, boxGeo(1.2, 1.2, 2.6), M.accent, s * 2.7, 4.4, 2.3, { edge: true });
+  } else if (pack === 'booster') {
+    for (const s of [-1, 1]) {
+      add(torso, cylGeo(0.9, 0.9, 4.2, 10), M.metal, s * 2.8, 2.7, 2.7);                              // fuel tanks
+      add(torso, cylGeo(0.96, 0.96, 0.4, 10), M.accent, s * 2.8, 3.8, 2.7);
+      add(torso, cylGeo(0.96, 0.96, 0.4, 10), M.accent, s * 2.8, 1.6, 2.7);
+    }
+  } else if (pack === 'pod') {
+    for (const s of [-1, 1]) {
+      add(torso, boxGeo(1.8, 1.7, 3.2), M.dark, s * 2.6, 4.9, 2.6, { rx: -0.2, edge: true });          // missile rack
+      for (const ox of [-0.45, 0.45]) for (const oy of [-0.38, 0.38]) {
+        add(torso, cylGeo(0.3, 0.3, 0.3, 8), M.trim, s * 2.6 + ox, 4.9 + oy, 0.95, { rx: Math.PI / 2 }); // launch tubes
+      }
+    }
+  } else if (pack === 'wing') {
+    for (const s of [-1, 1]) {
+      add(torso, boxGeo(0.35, 6.0, 2.4), M.main, s * 3.4, 5.4, 2.6, { rz: -s * 0.55, edge: true });   // vernier wings
+      add(torso, boxGeo(0.45, 1.4, 2.5), M.accent, s * 4.97, 7.95, 2.6, { rz: -s * 0.55 });
+    }
   }
   const NOZZLE_TILT = Math.PI / 2 + 0.5;
+  const nk = big ? 1.25 : 1;
   for (const s of [-1, 1]) {
-    add(torso, cylGeo(0.95, 0.6, 1.4), M.metal, s * 1.1, 0.9, 3.0, { rx: NOZZLE_TILT });
+    add(torso, cylGeo(0.95 * nk, 0.6 * nk, 1.4), M.metal, s * 1.1, 0.9, 3.0, { rx: NOZZLE_TILT });
     // flame base: nozzle centre pushed along its axis (0, cos, sin)
     const nx = s * 1.1;
     const ny = 0.9 + Math.cos(NOZZLE_TILT) * 0.7;
     const nz = 3.0 + Math.sin(NOZZLE_TILT) * 0.7;
-    makeFlame(torso, nx, ny, nz, NOZZLE_TILT, 0.8, 5.0);
+    makeFlame(torso, nx, ny, nz, NOZZLE_TILT, big ? 1.1 : 0.8, big ? 6.5 : 5.0);
     add(torso, cylGeo(0.18, 0.18, 1.9), M.metal, s * 1.9, 3.7, 2.4, { rz: s * 0.3 });
   }
 
   // ---- shoulders & arms
+  const ARM = {
+    std:       { upper: [1.6, 3.0, 1.7], fore: [1.9, 3.4, 2.2] },
+    assault:   { upper: [1.9, 3.0, 2.0], fore: [2.5, 3.6, 2.7] },
+    precision: { upper: [1.3, 3.0, 1.4], fore: [1.5, 3.4, 1.8] },
+    blade:     { upper: [1.6, 3.0, 1.7], fore: [1.9, 3.4, 2.2] },
+  };
+  const armStyle = spec.arms && ARM[spec.arms] ? spec.arms : 'std';
+  const A = ARM[armStyle];
   const arms = {};
   for (const s of [-1, 1]) {
     add(torso, boxGeo(2.6, 2.4, 3.2), spec.shoulder === 'spike' ? M.sub : M.accent, s * (3.95 * bulk), 4.0, 0, { rz: s * 0.1, edge: true });
@@ -185,11 +259,21 @@ export function buildMech(spec) {
     const arm = group(torso, s * (3.7 * bulk), 3.4, 0);
     arm.rotation.order = 'YXZ';
     add(arm, sphGeo(1.0), M.dark);
-    add(arm, boxGeo(1.6, 3.0, 1.7), M.main, 0, -2.0, 0, { edge: true });
+    add(arm, boxGeo(...A.upper), M.main, 0, -2.0, 0, { edge: true });
     const elbow = group(arm, 0, -3.6, 0);
     add(elbow, cylGeo(0.8, 0.8, 1.8), M.dark, 0, 0, 0, { rz: Math.PI / 2 });
-    add(elbow, boxGeo(1.9, 3.4, 2.2), M.main, 0, -1.9, 0, { edge: true });
-    add(elbow, boxGeo(2.0, 0.6, 2.3), M.trim, 0, -3.1, 0);
+    add(elbow, boxGeo(...A.fore), M.main, 0, -1.9, 0, { edge: true });
+    add(elbow, boxGeo(A.fore[0] + 0.1, 0.6, A.fore[2] + 0.1), M.trim, 0, -3.1, 0);
+    if (armStyle === 'assault') {
+      add(elbow, boxGeo(A.fore[0] + 0.3, 0.9, A.fore[2] + 0.3), M.accent, 0, -0.5, 0, { edge: true });  // elbow guard
+      add(arm, boxGeo(A.upper[0] + 0.3, 1.0, A.upper[2] + 0.3), M.accent, 0, -1.2, 0, { edge: true });
+    } else if (armStyle === 'precision') {
+      add(elbow, boxGeo(0.35, 1.6, 0.35), M.trim, 0, -1.0, -(A.fore[2] / 2 + 0.1));                       // sensor mast
+      add(elbow, sphGeo(0.28), glowMat, 0, -0.2, -(A.fore[2] / 2 + 0.1), { shadow: false });
+    } else if (armStyle === 'blade') {
+      add(elbow, boxGeo(0.25, 3.4, 1.3), M.trim, s * 1.15, -1.9, -0.4, { rz: s * 0.12, edge: true });     // forearm blade fins
+      add(elbow, boxGeo(0.2, 4.4, 0.9), M.metal, s * 1.05, -2.1, 0.95, { rx: 0.1 });
+    }
     const hand = group(elbow, 0, -3.8, 0);
     add(hand, boxGeo(1.2, 1.4, 1.4), M.dark, 0, -0.5, 0);
     arms[s] = { arm, elbow, hand };
@@ -211,6 +295,18 @@ export function buildMech(spec) {
     add(rifle, cylGeo(0.2, 0.2, 2.2), M.metal, 0, -4.1, 0);
     add(rifle, boxGeo(0.7, 1.6, 0.8), M.accent, 0, -0.5, 0.9, { rx: 0.2 });
     muzzle.position.set(0, -5.3, 0);
+  } else if (spec.weapon === 'sniper') {
+    add(rifle, boxGeo(0.9, 6.6, 1.1), M.dark, 0, -2.8, 0, { edge: true });
+    add(rifle, boxGeo(1.0, 1.2, 1.3), M.sub, 0, -0.9, 0, { edge: true });
+    add(rifle, cylGeo(0.18, 0.18, 4.2), M.metal, 0, -7.4, 0);
+    add(rifle, cylGeo(0.32, 0.32, 2.2, 10), M.sub, 0, -2.2, -0.95);                                      // scope
+    add(rifle, sphGeo(0.28), glowMat, 0, -3.4, -0.95, { shadow: false });
+    add(rifle, boxGeo(0.6, 0.5, 0.6), M.metal, 0, -9.5, 0);                                              // muzzle brake
+    muzzle.position.set(0, -9.9, 0);
+  } else if (spec.weapon === 'saber') {
+    add(rifle, cylGeo(0.24, 0.24, 1.7), M.metal, 0, -0.9, 0);                                            // just a hilt
+    add(rifle, cylGeo(0.3, 0.3, 0.3), M.trim, 0, -1.8, 0);
+    muzzle.position.set(0, -2.0, 0);
   } else {
     add(rifle, boxGeo(0.95, 5.2, 1.3), M.dark, 0, -2.0, 0, { edge: true });
     add(rifle, boxGeo(1.0, 1.4, 1.4), M.sub, 0, -1.2, 0, { edge: true });
@@ -244,15 +340,24 @@ export function buildMech(spec) {
   saber.visible = false;
   blade.scale.y = 0.001;
 
-  // ---- shield on the left forearm
-  if (spec.shield) {
+  // ---- off-hand: shield on the left forearm, a shoulder cannon, or nothing
+  const offhand = spec.offhand ?? (spec.shield ? 'shield' : 'none');
+  let shoulderMuzzle = null;
+  if (offhand === 'shield') {
     const sh = group(armL.elbow, -1.5, -1.5, -0.5);
     add(sh, boxGeo(0.5, 5.8, 3.6), M.main, 0, 0, 0, { edge: true });
     add(sh, boxGeo(0.6, 5.0, 0.7), M.accent, 0, 0, 0);
     add(sh, boxGeo(0.62, 1.1, 3.7), M.trim, 0, 1.6, 0);
     add(sh, boxGeo(0.62, 1.1, 3.7), M.sub, 0, -1.6, 0);
-  } else if (spec.shoulderGun) {
-    add(torso, cylGeo(0.5, 0.5, 4.5), M.dark, -4.0 * bulk, 6.2, 0.5, { rx: Math.PI / 2 });
+  } else if (offhand === 'cannon') {
+    const cg = group(torso, -(3.95 * bulk), 6.0, 0.3);
+    add(cg, boxGeo(1.9, 1.0, 2.6), M.dark, 0, 0, 0, { edge: true });
+    add(cg, cylGeo(0.5, 0.62, 5.6, 10), M.sub, 0, 0.45, -2.4, { rx: Math.PI / 2, edge: true });          // barrel along -Z
+    add(cg, cylGeo(0.78, 0.62, 0.8, 10), M.metal, 0, 0.45, -5.3, { rx: Math.PI / 2 });                   // muzzle brake
+    add(cg, boxGeo(1.2, 0.5, 1.5), M.trim, 0, 0.85, -0.6);
+    shoulderMuzzle = new THREE.Object3D();
+    shoulderMuzzle.position.set(0, 0.45, -5.8);
+    cg.add(shoulderMuzzle);
   }
 
   // =================================================================== animation
@@ -387,5 +492,12 @@ export function buildMech(spec) {
     return muzzle.getWorldPosition(out);
   }
 
-  return { root, update, setSaber, tint, muzzleWorld, flashMats, hips, torso, armR, head };
+  /** World position of the shoulder cannon's muzzle (falls back to the main muzzle if there is none). */
+  function shoulderMuzzleWorld(out = tmp) {
+    if (!shoulderMuzzle) return muzzleWorld(out);
+    root.updateWorldMatrix(true, true);
+    return shoulderMuzzle.getWorldPosition(out);
+  }
+
+  return { root, update, setSaber, tint, muzzleWorld, shoulderMuzzleWorld, flashMats, hips, torso, armR, head };
 }

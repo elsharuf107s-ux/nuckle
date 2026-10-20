@@ -1,8 +1,9 @@
 # Steel Vanguard
 
-A 3D third-person mobile-suit combat game that runs in the browser. Pilot the **VG-01 Vanguard** through a
-dusk-lit colony city: boost over rooftops, lock on, burn enemies down with a beam rifle, homing missiles and a
-three-hit beam-saber combo, and survive five waves ending in a fight with the **Crimson Baron**.
+A 3D third-person mobile-suit combat game that runs in the browser. **Build your own mech piece by piece** in the
+garage (head, torso, arms, legs, backpack, weapon, off-hand and paint), then take it through a dusk-lit colony city:
+boost over rooftops, lock on, burn enemies down with your weapon, homing missiles and a three-hit beam-saber combo,
+and survive five waves ending in a fight with the **Crimson Baron**.
 
 Everything is generated in code. There are no model, texture or audio files: mechs are built from primitives,
 the city and sky are procedural, and every sound effect and the music are synthesised with WebAudio.
@@ -14,7 +15,8 @@ python3 serve.py          # http://localhost:8000   (or: python3 serve.py 3000)
 ```
 
 Any static file server works. The only requirement is that it serves `.js` files with a JavaScript MIME type
-(ES modules). Open the page, click **SORTIE**, and the game captures your mouse. Press **Esc** to pause.
+(ES modules). Open the page and click **SORTIE** to launch with your current build (the stock VG-01 Vanguard the first time), or
+**GARAGE** to build your own first. The game captures your mouse when a sortie starts. Press **Esc** to pause.
 Desktop browsers with WebGL only: there is no touch or gamepad support.
 
 ### Controls
@@ -25,9 +27,10 @@ Desktop browsers with WebGL only: there is no touch or gamepad support.
 | Mouse | Aim / camera (the camera tracks your target while locked on) |
 | `Space` (hold) | Boost upward |
 | `Shift` | Quick-boost dash, with brief invulnerability. Aimed along your input, or at your target |
-| Left mouse | Beam rifle (8-round magazine, auto-reloads) |
+| Left mouse | Your gun (auto-reloads). With **Twin Sabers** equipped it swings the saber instead |
 | Right mouse | Beam saber. Lunges at the target; press again mid-swing to chain a 3-hit combo |
-| `E` | Missile salvo (4 homing missiles, 2 charges that recharge) |
+| `E` | Missile salvo (4 homing missiles; charges recharge) |
+| `F` | Shoulder cannon, if you fitted one (a heavy splash shell, 7 s recharge) |
 | `Q` | Toggle lock-on |
 | `Tab` | Switch lock-on target |
 | `R` | Reload |
@@ -60,6 +63,31 @@ multiplier.
 The pause menu has mouse sensitivity, volume, a shadows toggle and a resolution scale. Lower the last two if
 the game runs slowly on integrated graphics. Settings are remembered in `localStorage`.
 
+## The garage
+
+Every slot has several parts. Each one changes how your mech **looks** and how it **plays**, and the right-hand
+panel shows the totals as bars. Hover a part to preview its effect on every stat (a white marker and a +/- delta)
+before you equip it. Drag to rotate the turntable, scroll to zoom, and use the preview poses (idle, boost, saber).
+
+| Slot | Options |
+| --- | --- |
+| **Head** | V-Fin Sensor (balanced) · Mono-Eye Scout (light, tighter missile homing) · Commander Horn (faster burst gauge, stronger saber) · Sentinel Visor (tougher, harder to stagger) |
+| **Torso** | Standard · Light Frame (fast, fragile) · Heavy Plate (very tough, heavy) · Reactor Core (more boost fuel and EN recovery) |
+| **Arms** | Standard · Assault Bracers (armor, saber; slower reloads) · Precision Arms (faster fire and reload) · Blade Arms (big saber damage) |
+| **Legs** | Standard · Sprint (fast, cheap dashes) · Tank (armor, stagger resistance; slow) · Jump (climb and air EN recovery) |
+| **Backpack** | Standard · Heavy Booster (boost fuel, climb) · Missile Pod (third missile charge, harder hits) · Wing Vernier (fast cheap dashes; fragile) |
+| **Weapon** | Beam Rifle · Rapid Beam Gun (30 rounds, low damage) · Blast Bazooka (3 explosive shells) · Beam Sniper (very fast heavy beams) · Twin Sabers (no gun, big melee bonus, deflects some gunfire) |
+| **Off-hand** | Beam Shield (absorbs 22% of gunfire, missiles and shells) · Shoulder Cannon (`F`) · None (lighter) |
+| **Paint** | Six schemes or your own four colours, plus energy colour (beams, saber, eyes) and thruster colour |
+
+**Weight matters.** Every part has a weight; the total scales your walking speed, flying speed and dash speed
+(a stock build is the reference at 100%, the heaviest possible is about 82%, the lightest about 115%). Armor, boost
+fuel and firepower are the price of weight, so a heavy tank and a light blade-runner play very differently. You
+can also name your mech, press **Randomize** for ideas, or **Reset** to the stock Vanguard.
+
+Your build is saved in the browser (`localStorage`) and used for every sortie. Open the garage from the title
+screen or from the results screen.
+
 ## Project layout
 
 ```
@@ -77,7 +105,9 @@ src/camera.js             chase camera with lock-on framing and trauma shake
 src/hud.js                DOM bars plus canvas reticle, radar and damage numbers
 src/missions.js           wave director
 src/audio.js              synthesised sound effects and music
-src/data.js               mech stats, palettes and wave definitions
+src/data.js               enemy mech stats, palettes and wave definitions
+src/parts.js              garage parts catalogue, stat derivation, build validation (no browser code)
+src/garage.js             the garage screen: tabs, option cards, stat bars, paint, saved builds
 vendor/three/             three.js r170 (MIT), vendored so the game runs offline
 scripts/test.mjs          end-to-end test suite
 serve.py                  tiny static server
@@ -88,8 +118,11 @@ running game for debugging (`__game.cheat.invincible = true` is handy for sights
 
 ## Tests
 
-`scripts/test.mjs` loads the game in headless Chromium and plays it: movement, boosting, landing on roofs,
-building collision (including a randomised stress run), every weapon, each enemy type and the boss, a full
+`scripts/test.mjs` first checks the parts maths in plain Node (every part's effect, weight scaling, input
+sanitising), then loads the game in headless Chromium and plays it: the garage UI by real clicks (equip, hover
+preview, paint, rename, random/reset, saved builds across a reload), movement, boosting, landing on roofs, building
+collision (including a randomised stress run), every weapon, the shield, shoulder cannon, missile pod and weight
+effects in actual combat, 25 random builds through a short fight each, each enemy type and the boss, a full
 scripted playthrough to victory, a defeat and retry, and the pause/options UI. It fails on any console error.
 
 ```bash
@@ -102,7 +135,7 @@ Screenshots from each run are written to `out/test/` (git-ignored).
 
 ## Notes
 
-- The mech designs are original. They borrow the visual language of the real-robot anime genre (a V-fin hero,
+- The mech designs and every garage part are original. They borrow the visual language of the real-robot anime genre (a V-fin hero,
   mono-eye grunts, a horned ace) but copy no existing machine. This is an independent fan-style project and is
   not affiliated with or endorsed by any anime studio or toy maker.
 - three.js is © its authors, MIT licensed; see `vendor/three/LICENSE`.

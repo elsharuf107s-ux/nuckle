@@ -46,16 +46,21 @@
     </div>
 
     <div class="panel" id="weapons">
-      <div class="weapon">
-        <div class="wname">BEAM RIFLE <kbd>LMB</kbd></div>
+      <div class="weapon" id="gun-row">
+        <div class="wname"><span id="weapon-name">BEAM RIFLE</span> <kbd id="weapon-key">LMB</kbd></div>
         <div id="ammo-pips"></div>
+        <div id="ammo-count"></div>
         <div id="reload-note">RELOADING</div>
       </div>
       <div class="weapon">
         <div class="wname">MISSILES <kbd>E</kbd></div>
         <div id="missile-pips"></div>
       </div>
-      <div class="weapon">
+      <div class="weapon" id="cannon-row">
+        <div class="wname"><span>SHOULDER CANNON</span> <kbd>F</kbd></div>
+        <div class="bar cannon"><i id="cannon-fill"></i></div>
+      </div>
+      <div class="weapon" id="saber-row">
         <div class="wname">BEAM SABER <kbd>RMB</kbd></div>
         <div class="wsub">3-hit combo &middot; tap again to chain</div>
       </div>
@@ -69,7 +74,11 @@
       <div class="eyebrow">MOBILE SUIT COMBAT</div>
       <h1>STEEL<br>VANGUARD</h1>
       <p class="tagline">Colony under siege. Five waves stand between you and the Crimson Baron.</p>
-      <button id="btn-start" class="primary">SORTIE</button>
+      <div class="title-buttons">
+        <button id="btn-start" class="primary">SORTIE</button>
+        <button id="btn-garage" class="secondary">GARAGE</button>
+      </div>
+      <div id="title-build" class="build-line"></div>
       <div class="controls">
         <div><kbd>W A S D</kbd> move</div>
         <div><kbd>MOUSE</kbd> aim / camera</div>
@@ -77,7 +86,7 @@
         <div><kbd>SHIFT</kbd> quick-boost dash</div>
         <div><kbd>LMB</kbd> beam rifle</div>
         <div><kbd>RMB</kbd> saber combo</div>
-        <div><kbd>E</kbd> missile salvo</div>
+        <div><kbd>E</kbd> missile salvo &nbsp; <kbd>F</kbd> shoulder cannon (if fitted)</div>
         <div><kbd>Q</kbd> lock-on on/off &nbsp; <kbd>TAB</kbd> switch target</div>
         <div><kbd>R</kbd> reload &nbsp; <kbd>X</kbd> burst &nbsp; <kbd>M</kbd> mute</div>
       </div>
@@ -109,6 +118,37 @@
       <div id="end-rank" class="rank hidden">S</div>
       <table id="end-stats"></table>
       <button id="btn-again" class="primary">SORTIE AGAIN</button>
+      <button id="btn-garage-end" class="secondary">GARAGE</button>
+    </div>
+  </div>
+
+  <!-- garage: the 3D canvas shows the mech on a turntable; these panels float over it -->
+  <div id="screen-garage" class="hidden">
+    <div class="g-panel g-left">
+      <div class="g-title">GARAGE</div>
+      <label class="g-name">CALLSIGN <input id="g-name" type="text" maxlength="14" spellcheck="false" autocomplete="off"></label>
+      <div id="g-tabs" class="g-tabs"></div>
+      <div id="g-options" class="g-options"></div>
+    </div>
+    <div class="g-panel g-right">
+      <div class="g-title">LOADOUT</div>
+      <div id="g-stats"></div>
+      <div id="g-summary" class="g-summary"></div>
+    </div>
+    <div class="g-bottom">
+      <div class="g-poses">
+        <span>PREVIEW</span>
+        <button class="pose active" data-pose="idle">IDLE</button>
+        <button class="pose" data-pose="boost">BOOST</button>
+        <button class="pose" data-pose="saber">SABER</button>
+      </div>
+      <div class="g-actions">
+        <button id="g-back" class="secondary">BACK</button>
+        <button id="g-random" class="secondary">RANDOMIZE</button>
+        <button id="g-reset" class="secondary">RESET</button>
+        <button id="g-go" class="primary">SORTIE</button>
+      </div>
+      <div class="g-hint">Drag to rotate &middot; scroll to zoom</div>
     </div>
   </div>
 

@@ -26,11 +26,12 @@ const CEILING = 230;
  *   hover         true to cancel gravity gently (floating during a melee swing)
  */
 export class Mech {
-  constructor(game, type, team) {
+  /** `defOverride` lets the garage field a custom build (see parts.js deriveMech) instead of a stock mech. */
+  constructor(game, type, team, defOverride = null) {
     this.game = game;
     this.type = type;
     this.team = team;
-    this.def = MECHS[type];
+    this.def = defOverride ?? MECHS[type];
     this.spec = this.def.spec;
 
     this.model = buildMech(this.spec);
@@ -253,6 +254,8 @@ export class Mech {
   takeDamage(amount, info = {}) {
     if (this.dead || this.invuln > 0 || amount <= 0) return 0;
     if (this.team === 'player' && this.game.cheat.invincible) return 0;
+    // a shield soaks a share of everything except saber hits
+    if (this.def.guard && info.kind && info.kind !== 'saber') amount *= 1 - this.def.guard;
     this.hp -= amount;
     this.flashT = 0.12;
 

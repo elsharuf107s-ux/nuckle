@@ -168,7 +168,7 @@ export class Projectiles {
     }
     const normal = this._b.copy(p.dir).negate();
     if (p.type === 'cannon' || p.type === 'missile') {
-      const r = p.type === 'cannon' ? 11 : 6;
+      const r = p.type === 'cannon' ? (p.splash ? Math.max(11, p.splash.radius * 0.5) : 11) : 6;
       game.fx.explosion(at, r, { shake: p.type === 'cannon' ? 0.8 : 0.35 });
       if (p.splash) this._splash(p, at, mech);
     } else {

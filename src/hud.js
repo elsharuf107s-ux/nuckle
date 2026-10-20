@@ -17,7 +17,9 @@ export class Hud {
       hpFill: $('hp-fill'), hpText: $('hp-text'), hpBar: $('hp-fill').parentElement,
       enFill: $('en-fill'), enText: $('en-text'), enBar: $('en-fill').parentElement,
       burstFill: $('burst-fill'), burstText: $('burst-text'), burstBar: $('burst-fill').parentElement, burstReady: $('burst-ready'),
-      ammo: $('ammo-pips'), missiles: $('missile-pips'), reload: $('reload-note'),
+      ammo: $('ammo-pips'), ammoCount: $('ammo-count'), missiles: $('missile-pips'), reload: $('reload-note'),
+      weaponName: $('weapon-name'), weaponKey: $('weapon-key'), gunRow: $('gun-row'), saberRow: $('saber-row'),
+      cannonRow: $('cannon-row'), cannonFill: $('cannon-fill'), mechName: $('mech-name'),
       boss: $('boss-bar'), bossFill: $('boss-fill'), bossName: $('boss-name'),
       banner: $('banner'), aMissile: $('alert-missile'), aArea: $('alert-area'), aArmor: $('alert-armor'),
       dmg: $('damage-vignette'), burstV: $('burst-vignette'),
@@ -44,6 +46,30 @@ export class Hud {
     this.h = window.innerHeight;
     this.canvas.width = Math.round(this.w * this.dpr);
     this.canvas.height = Math.round(this.h * this.dpr);
+  }
+
+  /** Rebuild the weapon panel for the currently equipped loadout. Call whenever the build changes. */
+  configure() {
+    const p = this.game.player;
+    const e = this.el;
+    e.mechName.textContent = p.build.name;
+    e.weaponName.textContent = p.weapon.name;
+    const saberOnly = p.meleeOnly;
+    e.weaponKey.textContent = saberOnly ? 'LMB / RMB' : 'LMB';
+    e.ammo.style.display = !saberOnly && p.magSize <= 12 ? '' : 'none';
+    e.ammoCount.style.display = !saberOnly && p.magSize > 12 ? '' : 'none';
+    e.reload.style.display = saberOnly ? 'none' : '';
+    e.saberRow.style.display = saberOnly ? 'none' : '';
+    e.cannonRow.style.display = p.ability ? '' : 'none';
+    e.gunRow.querySelector('.wsub')?.remove();
+    if (saberOnly) {
+      const sub = document.createElement('div');
+      sub.className = 'wsub';
+      sub.textContent = '3-hit combo · tap again to chain';
+      e.gunRow.append(sub);
+    }
+    this._lastAmmo = -1;
+    this._lastMissile = -1;
   }
 
   show(on) {
@@ -125,8 +151,10 @@ export class Hud {
     e.burstReady.classList.toggle('on', ready);
 
     // ---- weapon pips (rebuilt only when the count changes)
-    this._pips(e.ammo, player.ammo, 8, '_lastAmmo');
+    if (player.magSize > 12) e.ammoCount.textContent = `${player.ammo} / ${player.magSize}`;
+    else this._pips(e.ammo, player.ammo, player.magSize, '_lastAmmo');
     this._missilePips(player);
+    if (player.ability) e.cannonFill.style.width = `${(1 - player.cannonCd / player.ability.cooldown) * 100}%`;
     e.reload.classList.toggle('on', player.reloadT > 0);
     if (player.reloadT > 0) e.reload.textContent = `RELOADING ${Math.round((1 - player.reloadT / player.reloadDur) * 100)}%`;
 
@@ -189,7 +217,7 @@ export class Hud {
     this._lastMissile = key;
     const c = this.el.missiles;
     c.textContent = '';
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < player.stats.missileCharges; i++) {
       const d = document.createElement('div');
       d.className = `pip${i < player.missiles ? ' on' : ''}`;
       if (i === player.missiles) {
