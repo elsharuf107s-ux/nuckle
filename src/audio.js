@@ -177,6 +177,16 @@ export class AudioEngine {
     });
   }
 
+  /** A building coming down: a long, low rumble under a crunch of concrete. `size` is about the number of floors lost / 4. */
+  collapse(size = 1, pos = null) {
+    this._play(pos, 0.02, (v, pan) => {
+      const s = clamp(size, 0.4, 3);
+      this._noise({ type: 'lowpass', f0: 900, f1: 55, dur: 1.2 + s * 0.8, vol: Math.min(0.9, 0.5 * s) * v, pan });
+      this._tone({ type: 'sine', f0: 70, f1: 24, dur: 1 + s * 0.7, vol: Math.min(0.9, 0.55 * s) * v, pan });
+      this._noise({ type: 'bandpass', f0: 1800, f1: 400, q: 1, dur: 0.5 + s * 0.3, vol: 0.2 * v, pan });
+    });
+  }
+
   hit(pos) {
     this._play(pos, 0.05, (v, pan) => {
       this._noise({ type: 'bandpass', f0: 2400, f1: 900, q: 2, dur: 0.07, vol: 0.18 * v, pan });

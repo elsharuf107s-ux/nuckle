@@ -2024,6 +2024,247 @@ try {
   check('the shuttle throws the mech down the deck and into the air', launch.run.speed > 150 && launch.release.released && launch.release.airborne && launch.release.vy > 20 && launch.release.lines > 0.4, JSON.stringify([launch.run, launch.release]));
   check('it lands in the plaza before the first wave arrives, and the catapult and the scripted camera clear away', !!launch.landed && launch.landed.z < 120 && launch.landed.z > -80 && launch.landed.enemies === 0 && !launch.after.launch && !launch.after.shown && !launch.after.cine && launch.after.enemies > 0, JSON.stringify([launch.landed, launch.after]));
 
+  // ------------------------------------------------------------ 5j. the destructible city
+  const ruin = await page.evaluate(async () => {
+    const g = window.__game, w = g.world, D = g.destruction;
+    const THREE = await import('three');
+    const P = await import('/src/parts.js');
+    const { createEnemy } = await import('/src/ai.js');
+    const V = THREE.Vector3;
+    const out = {};
+    g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning } });
+    g.launchIntro = false;
+    g.cheat.invincible = true;
+    g.startMission();
+    g.manual = true;
+    g.missions.state = 'idle';
+    g.hud.reset();
+    const m = () => g.player.mech;
+    const dummy = (x, z, type = 'bulwark') => {
+      const e = createEnemy(g, type, 1);
+      e.mech.place(x, z, 0, 0);
+      e.think = () => ({ faceYaw: 0 });
+      e.def_dodge = 0;
+      e.mech.hp = e.mech.maxHp = 1e6;
+      g.enemies.push(e);
+      return e;
+    };
+    const clear = () => { for (const e of g.enemies) e.mech.destroy(); g.enemies.length = 0; g.projectiles.clear(); };
+    // a building with an open street on its +z side: where the shots come from
+    const open = (b) => !w.pointBlocked(b.cx, 6, b.maxZ + 36) && !w.pointBlocked(b.cx, 28, b.maxZ + 36) && w.raycast(b.cx, 28, b.maxZ + 36, 0, 0, -1, 60) > 30;
+    const pick = (minFloors, maxFloors = 99, skip = []) => w.boxes.filter((b) => b.n0 >= minFloors && b.n0 <= maxFloors && b.w > 16 && open(b) && !skip.includes(b) && Math.hypot(b.cx, b.cz) > 60)
+      .sort((a, b) => Math.hypot(a.cx, a.cz) - Math.hypot(b.cx, b.cz))[0];
+    const shoot = (b, type, damage, y, extra = {}, team = 'player') => {
+      const pos = new V(b.cx, y, b.maxZ + 36), dir = new V(0, 0, -1);
+      g.projectiles.spawn({ type, team, source: team === 'player' ? m() : g.enemies[0]?.mech ?? m(), pos, dir, damage, speed: type === 'cannon' ? 300 : 780, color: 0xffa040, knock: 0, ...extra });
+      g.step(40);
+    };
+    const shell = { splash: { radius: 26, damage: 260 } };
+    const sum = (b) => Array.from(b.floorDmg).reduce((a, c) => a + c, 0);
+    const calls = () => { g.render(); return g.renderer.info.render.calls; };
+
+    // ---- the city is made of floors
+    out.city = { all: w.allBuildings.length, standing: w.boxes.length, floorsOk: w.allBuildings.every((b) => b.n0 === Math.ceil(b.h0 / 4.5) && b.floorDmg.length === b.n0 && b.top === b.h0), perFloor: 4.5 };
+
+    // ---- a magazine of rifle shots chips a tower but does not bring it down; it leaves scorch marks
+    const tower = pick(10);
+    const topBefore = tower.top, marks0 = D.decalCount;
+    for (let i = 0; i < 8; i++) shoot(tower, 'beam', 210, 18 + (i % 3) * 3);
+    out.rifle = { top: tower.top - topBefore, dmg: Math.round(sum(tower)), marks: D.decalCount - marks0, collapses: D.collapses };
+
+    // ---- machine-gun bullets barely scratch it
+    const mgTarget = pick(6, 9, [tower]);
+    for (let i = 0; i < 30; i++) shoot(mgTarget, 'bullet', 42, 12);
+    out.mg = { dmg: Math.round(sum(mgTarget)), top: mgTarget.top - mgTarget.h0, hp: 260 + 90 * (mgTarget.n0 - 1) };
+
+    // ---- a shell at mid height takes the top off: whole floors, the collision follows, chunks and smoke
+    const target = pick(9, 14, [tower, mgTarget]);
+    const old = target.top;
+    const rayBefore = w.raycast(target.cx, old - 3, target.maxZ + 30, 0, 0, -1, 80);
+    const debris0 = g.fx.debris.length;
+    shoot(target, 'cannon', 520, old * 0.55, shell);
+    out.shell = { drop: old - target.top, floorsDropped: (old - target.top) / 4.5, aligned: Math.abs(target.top / 4.5 - Math.round(target.top / 4.5)) < 1e-6, n: target.n, rayBefore: Math.round(rayBefore), rayAfter: w.raycast(target.cx, old - 3, target.maxZ + 30, 0, 0, -1, 80),
+      blockedAtOldRoof: w.pointBlocked(target.cx, old - 3, target.cz), slabs: D.slabs.length, emitters: D.emitters.length, chunks: g.fx.debris.length - debris0, stat: g.stats.collapses, crown: !!target.crown, meshOk: Math.abs(target.mesh.geometry.parameters.height - target.top) < 1e-6 };
+    g.step(200);
+    out.shell.slabsAfter = D.slabs.length;
+
+    // ---- a mech on the roof falls with it, and is hurt
+    g.cheat.invincible = false;
+    const roof = pick(8, 14, [tower, mgTarget, target]);
+    const roofTop = roof.top;
+    m().place(roof.cx, roof.cz, roofTop, 0);
+    m().invuln = 0;
+    g.step(20);
+    const stood = { y: m().pos.y, grounded: m().grounded };
+    const hp0 = m().hp;
+    D._collapse(roof, 3);
+    g.step(90);
+    out.rider = { stood, fell: roofTop - m().pos.y, hurt: hp0 - m().hp };
+    g.cheat.invincible = true;
+    m().place(0, 0, 0, 0);
+
+    // ---- debris near the foot hurts and shoves what is there; what is far is untouched
+    const b3 = pick(8, 14, [tower, mgTarget, target, roof]);
+    const near = dummy(b3.cx, b3.maxZ + 8), far = dummy(b3.cx, b3.maxZ + 90);
+    near.mech.hp = near.mech.maxHp = 5000; far.mech.hp = far.mech.maxHp = 5000;
+    g.step(2);
+    D._collapse(b3, 3);
+    const k = near.mech.vel;
+    out.debris = { nearHurt: near.mech.maxHp - near.mech.hp, farHurt: far.mech.maxHp - far.mech.hp, pushedAway: k.z > 15, stagger: near.mech.stagger > 0 };
+    // ... but not twice in a row
+    const hpNow = near.mech.hp;
+    D._collapse(b3, 2);
+    out.debris.again = hpNow - near.mech.hp;
+    clear();
+
+    // ---- flatten a building: rubble you can walk over, no wall, spawn logic unharmed
+    const b4 = pick(6, 12, [tower, mgTarget, target, roof, b3]);
+    D._collapse(b4, 0);
+    out.rubble = { has: !!b4.rubble, solid: w.boxes.includes(b4), blocked: w.pointBlocked(b4.cx, 5, b4.cz), top: b4.top, leveled: D.leveled, hidden: !b4.mesh.visible, stat: g.stats.leveled };
+    m().place(b4.cx, b4.cz, 0, 0);
+    g.step(30);
+    out.rubble.walkedIn = Math.hypot(m().pos.x - b4.cx, m().pos.z - b4.cz);
+    m().place(0, 0, 0, 0);
+    let spawnOk = true;
+    for (let i = 0; i < 40; i++) { const sp = w.findSpawn(190, 330, []); if (!Number.isFinite(sp.x) || w.pointBlocked(sp.x, 5, sp.z)) spawnOk = false; }
+    out.rubble.spawnOk = spawnOk;
+    // shots now fly through where it stood
+    out.rubble.rayThrough = w.raycast(b4.cx, 10, b4.maxZ + 30, 0, 0, -1, 60);
+
+    // ---- the enemy breaks things too
+    const b5 = pick(7, 14, [tower, mgTarget, target, roof, b3, b4]);
+    const foe = dummy(b5.cx + 150, b5.maxZ + 60);
+    shoot(b5, 'cannon', 220, 10, { splash: { radius: 24, damage: 120 } }, 'enemy');
+    out.enemyShell = Math.round(sum(b5));
+    // ... and enemy sabers
+    const b6 = pick(6, 14, [tower, mgTarget, target, roof, b3, b4, b5]);
+    foe.mech.place(b6.cx, b6.maxZ + 14, 0, 0);
+    const dmg0 = sum(b6);
+    D.slash(foe.mech, 26, 340 * 1.3);
+    out.enemySaber = Math.round(sum(b6) - dmg0);
+    clear();
+
+    // ---- the pilot's own saber
+    const b7 = pick(6, 14, [tower, mgTarget, target, roof, b3, b4, b5, b6]);
+    m().place(b7.cx, b7.maxZ + 16, 0, 0);
+    g.rig.reset(0);
+    g.step(5);
+    const dmg7 = sum(b7);
+    for (let i = 0; i < 12; i++) { window.__t.tap('Mouse2'); g.step(10); }
+    out.saber = { dmg: Math.round(sum(b7) - dmg7), top: b7.top - b7.h0, collapsed: b7.top < b7.h0, stat: g.stats.collapses };
+    m().place(0, 0, 0, 0);
+
+    // ---- a wreck blowing up beside a wall hurts it
+    const b8 = pick(7, 14, [tower, mgTarget, target, roof, b3, b4, b5, b6, b7]);
+    const dying = dummy(b8.cx, b8.maxZ + 10, 'drone');
+    dying.mech.hp = dying.mech.maxHp = 100;
+    g.step(2);
+    const dmg8 = sum(b8) + (b8.top < b8.h0 ? 1e6 : 0);
+    dying.mech.takeDamage(1e6, { kind: 'beam' });
+    g.step(120);
+    out.wreckBlast = Math.round(sum(b8) + (b8.top < b8.h0 ? 1e6 : 0) - dmg8);
+    clear();
+
+    // ---- a shell that hits a mech beside a wall splashes the wall
+    const b9 = pick(7, 14, [tower, mgTarget, target, roof, b3, b4, b5, b6, b7, b8]);
+    dummy(b9.cx, b9.maxZ + 6);
+    g.step(2);
+    const dmg9 = sum(b9), top9 = b9.top;
+    g.projectiles.spawn({ type: 'cannon', team: 'player', source: m(), pos: new V(b9.cx, 9, b9.maxZ + 40), dir: new V(0, 0, -1), damage: 520, speed: 300, color: 0xffa040, knock: 0, splash: { radius: 26, damage: 260 } });
+    g.step(40);
+    out.splashWall = Math.round(sum(b9) - dmg9);
+    out.splashWallDown = b9.top < top9; // (a collapse clears the floor damage it used up)
+    clear();
+
+    // ---- a shell that lands in the street beside a wall only blasts it (no full wall hit); one that hits the wall itself does much more
+    const b10 = pick(9, 14, [tower, mgTarget, target, roof, b3, b4, b5, b6, b7, b8, b9]);
+    D.reset();
+    g.projectiles.spawn({ type: 'cannon', team: 'player', source: m(), pos: new V(b10.cx, 14, b10.maxZ + 44), dir: new V(0, -0.32, -1).normalize(), damage: 520, speed: 300, color: 0xffa040, knock: 0, splash: { radius: 26, damage: 260 } });
+    g.step(60);
+    const groundDmg = sum(b10) + (b10.top < b10.h0 ? 1e6 : 0);
+    D.reset();
+    shoot(b10, 'cannon', 520, 20, shell);
+    out.ground = { streetHit: Math.round(groundDmg), wallHit: Math.round(sum(b10) + (b10.top < b10.h0 ? 1e6 : 0)) };
+
+    // ---- caps: scorch marks, chunks, slabs and smoke columns stay bounded however much is shot
+    const spam = pick(14, 30) ?? w.boxes.reduce((a, c) => (c.n0 > a.n0 ? c : a));
+    for (let i = 0; i < 600; i++) D.damageAt(spam.cx + rand(0, 1), 1 + (i % 40), spam.maxZ + 1, 40, 2.5, true);
+    out.caps = { marks: D.decalCount, debris: g.fx.debris.length, slabs: D.slabs.length, emitters: D.emitters.length };
+
+    // ---- the GPU bill: a lot of destruction adds a handful of draw calls, not hundreds
+    D.reset();
+    g.camera.position.set(0, 120, 220); g.camera.lookAt(0, 20, 0); g.camera.updateMatrixWorld(true);
+    out.calls = { before: calls() };
+    const many = w.boxes.slice().sort((a, b) => Math.hypot(a.cx, a.cz) - Math.hypot(b.cx, b.cz)).slice(0, 24);
+    many.forEach((b, i) => D._collapse(b, i % 3 === 0 ? 0 : 2 + (i % 4)));
+    g.step(300);
+    out.calls.after = calls();
+    out.calls.mixed = many.filter((b) => b.rubble).length;
+    out.calls.crowns = many.filter((b) => b.crown).length;
+
+    // ---- the CPU bill
+    D.reset();
+    const t0 = performance.now();
+    for (let i = 0; i < 3000; i++) D.damageAt(0, 10, 0, 5, 3, true);
+    out.cpuPerHitMs = (performance.now() - t0) / 3000;
+
+    // ---- nothing is left behind: a second collapse replaces the first one's crown, and a reset removes every ruin
+    D.reset();
+    const groupN = w.cityGroup.children.length;
+    const lb = pick(10, 20);
+    D._collapse(lb, 7);
+    const afterFirst = w.cityGroup.children.length;
+    D._collapse(lb, 4);
+    const afterSecond = w.cityGroup.children.length;
+    D._collapse(w.boxes[10], 0);
+    D._collapse(w.boxes[11], 3);
+    D.reset();
+    out.leak = { first: afterFirst - groupN, second: afterSecond - groupN, afterReset: w.cityGroup.children.length - groupN };
+
+    // ---- the results screen counts what was brought down
+    D.reset();
+    g.stats = g._freshStats();
+    g.victory = true;
+    const rowsClean = g._result().rows.map((r) => r[0]);
+    D._collapse(w.boxes[3], 0);
+    D._collapse(w.boxes[5], 4);
+    const rows = g._result().rows.find((r) => r[0] === 'Structures brought down');
+    out.results = { clean: rowsClean.includes('Structures brought down'), row: rows ? rows[1] : null };
+
+    // ---- a new sortie puts the whole city back
+    g.startMission();
+    g.manual = true;
+    g.missions.state = 'idle';
+    out.reset = { top: w.allBuildings.every((b) => b.top === b.h0 && b.n === b.n0 && b.mesh.visible && !b.rubble && !b.crown && sum(b) === 0), standing: w.boxes.length === w.allBuildings.length, marks: D.decalCount, slabs: D.slabs.length, emitters: D.emitters.length,
+      solidAgain: w.pointBlocked(b4.cx, 5, b4.cz), geoOk: w.allBuildings.every((b) => Math.abs(b.mesh.geometry.parameters.height - b.h0) < 1e-6), collapses: D.collapses };
+    out.finite = [m().pos.x, m().pos.y, m().pos.z, m().hp].every(Number.isFinite);
+    g.cheat.invincible = true;
+    return out;
+    function rand(a, b) { return a + Math.random() * (b - a); }
+  });
+  dump('ruin', ruin);
+  check('every building is a stack of 4.5-unit floors, all standing at the start', ruin.city.floorsOk && ruin.city.all === ruin.city.standing && ruin.city.all > 50, JSON.stringify(ruin.city));
+  check('a magazine of rifle shots chips a tower and scorches it, but cannot bring it down', ruin.rifle.dmg > 300 && ruin.rifle.marks >= 3 && ruin.rifle.top === 0 && ruin.rifle.collapses === 0, JSON.stringify(ruin.rifle));
+  check('thirty machine-gun bullets barely scratch a building: less than half what its weakest floor can take', ruin.mg.dmg > 0 && ruin.mg.dmg < 400 && ruin.mg.top === 0, JSON.stringify(ruin.mg));
+  check('a shell takes whole floors off the top: height, collision and the mesh all follow, with chunks, a falling roof and smoke', ruin.shell.floorsDropped >= 2 && ruin.shell.aligned && ruin.shell.meshOk && ruin.shell.slabs > 0 && ruin.shell.emitters > 0 && ruin.shell.chunks >= 5 && ruin.shell.crown && ruin.shell.stat >= 1, JSON.stringify(ruin.shell));
+  check('where the roof was is open air: a ray that hit the wall now passes, and the point is no longer blocked', ruin.shell.rayBefore < 40 && !(ruin.shell.rayAfter < 80) && !ruin.shell.blockedAtOldRoof, `${ruin.shell.rayBefore} -> ${ruin.shell.rayAfter}`);
+  check('the falling roof section finishes and is cleared away', ruin.shell.slabsAfter === 0, `${ruin.shell.slabsAfter} left`);
+  check('a mech standing on the roof falls with it, and is hurt', ruin.rider.stood.grounded && ruin.rider.fell > 8 && ruin.rider.hurt > 100, JSON.stringify(ruin.rider));
+  check('debris hurts and shoves a mech at the foot of the building, and leaves one far away alone, and cannot hit twice in a row', ruin.debris.nearHurt > 60 && ruin.debris.pushedAway && ruin.debris.stagger && ruin.debris.farHurt === 0 && ruin.debris.again === 0, JSON.stringify(ruin.debris));
+  check('a flattened building leaves rubble: no wall, not solid, hidden walls, walkable, and spawns still find open ground', ruin.rubble.has && !ruin.rubble.solid && !ruin.rubble.blocked && ruin.rubble.top === 0 && ruin.rubble.hidden && ruin.rubble.walkedIn < 1 && ruin.rubble.spawnOk && ruin.rubble.leveled >= 1 && ruin.rubble.stat >= 1, JSON.stringify(ruin.rubble));
+  check('shots fly through where a flattened building stood', !(ruin.rubble.rayThrough < 60), `${ruin.rubble.rayThrough}`);
+  check('enemy fire breaks buildings too: shells and sabers', ruin.enemyShell > 300 && ruin.enemySaber > 300, `shell ${ruin.enemyShell}, saber ${ruin.enemySaber}`);
+  check('the pilot\'s saber cuts into a wall (a combo can bring a small building down)', ruin.saber.dmg > 300 || ruin.saber.collapsed, JSON.stringify(ruin.saber));
+  check('a machine blowing up beside a wall hurts it', ruin.wreckBlast > 100, `${ruin.wreckBlast}`);
+  check('a shell that hits a mech beside a wall splashes the wall', ruin.splashWall > 200 || ruin.splashWallDown, `${ruin.splashWall}, down ${ruin.splashWallDown}`);
+  check('a shell that lands in the street beside a wall only blasts it; hitting the wall itself does far more', ruin.ground.streetHit < ruin.ground.wallHit * 0.6, JSON.stringify(ruin.ground));
+  check('scorch marks, chunks, falling roofs and smoke columns stay within their caps', ruin.caps.marks <= 240 && ruin.caps.debris <= 130 && ruin.caps.slabs <= 6 && ruin.caps.emitters <= 12, JSON.stringify(ruin.caps));
+  check('wrecking two dozen buildings adds a handful of draw calls, not hundreds', ruin.calls.after - ruin.calls.before < 60 && ruin.calls.mixed >= 6 && ruin.calls.crowns >= 6, JSON.stringify(ruin.calls));
+  check('registering a hit is cheap', ruin.cpuPerHitMs < 0.15, `${ruin.cpuPerHitMs.toFixed(3)} ms`);
+  check('no mesh is left behind: a second collapse replaces the first crown, and a reset clears every ruin', ruin.leak.first === 1 && ruin.leak.second === 1 && ruin.leak.afterReset === 0, JSON.stringify(ruin.leak));
+  check('the results screen counts the structures brought down, once there are any', !ruin.results.clean && /^2 \(1 flattened\)$/.test(ruin.results.row ?? ''), JSON.stringify(ruin.results));
+  check('a new sortie puts the whole city back: every building whole, solid and lit, no rubble, marks or smoke', ruin.reset.top && ruin.reset.standing && ruin.reset.marks === 0 && ruin.reset.slabs === 0 && ruin.reset.emitters === 0 && ruin.reset.solidAgain && ruin.reset.geoOk && ruin.reset.collapses === 0 && ruin.finite, JSON.stringify(ruin.reset));
+
   // ------------------------------------------------------------ 6. enemies fight back
   const enemies = await page.evaluate(async () => {
     const g = window.__game, p = g.player, m = p.mech;

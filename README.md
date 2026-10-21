@@ -5,7 +5,8 @@ garage (eleven hardpoints you click on the mech, 97 parts, tuning points and pai
 boost over rooftops, lock on, burn enemies down with your weapon, homing missiles and a boost lunge into a four-hit
 beam-saber combo, and survive five waves ending in a fight with the **Crimson Baron**. Every sortie opens with a catapult
 launch, and the machines move like the mobile suits in the versus games: snap shots, saber draws, hard-leaning steps
-with afterimages, knockdowns and sparking wrecks. Between waves you drop into a **pit-stop garage**
+with afterimages, knockdowns and sparking wrecks. The city is destructible: shells, missiles, sabers and exploding machines
+bring floors down, collapses crush whoever is underneath, and flattened blocks become rubble you can walk over. Between waves you drop into a **pit-stop garage**
 to re-fit your mech for what comes next.
 
 Everything is generated in code. There are no model, texture or audio files: mechs are built from primitives,
@@ -68,6 +69,35 @@ The animation is modelled on the mobile-suit versus games: fast, readable, with 
   wing binders spread under thrust, whip antennas sway, and crests rattle on impact.
 - **The catapult.** A sortie opens on a launch deck north of the plaza: the lights count down while the mech crouches on
   the shuttle, the shuttle throws it down the deck, and the chase camera takes over once it is airborne.
+
+### A destructible city
+
+Every building is a stack of floors (one row of windows each) with a structural strength that grows toward the ground,
+because the floors below carry the ones above. Everything damages the floors around where it lands, yours and the enemy's:
+
+| Source | Against a building |
+| --- | --- |
+| Beam shots | chip a floor (a magazine of rifle shots will not bring a tower down) |
+| Machine-gun bullets | barely scratch it |
+| Bazooka, cannon and missiles | break floors; the blast spreads over the floors and buildings around the impact, even when the shell hit a mech |
+| Saber strokes | cut into the wall in front of you (the combo's finisher cuts hardest); enemy sabers do too |
+| A machine blowing up | damages the walls beside it |
+
+When a floor gives way, **it and everything above it comes down**:
+
+- The roof section pancakes onto what is left in a cloud of dust, windows tumble down as glowing chunks, the roof
+  machinery and beacon masts fall off, and the stump smoulders under a column of smoke with a jagged crown of broken slabs
+  and bent rebar. The height, the collision and the cover all follow: shots and mechs go through where the walls were.
+- **A mech standing on the roof falls with it** and is hurt. Debris also hurts and shoves anything near the foot of the
+  building (yours and theirs, and never twice within a second). Fighting in the shadow of a tower you are about to topple is a bad idea.
+- Bring down the lowest floors and the building is **flattened** to a mound of rubble with a scorched patch under it.
+  The rubble has no collision: walk or fly over it. A flattened block opens new lines of fire.
+- Walls that have been hit show scorch marks, and smoulder once their structure is in a bad way.
+- Damage carries over from wave to wave (the pit stop does not repair the city); a new sortie puts every building back.
+  The results screen counts the structures brought down.
+
+A competent run brings down some thirty roof sections and flattens a few blocks, so the city is chewed up rather than
+erased; a bazooka build flattens more.
 
 ### The sortie
 
@@ -217,7 +247,8 @@ the results screen, or meet it again in the pit stop between waves.
 index.html, style.css     page shell, HUD markup and menus
 src/main.js               entry point: screens, pause, pointer lock, saved options
 src/game.js               renderer, fixed-timestep loop, damage/kill/score rules, win and lose
-src/world.js              procedural city, sky shader, lighting, the launch catapult, collision queries
+src/world.js              procedural city of floor-stacked buildings, sky shader, lighting, the launch catapult, collision queries
+src/destruction.js        the destructible city: per-floor damage, collapses, rubble, scorch marks, debris damage to mechs
 src/mechModel.js          assembles a mech from a spec and hands it to the motion layer; locates the garage's hardpoint anchors
 src/model/                the geometry: kit.js (shared geometry and materials), skeleton.js (proportions), body.js (pelvis and hinged skirt,
                           legs, torso, arms), head.js (helmets, crests, whip antennas), gear.js (backpacks, shoulders and mounts, weapons and
@@ -229,7 +260,7 @@ src/mech.js               mech physics: walk, jump, boost, dash, skids, knockdow
 src/player.js             input to intent, lock-on, rifle, missiles, saber lunge and combo, burst
 src/ai.js                 Drone / Striker / Bulwark / Baron behaviours
 src/weapons.js            projectiles with swept collision and homing
-src/fx.js                 particles, explosions, debris, saber arcs and thrust streaks, afterimages
+src/fx.js                 particles, explosions, dust clouds, smoke plumes, debris chunks, saber arcs and thrust streaks, afterimages
 src/camera.js             chase camera with lock-on framing, trauma shake, kill punches and scripted shots (the launch)
 src/input.js              keyboard, mouse and touch state in one key set (plus the analog stick axis)
 src/touch.js              on-screen touch controls: floating stick, look drag, tap-to-target, action buttons
@@ -271,7 +302,12 @@ holding, the two-handed grip, the saber draw and sheath (hand at the hilt, gun o
 step lean and skid, the flight pose, the kneeling landing, the skirt, antenna and wing motion, the shoulder mount aim and
 kick, the hit flinch, a knockdown with no damage taken on the ground, a wreck sinking before it explodes, the kill slow
 motion, the boost lunge with afterimages and speed lines into the four-hit combo and its knockdown finisher, and the
-catapult launch from the deck to the plaza. It fails on any console error.
+catapult launch from the deck to the plaza, and the destructible city (floors, scorch marks, a magazine of rifle shots
+that chips but does not topple, machine-gun bullets that barely scratch, a shell taking whole floors off with the
+collision, mesh and chunks following, a mech riding a collapsing roof down and being hurt, debris hurting what is at the
+foot and not what is far, rubble that is walkable with spawns unharmed, enemy fire, sabers and exploding wrecks all
+breaking walls, the caps on marks, chunks and smoke, no leaked meshes, and the whole city restored for a new sortie).
+It fails on any console error.
 
 `scripts/test-touch.mjs` does the same for phones: an emulated touch device with real multi-touch (both thumbs at once),
 the title, garage, HUD, pause and end screens at 844x390 and 667x375, every on-screen control, the analog stick, tap to

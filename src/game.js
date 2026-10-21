@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { AudioEngine } from './audio.js';
 import { CameraRig } from './camera.js';
+import { Destruction } from './destruction.js';
 import { Fx } from './fx.js';
 import { Hud } from './hud.js';
 import { Input } from './input.js';
@@ -87,6 +88,7 @@ export class Game {
     this.audio = new AudioEngine();
     this.world = new World(this.scene, this.renderer);
     this.fx = new Fx(this);
+    this.destruction = new Destruction(this);
     this.projectiles = new Projectiles(this);
     this.hud = new Hud(this);
     this.player = new Player(this);
@@ -101,7 +103,7 @@ export class Game {
   }
 
   _freshStats() {
-    return { score: 0, kills: 0, time: 0, damageTaken: 0, damageDealt: 0 };
+    return { score: 0, kills: 0, time: 0, damageTaken: 0, damageDealt: 0, collapses: 0, leveled: 0 };
   }
 
   /** Apply graphics options: { shadows: bool, scale: render-resolution multiplier }. */
@@ -133,6 +135,7 @@ export class Game {
     this._clearWrecks();
     this.projectiles.clear();
     this.fx.clear();
+    this.destruction.reset(); // a new sortie: the whole city is standing again
     this.hud.reset();
     this.stats = this._freshStats();
     this.combo = { count: 0, t: 0 };
@@ -167,6 +170,7 @@ export class Game {
     this.world.showCatapult(false);
     this.projectiles.clear();
     this.fx.clear();
+    this.destruction.reset();
     this.hud.reset();
     this.hud.show(false);
     this.player.reset(0, 0);
@@ -235,6 +239,7 @@ export class Game {
         ['Damage dealt', Math.round(s.damageDealt).toLocaleString('en-US')],
         ['Damage taken', Math.round(s.damageTaken).toLocaleString('en-US')],
         ['Combat score', s.score.toLocaleString('en-US')],
+        ...(s.collapses > 0 ? [['Structures brought down', `${s.collapses}${s.leveled ? ` (${s.leveled} flattened)` : ''}`]] : []),
         ...(this.victory ? [['Time bonus', timeBonus.toLocaleString('en-US')], ['Armor bonus', armorBonus.toLocaleString('en-US')]] : []),
         ['Total', total.toLocaleString('en-US')],
       ],
@@ -293,6 +298,7 @@ export class Game {
       this._updateShowroom(dt);
       this.world.update(dt, player.mech.pos, this.camera.position);
       this.fx.update(dt);
+      this.destruction.update(dt);
       this.input.endStep();
       return;
     }
@@ -322,6 +328,7 @@ export class Game {
     this.projectiles.update(dt);
     if (this.state === 'playing') this.missions.update(dt);
     this.fx.update(dt);
+    this.destruction.update(dt);
 
     if (this.combo.count > 0) {
       this.combo.t -= dt;
@@ -699,6 +706,7 @@ export class Game {
     const player = mech === this.player.mech;
     const r = player ? 40 : (boss ? 62 : 32) * mech.spec.scale;
     this.fx.explosion(center, r, { shake: boss ? 1.4 : player ? 1.2 : 1 });
+    this.destruction.explode(center.x, center.y, center.z, boss ? 900 : 450, r * 1.1); // a machine blowing up next to a building hurts it
     this.fx.debrisBurst(center, mech.spec.palette, mech.spec.scale);
     if (boss) this.fx.explosion(center.clone().add(new THREE.Vector3(8, 6, -4)), r * 0.7, { sound: false });
     mech.destroy();

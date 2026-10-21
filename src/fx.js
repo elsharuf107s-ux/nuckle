@@ -110,6 +110,9 @@ const YELLOW = [1, 0.85, 0.35];
 const SMOKE_A = [0.28, 0.27, 0.3];
 const SMOKE_B = [0.1, 0.1, 0.12];
 
+const MAX_DEBRIS = 130;   // flying wreckage (mech parts and building chunks) alive at once
+const DUST_A = [0.56, 0.5, 0.45];
+const DUST_B = [0.3, 0.28, 0.27];
 const GHOST_POOL = 6;     // afterimages per mech
 const GHOST_LIFE = 0.26;  // seconds an afterimage takes to fade
 const GHOST_ALPHA = 0.16; // its starting opacity (additive, and the meshes overlap, so it stays low)
@@ -275,6 +278,39 @@ export class Fx {
   /** Glowing exhaust particle, used for boost trails. */
   exhaust(pos, vel, color, size = 3) {
     this.glow.spawn(pos.x, pos.y, pos.z, vel.x, vel.y, vel.z, rand(0.2, 0.4), size, size * 0.3, color, [0.1, 0.1, 0.4], 0.7, 0, 1.5);
+  }
+
+  /** A big billow of dust rolling out from (x, y, z): a collapse, or a heavy impact on the ground. */
+  dustCloud(x, y, z, radius, n = 16, rise = 1) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = radius * rand(0.3, 1.05);
+      const sp = rand(6, 22) * (0.6 + radius / 40);
+      this.smoke.spawn(x + Math.cos(a) * r, y + rand(0.5, 3), z + Math.sin(a) * r, Math.cos(a) * sp, rand(4, 12) * rise, Math.sin(a) * sp,
+        rand(2.4, 4.4), rand(5, 9), rand(18, 36), DUST_A, DUST_B, 0.55, 0, 1.3, 0.1);
+    }
+  }
+
+  /** One puff of a rising smoke column (a smouldering ruin); `fire` adds an ember now and then. */
+  plume(x, y, z, fire = false) {
+    this.smoke.spawn(x + rand(-3, 3), y, z + rand(-3, 3), rand(-2, 3), rand(10, 18), rand(-2, 2), rand(2.8, 4.6), 4, rand(14, 26), SMOKE_A, SMOKE_B, 0.5, 0, 0.5, 0.2);
+    if (fire && Math.random() < 0.55) {
+      this.glow.spawn(x + rand(-3, 3), y, z + rand(-3, 3), rand(-4, 4), rand(8, 20), rand(-4, 4), rand(0.5, 1.1), rand(1.5, 3), 0.4, WHITE_HOT, EMBER, 0.9, -10, 0.4);
+    }
+  }
+
+  /**
+   * A chunk of wreckage that flies and tumbles, lands, and fades: used for building collapses. `mat` is any shared
+   * material; chunks past the cap are dropped so a big collapse cannot flood the scene.
+   */
+  chunk(pos, vel, size, mat, life = rand(3, 5)) {
+    if (this.debris.length >= MAX_DEBRIS) return;
+    const mesh = new THREE.Mesh(debrisGeo, mat);
+    mesh.scale.set(size * rand(0.7, 1.4), size * rand(0.5, 1.1), size * rand(0.7, 1.4));
+    mesh.position.copy(pos);
+    mesh.castShadow = true;
+    this.scene.add(mesh);
+    this.debris.push({ mesh, size, age: 0, life, vel: vel.clone(), spin: new THREE.Vector3(rand(-5, 5), rand(-5, 5), rand(-5, 5)) });
   }
 
   /** A wrecked mech: hull chunks scatter and burn. */

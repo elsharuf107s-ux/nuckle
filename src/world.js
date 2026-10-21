@@ -8,6 +8,7 @@ export const ARENA = 360; // playable half-width; beyond this the pilot is pushe
 const PITCH = 120;        // street grid spacing (a 36-wide street plus an 84-wide block)
 const BLOCK_INSET = 18;   // half the street width
 const TILE = 18;          // world size of one repeating window texture tile
+export const FLOOR_H = TILE / 4; // the window texture has four rows per tile: one row of windows is one floor
 
 export const SUN_DIR = new THREE.Vector3(0.62, 0.3, 0.72).normalize();
 
@@ -15,7 +16,8 @@ export class World {
   constructor(scene, renderer) {
     this.scene = scene;
     this.renderer = renderer;
-    this.boxes = []; // collision volumes: { minX, maxX, minZ, maxZ, top }
+    this.boxes = []; // collision volumes: the standing buildings ({ minX, maxX, minZ, maxZ, top, ... }; see _buildCity)
+    this.allBuildings = []; // every building ever built, standing or not (destruction.js rebuilds them between sorties)
     this.rand = mulberry32(1979);
 
     scene.fog = new THREE.FogExp2(0x7a4a60, 0.00115);
@@ -260,34 +262,40 @@ export class World {
     const rng = this.rand;
     this.cityGroup = new THREE.Group();
     this.scene.add(this.cityGroup);
+    this.cityAssets = { sideMats, roofMat };
 
+    /**
+     * A building is a box from the ground to `top`, and the record is its own collision volume. `top` drops as
+     * floors are destroyed (see destruction.js): `h0` is the original height, `n0` the original floor count, `n` the
+     * floors standing, `floorDmg` the damage each floor has taken, `props` the roof machinery that goes down with the roof.
+     */
     const addBuilding = (cx, cz, w, d, h) => {
-      const geo = new THREE.BoxGeometry(w, h, d);
-      const uv = geo.attributes.uv;
-      const ou = rng(), ov = rng();
-      for (let f = 0; f < 6; f++) {
-        if (f === 2 || f === 3) continue; // roof / floor
-        const faceW = f < 2 ? d : w;
-        for (let i = 0; i < 4; i++) {
-          const k = f * 4 + i;
-          uv.setXY(k, uv.getX(k) * (faceW / TILE) + ou, uv.getY(k) * (h / TILE) + ov);
-        }
-      }
+      const ou = rng();
+      const ov = Math.floor(rng() * 4) / 4; // a quarter tile at a time: the slab lines of the texture land on the floor lines
       const side = sideMats[Math.floor(rng() * sideMats.length)];
-      const mesh = new THREE.Mesh(geo, [side, side, roofMat, roofMat, side, side]);
+      const n0 = Math.ceil(h / FLOOR_H);
+      const b = {
+        minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, top: h,
+        cx, cz, w, d, h0: h, n0, n: n0, ou, ov, side, floorDmg: new Float32Array(n0), props: [],
+        mesh: null, crown: null, rubble: null, changed: false, lastDecal: -1, smokeUntil: -1,
+      };
+      const mesh = new THREE.Mesh(this.buildingGeo(b, 0, h), [side, side, roofMat, roofMat, side, side]);
       mesh.position.set(cx, h / 2, cz);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.cityGroup.add(mesh);
-      this.boxes.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, top: h });
+      b.mesh = mesh;
+      this.boxes.push(b);
+      this.allBuildings.push(b);
 
-      // rooftop machinery and aircraft-warning beacons
+      // rooftop machinery and aircraft-warning beacons (they come down with the roof)
       if (rng() < 0.45) {
         const bw = w * (0.2 + rng() * 0.25), bd = d * (0.2 + rng() * 0.25), bh = 2 + rng() * 4;
         const box = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), roofMat);
         box.position.set(cx + (rng() - 0.5) * w * 0.4, h + bh / 2, cz + (rng() - 0.5) * d * 0.4);
         box.castShadow = true;
         this.cityGroup.add(box);
+        b.props.push({ mesh: box, base: h, size: Math.max(bw, bd, bh) });
       }
       if (h > 60) {
         const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 14, 6), roofMat);
@@ -295,6 +303,7 @@ export class World {
         const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.9, 8, 6), beaconMat);
         lamp.position.set(cx, h + 14.5, cz);
         this.cityGroup.add(mast, lamp);
+        b.props.push({ mesh: mast, base: h, size: 3 }, { mesh: lamp, base: h, size: 1.5 });
       }
     };
 
@@ -322,6 +331,26 @@ export class World {
         }
       }
     }
+  }
+
+  /**
+   * The walls of a building between heights y0 and y1, centred on its footprint and spanning y0..y1 around its middle
+   * (so position it at (y0 + y1) / 2). The window texture runs on from the ground whatever the segment, so a shortened
+   * building and a slab of a fallen one both keep their windows lined up.
+   */
+  buildingGeo(b, y0, y1) {
+    const hh = y1 - y0;
+    const geo = new THREE.BoxGeometry(b.w, hh, b.d);
+    const uv = geo.attributes.uv;
+    for (let f = 0; f < 6; f++) {
+      if (f === 2 || f === 3) continue; // roof / floor
+      const faceW = f < 2 ? b.d : b.w;
+      for (let i = 0; i < 4; i++) {
+        const k = f * 4 + i;
+        uv.setXY(k, uv.getX(k) * (faceW / TILE) + b.ou, uv.getY(k) * (hh / TILE) + y0 / TILE + b.ov);
+      }
+    }
+    return geo;
   }
 
   /** Dark silhouettes beyond the arena for depth; no collision. */
@@ -499,6 +528,15 @@ export class World {
       if (y < b.top && x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ) return true;
     }
     return false;
+  }
+
+  /** The standing building that contains this point, or null (the ground and open air are not buildings). */
+  buildingAt(x, y, z) {
+    if (y < 0) return null;
+    for (const b of this.boxes) {
+      if (y < b.top && x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ) return b;
+    }
+    return null;
   }
 
   /** Height of the roof (or ground) a body of this radius can stand on, given its previous feet height. */

@@ -137,6 +137,7 @@ class Enemy {
   meleeHit(damage, reach, stagger = false) {
     const m = this.mech;
     const p = this.target;
+    this.game.destruction.slash(m, reach, damage * 0.8); // a swing that reaches a wall cuts into it, whoever is in front
     const v = this._tmp.set(p.pos.x - m.pos.x, 0, p.pos.z - m.pos.z);
     const d = v.length();
     if (d > reach + p.radius + m.radius * 0.5 || Math.abs(p.pos.y - m.pos.y) > 22) return false;

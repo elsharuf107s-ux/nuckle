@@ -906,6 +906,11 @@ export class Player {
       game.fx.sparks(m.center(new THREE.Vector3()), fwd, def.finisher ? 40 : 22, [1, 0.6, 0.95]);
       landed = true;
     }
+    // a stroke that reaches a wall cuts into it as well (the finisher, a good deal deeper)
+    if (game.destruction.slash(mech, this.stats.reach, def.damage * this.stats.melee * this.dmgMul * (def.finisher ? 1.5 : 0.6))) {
+      game.audio.saberHit(mech.pos);
+      game.shake(0.3);
+    }
     if (landed) {
       game.audio.saberHit(mech.pos);
       game.shake(def.stagger ? 0.9 : 0.5);

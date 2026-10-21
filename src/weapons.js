@@ -34,6 +34,9 @@ const TYPES = {
   missile: { speed: 150, radius: 2.0, life: 5.0 },
 };
 
+/** How hard each kind of shot hits a building, against the damage it does to a mech: bullets chip, shells and missiles break things. */
+const STRUCTURE = { beam: 0.5, bullet: 0.1, cannon: 1.8, missile: 1.4 };
+
 function makeMesh(type, color) {
   const g = new THREE.Group();
   if (type === 'beam') {
@@ -206,9 +209,26 @@ export class Projectiles {
     return n;
   }
 
+  /**
+   * Structural damage to the city where a shot landed. A shot that stops against a wall (`contact`) hits that floor with
+   * the weapon's full punch, and shells and missiles also blast the floors around it, whether they hit a wall or a mech.
+   */
+  _structure(p, at, contact) {
+    const d = this.game.destruction;
+    const heavy = p.type === 'cannon' || p.type === 'missile';
+    if (contact) d.damageAt(at.x, at.y, at.z, p.damage * (STRUCTURE[p.type] ?? 0.4), 2.5 + p.radius * 0.5, true);
+    if (heavy) {
+      const r = p.splash ? p.splash.radius : p.type === 'cannon' ? 11 : 6;
+      d.damageAt(at.x, at.y, at.z, (p.splash ? p.splash.damage * 1.5 : p.damage * 0.8), r, contact);
+    }
+  }
+
   _impact(p, atScratch, mech) {
     const game = this.game;
     const at = atScratch.clone(); // callers pass scratch vectors that the splash pass would overwrite
+    // a shot that stopped inside a wall hits that wall in full; one that hit the street, or a mech, only blasts what is near
+    if (!mech) this._structure(p, at, this.game.world.buildingAt(p.pos.x, p.pos.y, p.pos.z) !== null);
+    else if (p.type === 'cannon' || p.type === 'missile') this._structure(p, at, false);
     const knock = this._c.copy(p.dir).multiplyScalar(p.knock);
     if (mech) {
       mech.takeDamage(p.damage, { source: p.source, knock: knock.clone(), point: at.clone(), kind: p.type });
