@@ -1,9 +1,11 @@
 // The garage's parts catalogue and everything derived from a build.
 //
-// A build picks one part for each of eleven slots, spends tuning points, and paints the result.
-// Each part contributes additive (`add`) and multiplicative (`mul`) stat changes, and a model
-// style that mechModel.js knows how to draw. deriveMech() folds a build into the same "def" shape
-// the fixed enemy mechs use, so the Mech class needs no special casing.
+// A build picks one part for each of sixteen slots, spends tuning points, and paints the result. The
+// slots sit on eleven HARDPOINTS, the places on the machine that the garage lets you click: the
+// shoulders are separate left and right (each with an armor pad and a weapon mount on top), so the
+// two sides can differ. Each part contributes additive (`add`) and multiplicative (`mul`) stat changes,
+// and a model style that the model builder knows how to draw. deriveMech() folds a build into the same
+// "def" shape the fixed enemy mechs use, so the Mech class needs no special casing.
 //
 // Two budgets make the choices bite:
 //   LOAD   the legs carry a weight limit; going over it slows the mech down.
@@ -12,7 +14,51 @@
 //
 // This module has no browser or three.js dependency, so it can be unit-tested in plain Node.
 
-export const SLOTS = ['head', 'torso', 'arms', 'legs', 'shoulder', 'backpack', 'core', 'pilot', 'weapon', 'offhand', 'sub'];
+export const SLOTS = [
+  'head', 'crest', 'torso', 'pilot', 'arms', 'legs',
+  'shoulderL', 'shoulderR', 'mountL', 'mountR',
+  'backpack', 'core', 'skirt', 'weapon', 'offhand', 'sub',
+];
+
+/** The two shoulders pick from one catalogue, and so do the two weapon mounts. */
+const POOL = { shoulderL: 'shoulder', shoulderR: 'shoulder', mountL: 'mount', mountR: 'mount' };
+export const poolOf = (slot) => POOL[slot] ?? slot;
+/** The other side of a left/right slot (shoulders and mounts), for the symmetry switch. */
+export const MIRROR = { shoulderL: 'shoulderR', shoulderR: 'shoulderL', mountL: 'mountR', mountR: 'mountL' };
+
+/** What the garage calls each slot. */
+export const SLOT_LABELS = {
+  head: 'HELMET', crest: 'CREST', torso: 'FRAME', pilot: 'PILOT', arms: 'ARMS', legs: 'LEGS',
+  shoulderL: 'ARMOR', shoulderR: 'ARMOR', mountL: 'WEAPON MOUNT', mountR: 'WEAPON MOUNT',
+  backpack: 'BACKPACK', core: 'CORE', skirt: 'SKIRT', weapon: 'WEAPON', offhand: 'OFF-HAND', sub: 'SUB-WEAPON',
+};
+
+/**
+ * The places on the machine you click in the garage. A hardpoint can hold several slots (a shoulder has an
+ * armor pad and a weapon mount; the head has a helmet and a crest) and shows them as tabs.
+ */
+export const HARDPOINTS = [
+  { id: 'head', name: 'HEAD', slots: ['head', 'crest'] },
+  { id: 'chest', name: 'CHEST', slots: ['torso', 'pilot'] },
+  { id: 'arms', name: 'ARMS', slots: ['arms'] },
+  { id: 'legs', name: 'LEGS', slots: ['legs'] },
+  { id: 'shoulderL', name: 'L SHOULDER', slots: ['shoulderL', 'mountL'] },
+  { id: 'shoulderR', name: 'R SHOULDER', slots: ['shoulderR', 'mountR'] },
+  { id: 'back', name: 'BACKPACK', slots: ['backpack'] },
+  { id: 'waist', name: 'WAIST', slots: ['core', 'skirt'] },
+  { id: 'handR', name: 'R HAND', slots: ['weapon'] },
+  { id: 'handL', name: 'L HAND', slots: ['offhand'] },
+  { id: 'hips', name: 'HIPS', slots: ['sub'] },
+];
+export const hardpointOf = (slot) => HARDPOINTS.find((h) => h.slots.includes(slot));
+
+/** Cosmetic markings painted on the machine. */
+export const MARKS = [
+  { id: 'none', name: 'NONE' },
+  { id: 'stripe', name: 'STRIPES' },
+  { id: 'chevron', name: 'CHEVRONS' },
+  { id: 'hazard', name: 'HAZARD' },
+];
 
 // ------------------------------------------------------------------ frame and budgets
 
@@ -82,6 +128,21 @@ export const PARTS = {
       add: { hp: 110, weight: 5, draw: 10 }, mul: { fireRate: 1.06, burstGain: 1.15, melee: 1.04 } },
     { id: 'jammer', name: 'ECM CROWN', model: 'jammer', desc: 'Electronic warfare crown: enemy missiles lose 40% of their turning, so most of them miss.',
       add: { hp: 80, weight: 5, draw: 14, jam: 0.4 } },
+    { id: 'knight', name: 'KNIGHT HELM', model: 'knight', desc: 'A closed, armoured helm with a narrow visor slit: tougher and steadier, but heavy.',
+      add: { hp: 200, weight: 7, staggerAt: 30, draw: 6 }, guard: 0.02 },
+    { id: 'hawk', name: 'HAWK SIGHT', model: 'hawk', desc: 'A beaked targeting helm: a long-range radar and much tighter missile tracking. Power hungry.',
+      add: { hp: 80, weight: 4, radar: 120, missileTurn: 0.4, draw: 9 } },
+    { id: 'twin', name: 'TWIN-EYE HELM', model: 'twin', desc: 'Twin cameras on a light helm: a quicker trigger and faster reloads.',
+      add: { hp: 100, weight: 5, draw: 8 }, mul: { fireRate: 1.04, reload: 1.06 } },
+  ],
+  crest: [
+    { id: 'auto', name: 'HELMET DEFAULT', model: 'auto', desc: 'Keeps the crest that comes with your helmet.', add: {} },
+    { id: 'vfin', name: 'V-FIN', model: 'vfin', desc: 'The classic V-shaped fin. Purely cosmetic.', add: {} },
+    { id: 'horn', name: 'COMMAND HORN', model: 'horn', desc: 'A single tall horn. Purely cosmetic.', add: {} },
+    { id: 'blade', name: 'BLADE CREST', model: 'blade', desc: 'A swept blade fin along the helmet. Purely cosmetic.', add: {} },
+    { id: 'antenna', name: 'TWIN ANTENNA', model: 'antenna', desc: 'Two slim whip antennae. Purely cosmetic.', add: {} },
+    { id: 'crown', name: 'SPIKE CROWN', model: 'crown', desc: 'A ring of short spikes. Purely cosmetic.', add: {} },
+    { id: 'none', name: 'NO CREST', model: 'none', desc: 'A clean, bare helmet. Purely cosmetic.', add: {} },
   ],
   torso: [
     { id: 'std', name: 'STANDARD CHEST', model: 'std', bulk: 1.0, desc: 'Well-rounded chassis. Power output 100.',
@@ -94,6 +155,10 @@ export const PARTS = {
       add: { hp: 1000, weight: 28, en: 25, enGround: 10, enAir: 4, supply: 132 }, mul: { burstGain: 1.2 } },
     { id: 'bay', name: 'MISSILE BAY CHEST', model: 'bay', bulk: 1.08, desc: 'Armoured chest with missile bays: an extra missile charge and harder-hitting missiles, for a little less armour.',
       add: { hp: 1000, weight: 29, missileCharges: 1, supply: 104 }, mul: { missileDamage: 1.1 } },
+    { id: 'wedge', name: 'WEDGE FRAME', model: 'wedge', bulk: 0.96, desc: 'An angular, aerodynamic frame between the light and standard chassis: nimble, with a little more armour than the light frame.',
+      add: { hp: 920, weight: 20, enGround: 4, supply: 96 }, mul: { mobility: 1.02 } },
+    { id: 'ranger', name: 'RANGER FRAME', model: 'ranger', bulk: 1.0, desc: 'A long-range chassis with fuel tanks along the spine: more boost fuel and a steadier climb.',
+      add: { hp: 980, weight: 22, en: 12, ascendSpeed: 3, supply: 104 } },
     { id: 'command', name: 'COMMAND CHEST', model: 'command', bulk: 1.02, desc: 'Command-grade chassis with a sensor mast: bigger radar, a faster burst gauge and extra armor repaired between waves.',
       add: { hp: 1050, weight: 27, radar: 100, resupplyHeal: 0.1, supply: 112 }, mul: { burstGain: 1.2 } },
   ],
@@ -125,19 +190,38 @@ export const PARTS = {
     { id: 'siege', name: 'SIEGE LEGS', model: 'siege', desc: 'Braced stabiliser stance: very hard to stagger and steadier on the gun, but slow.',
       add: { hp: 520, weight: 32, staggerAt: 160, draw: 7, load: 140 }, mul: { mobility: 0.95, reload: 1.1, fireRate: 1.04 } },
   ],
+  // Shoulder armor: the values are PER SIDE, so a matched pair gives the whole bonus and a mismatched pair half of each.
   shoulder: [
-    { id: 'std', name: 'STANDARD PAULDRONS', model: 'std', desc: 'Light shoulder plates.',
-      add: { weight: 8, draw: 4 } },
-    { id: 'bulwark', name: 'BULWARK SHELLS', model: 'bulwark', desc: 'Layered armour shells: extra armour, a little gunfire absorption and stagger resistance.',
-      add: { hp: 220, weight: 16, staggerAt: 40, draw: 8 }, guard: 0.04 },
-    { id: 'spike', name: 'RAM SPIKES', model: 'spike', desc: 'Spiked shoulders for close work: a modest saber bonus and some extra armour.',
-      add: { hp: 120, weight: 9, draw: 4 }, mul: { melee: 1.12 } },
-    { id: 'vernier', name: 'VERNIER SHOULDERS', model: 'vernier', desc: 'Thruster shoulders: sharper turning and faster, cheaper dashes. Power hungry.',
-      add: { weight: 7, turn: 3, dashSpeed: 25, dashCost: -2, draw: 12 } },
-    { id: 'rack', name: 'MISSILE RACKS', model: 'rack', desc: 'Racks on the shoulders: an extra missile charge and tighter homing. Power hungry.',
-      add: { weight: 14, missileCharges: 1, missileTurn: 1.0, draw: 16 } },
-    { id: 'aegis', name: 'AEGIS EMITTERS', model: 'aegis', desc: 'Field emitters absorb 10% of incoming gunfire, missiles and shells. Power hungry.',
-      add: { hp: 60, weight: 10, draw: 16 }, guard: 0.10 },
+    { id: 'std', name: 'STANDARD PAULDRON', model: 'std', desc: 'A light shoulder plate.',
+      add: { weight: 4, draw: 2 } },
+    { id: 'bulwark', name: 'BULWARK SHELL', model: 'bulwark', desc: 'A layered armour shell: extra armour, a little gunfire absorption and stagger resistance.',
+      add: { hp: 110, weight: 8, staggerAt: 20, draw: 4 }, guard: 0.02 },
+    { id: 'spike', name: 'RAM SPIKE', model: 'spike', desc: 'A spiked pad for close work: a modest saber bonus and some extra armour.',
+      add: { hp: 60, weight: 4.5, draw: 2 }, mul: { melee: 1.06 } },
+    { id: 'vernier', name: 'VERNIER SHOULDER', model: 'vernier', desc: 'A thruster shoulder: sharper turning and faster, cheaper dashes. Power hungry.',
+      add: { weight: 3.5, turn: 1.5, dashSpeed: 12.5, dashCost: -1, draw: 6 } },
+    { id: 'rack', name: 'MISSILE RACK', model: 'rack', desc: 'A rack on the shoulder: harder-hitting missiles that track tighter. Power hungry.',
+      add: { weight: 7, missileTurn: 0.5, draw: 8 }, mul: { missileDamage: 1.12 } },
+    { id: 'aegis', name: 'AEGIS EMITTER', model: 'aegis', desc: 'A field emitter: absorbs 5% of incoming gunfire, missiles and shells. Power hungry.',
+      add: { hp: 30, weight: 5, draw: 8 }, guard: 0.05 },
+    { id: 'wing', name: 'FIN PAULDRON', model: 'wing', desc: 'A swept stabiliser fin: steadier turning and a quicker dash, little armour.',
+      add: { hp: 20, weight: 3, turn: 1.0, dashSpeed: 8, draw: 3 } },
+    { id: 'dome', name: 'DOME GUARD', model: 'dome', desc: 'A rounded blast shield: armour and stagger resistance without the weight of a bulwark shell.',
+      add: { hp: 80, weight: 6, staggerAt: 12, draw: 3 } },
+  ],
+  // Weapon mounts: one on each shoulder, each its own ability. The first one you fit fires on F, the second on G.
+  mount: [
+    { id: 'none', name: 'NO MOUNT', model: 'none', desc: 'Nothing on this shoulder: no extra weight or power draw.',
+      add: {} },
+    { id: 'cannon', name: 'SHOULDER CANNON', model: 'cannon', desc: 'A heavy splash shell. Recharges in 7 seconds.',
+      add: { weight: 12, draw: 16 },
+      ability: { name: 'SHOULDER CANNON', kind: 'cannon', damage: 380, cooldown: 7, speed: 320, knock: 50, splash: { radius: 24, damage: 190 } } },
+    { id: 'swarm', name: 'MICRO-MISSILE POD', model: 'swarm', desc: 'Six small homing missiles. Recharges in 9 seconds.',
+      add: { weight: 13, draw: 18 },
+      ability: { name: 'MICRO-MISSILES', kind: 'swarm', count: 6, damage: 70, cooldown: 9, splash: { radius: 12, damage: 30 } } },
+    { id: 'rail', name: 'RAIL LANCE', model: 'rail', desc: 'A fast piercing slug that goes through everything in its line. Recharges in 8 seconds.',
+      add: { weight: 11, draw: 20 },
+      ability: { name: 'RAIL LANCE', kind: 'rail', damage: 300, cooldown: 8, speed: 1100, knock: 24 } },
   ],
   backpack: [
     { id: 'std', name: 'STANDARD PACK', model: 'std', desc: 'Basic thrusters and a saber rack.',
@@ -189,6 +273,19 @@ export const PARTS = {
     { id: 'guardian', name: 'GUARDIAN', model: 'none', desc: 'Bodyguard: steadier on the feet, absorbs 5% of gunfire and gets extra armor back between waves.',
       add: { staggerAt: 40, resupplyHeal: 0.1 }, guard: 0.05 },
   ],
+  skirt: [
+    { id: 'std', name: 'STANDARD SKIRT', model: 'std', desc: 'The usual waist armour.', add: {} },
+    { id: 'none', name: 'NO SKIRT', model: 'none', desc: 'Bare hips: lighter and quicker to recover boost fuel.',
+      add: { weight: -3, enGround: 4 } },
+    { id: 'long', name: 'LONG TAILS', model: 'long', desc: 'Long front and rear skirt plates: a little extra armour.',
+      add: { hp: 60, weight: 4, draw: 1 } },
+    { id: 'heavy', name: 'FORTRESS SKIRT', model: 'heavy', desc: 'Broad, layered skirt armour: lots of armour and stagger resistance, but heavy.',
+      add: { hp: 160, weight: 10, staggerAt: 30, draw: 2 } },
+    { id: 'flare', name: 'FLARE SKIRT', model: 'flare', desc: 'Wide stabiliser skirt: steadier turning and a quicker dash.',
+      add: { weight: 3, dashSpeed: 12, turn: 1, draw: 4 } },
+    { id: 'thruster', name: 'SKIRT THRUSTERS', model: 'thruster', desc: 'Thrusters in the skirt: a stronger climb and quicker air recovery. Power hungry.',
+      add: { weight: 6, ascendSpeed: 4, enAir: 6, draw: 10 } },
+  ],
   weapon: [
     { id: 'rifle', name: 'BEAM RIFLE', model: 'rifle', desc: 'Reliable all-rounder: accurate, 8-round magazine.',
       add: { weight: 6, draw: 14 },
@@ -222,18 +319,12 @@ export const PARTS = {
   offhand: [
     { id: 'shield', name: 'BEAM SHIELD', model: 'shield', desc: 'Absorbs 22% of incoming gunfire, missiles and shells (not saber hits).',
       add: { weight: 10, draw: 4 }, guard: 0.22 },
-    { id: 'cannon', name: 'SHOULDER CANNON', model: 'cannon', desc: 'Press F: a heavy splash shell. Recharges in 7 seconds.',
-      add: { weight: 12, draw: 16 },
-      ability: { name: 'SHOULDER CANNON', kind: 'cannon', damage: 380, cooldown: 7, speed: 320, knock: 50, splash: { radius: 24, damage: 190 } } },
     { id: 'none', name: 'NO OFF-HAND', model: 'none', desc: 'Lighter and quicker on its feet.',
       add: { weight: 0, enGround: 8 }, mul: { mobility: 1.03 } },
     { id: 'buckler', name: 'PARRY BUCKLER', model: 'buckler', desc: 'Small arm shield: absorbs 12% of gunfire and leaves the saber arm free (+5% melee).',
       add: { weight: 5, draw: 2 }, guard: 0.12, mul: { melee: 1.05 } },
     { id: 'tower', name: 'TOWER SHIELD', model: 'tower', desc: 'Full-length shield: absorbs 30% of gunfire, missiles and shells and resists stagger, but heavy and slow.',
       add: { weight: 20, staggerAt: 60, draw: 5 }, guard: 0.30, mul: { mobility: 0.96 } },
-    { id: 'swarm', name: 'MICRO-MISSILE ARM', model: 'swarm', desc: 'Press F: six small homing missiles. Recharges in 9 seconds.',
-      add: { weight: 13, draw: 18 },
-      ability: { name: 'MICRO-MISSILES', kind: 'swarm', count: 6, damage: 70, cooldown: 9, splash: { radius: 12, damage: 30 } } },
   ],
   sub: [
     { id: 'none', name: 'NO SUB-WEAPON', model: 'none', desc: 'Nothing mounted: no extra weight or power draw.',
@@ -294,14 +385,25 @@ const DARK = 0x3a3f4d; // frame metal; the same for every build
 
 export const DEFAULT_BUILD = Object.freeze({
   name: 'AEGIS-01',
-  head: 'vfin', torso: 'std', arms: 'std', legs: 'std', shoulder: 'std', backpack: 'std', core: 'std', pilot: 'rookie',
-  weapon: 'rifle', offhand: 'shield', sub: 'none',
+  head: 'vfin', crest: 'auto', torso: 'std', pilot: 'rookie', arms: 'std', legs: 'std',
+  shoulderL: 'std', shoulderR: 'std', mountL: 'none', mountR: 'none',
+  backpack: 'std', core: 'std', skirt: 'std', weapon: 'rifle', offhand: 'shield', sub: 'none',
+  sym: true, // the garage keeps the left and right shoulders matched while this is on
   tuning: { plating: 0, servos: 0, thrusters: 0, weapons: 0 },
   paint: { main: '#eceff6', sub: '#2a56b8', accent: '#d23a32', trim: '#f5c518' },
+  marks: 'none',
   energy: 'pink', thruster: 'blue',
 });
 
-export const partOf = (slot, id) => PARTS[slot].find((p) => p.id === id) ?? PARTS[slot][0];
+export const partsFor = (slot) => PARTS[poolOf(slot)];
+export const partOf = (slot, id) => partsFor(slot).find((p) => p.id === id) ?? partsFor(slot)[0];
+
+/** `build` with `id` fitted in `slot` (and on the mirrored side too, unless `mirror` is false). Does not mutate. */
+export function withPart(build, slot, id, mirror = true) {
+  const out = { ...build, [slot]: id };
+  if (mirror && MIRROR[slot]) out[MIRROR[slot]] = id;
+  return out;
+}
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const hexToInt = (h) => parseInt(h.slice(1), 16);
@@ -335,9 +437,19 @@ export function sanitizeBuild(input) {
   const src = input && typeof input === 'object' ? input : {};
   const out = { ...DEFAULT_BUILD, paint: { ...DEFAULT_BUILD.paint }, tuning: { ...DEFAULT_BUILD.tuning } };
   out.name = cleanName(src.name);
-  for (const slot of SLOTS) {
-    if (typeof src[slot] === 'string' && PARTS[slot].some((p) => p.id === src[slot])) out[slot] = src[slot];
+  const valid = (slot, id) => typeof id === 'string' && partsFor(slot).some((p) => p.id === id);
+  for (const slot of SLOTS) if (valid(slot, src[slot])) out[slot] = src[slot];
+  // saves from before the shoulders were split, and the shoulder cannon / micro-missile arm moved from the off-hand to the mounts
+  if (valid('shoulderL', src.shoulder)) {
+    if (!valid('shoulderL', src.shoulderL)) out.shoulderL = src.shoulder;
+    if (!valid('shoulderR', src.shoulderR)) out.shoulderR = src.shoulder;
   }
+  if ((src.offhand === 'cannon' || src.offhand === 'swarm') && !valid('offhand', src.offhand)) {
+    out.offhand = 'none';
+    if (!valid('mountL', src.mountL)) out.mountL = src.offhand;
+  }
+  if (typeof src.sym === 'boolean') out.sym = src.sym;
+  if (MARKS.some((m) => m.id === src.marks)) out.marks = src.marks;
   out.tuning = cleanTuning(src.tuning);
   for (const k of ['main', 'sub', 'accent', 'trim']) {
     if (typeof src.paint?.[k] === 'string' && HEX.test(src.paint[k])) out.paint[k] = src.paint[k].toLowerCase();
@@ -350,7 +462,10 @@ export function sanitizeBuild(input) {
 export function randomBuild(rand = Math.random) {
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
   const b = sanitizeBuild({});
-  for (const slot of SLOTS) b[slot] = pick(PARTS[slot]).id;
+  for (const slot of SLOTS) b[slot] = pick(partsFor(slot)).id;
+  if (rand() < 0.7) { b.shoulderR = b.shoulderL; b.mountR = b.mountL; } // usually matched, sometimes not
+  b.sym = b.shoulderL === b.shoulderR && b.mountL === b.mountR;
+  b.marks = pick(MARKS).id;
   const paint = pick(PAINTS);
   b.paint = { main: paint.main, sub: paint.sub, accent: paint.accent, trim: paint.trim };
   b.energy = pick(Object.keys(ENERGY));
@@ -412,8 +527,12 @@ export function deriveStats(build) {
   w.reload = w.reload / mul.reload / powerFactor;
   if (w.kind !== 'melee') w.damage *= softCap(mul.gunDamage, GUN_SOFT_CAP);
 
-  const offPart = partOf('offhand', b.offhand);
   const subPart = partOf('sub', b.sub);
+  // weapon mounts: the first one fitted fires on F, the second on G
+  const abilities = ['mountL', 'mountR']
+    .map((slot, i) => ({ part: partOf(slot, b[slot]), side: i === 0 ? 'L' : 'R' }))
+    .filter(({ part }) => part.ability)
+    .map(({ part, side }) => ({ ...part.ability, side }));
   const stats = {
     hp: Math.round(s.hp),
     weight: s.weight,
@@ -453,7 +572,8 @@ export function deriveStats(build) {
     missileDamage: mul.missileDamage,
     missileTurn: s.missileTurn,
     weapon: w,
-    ability: offPart.ability ? { ...offPart.ability } : null,
+    abilities,
+    ability: abilities[0] ?? null, // the F ability (kept for the single-ability code paths and the tests)
     sub: subPart.sub ? { ...subPart.sub } : null,
     tuning: { ...t },
   };
@@ -478,8 +598,10 @@ export function deriveMech(build) {
   const m = (slot) => partOf(slot, b[slot]).model;
   const spec = {
     scale: 1,
-    head: m('head'), torso: m('torso'), arms: m('arms'), legs: m('legs'), shoulder: m('shoulder'), backpack: m('backpack'),
-    core: m('core'), weapon: m('weapon'), offhand: m('offhand'), sub: m('sub'),
+    head: m('head'), crest: m('crest'), torso: m('torso'), arms: m('arms'), legs: m('legs'),
+    shoulderL: m('shoulderL'), shoulderR: m('shoulderR'), mountL: m('mountL'), mountR: m('mountR'),
+    backpack: m('backpack'), core: m('core'), skirt: m('skirt'), weapon: m('weapon'), offhand: m('offhand'), sub: m('sub'),
+    marks: b.marks,
     bulk: partOf('torso', b.torso).bulk,
     palette: paletteOf(b),
   };
@@ -527,7 +649,7 @@ export function statRanges() {
       let best = get(deriveStats(b)) * dir;
       for (let pass = 0; pass < 3; pass++) {
         for (const slot of SLOTS) {
-          for (const p of PARTS[slot]) {
+          for (const p of partsFor(slot)) {
             const v = get(deriveStats({ ...b, [slot]: p.id })) * dir;
             if (v > best + 1e-9) { best = v; b[slot] = p.id; }
           }

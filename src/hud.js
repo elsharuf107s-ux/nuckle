@@ -21,7 +21,7 @@ export class Hud {
       burstFill: $('burst-fill'), burstText: $('burst-text'), burstBar: $('burst-fill').parentElement, burstReady: $('burst-ready'),
       ammo: $('ammo-pips'), ammoCount: $('ammo-count'), missiles: $('missile-pips'), reload: $('reload-note'),
       weaponName: $('weapon-name'), weaponKey: $('weapon-key'), gunRow: $('gun-row'), saberRow: $('saber-row'),
-      cannonRow: $('cannon-row'), cannonFill: $('cannon-fill'), mechName: $('mech-name'), buildFlags: $('build-flags'),
+      cannonRow: $('cannon-row'), cannonFill: $('cannon-fill'), cannon2Row: $('cannon2-row'), cannon2Fill: $('cannon2-fill'), cannon2Name: $('cannon2-name'), mechName: $('mech-name'), buildFlags: $('build-flags'),
       subRow: $('sub-row'), subName: $('sub-name'), subFill: $('sub-fill'), subState: $('sub-state'), subBar: $('sub-fill').parentElement,
       boss: $('boss-bar'), bossFill: $('boss-fill'), bossName: $('boss-name'),
       banner: $('banner'), aMissile: $('alert-missile'), aArea: $('alert-area'), aArmor: $('alert-armor'),
@@ -63,8 +63,10 @@ export class Hud {
     e.ammoCount.style.display = !saberOnly && p.magSize > 12 ? '' : 'none';
     e.reload.style.display = saberOnly ? 'none' : '';
     e.saberRow.style.display = saberOnly ? 'none' : '';
-    e.cannonRow.style.display = p.ability ? '' : 'none';
-    if (p.ability) e.cannonName.textContent = p.ability.name;
+    e.cannonRow.style.display = p.mounts[0] ? '' : 'none';
+    e.cannon2Row.style.display = p.mounts[1] ? '' : 'none';
+    if (p.mounts[0]) e.cannonName.textContent = p.mounts[0].def.name;
+    if (p.mounts[1]) e.cannon2Name.textContent = p.mounts[1].def.name;
     e.barrierRow.classList.toggle('on', p.stats.barrier > 0);
     e.subRow.style.display = p.sub ? '' : 'none';
     if (p.sub) e.subName.textContent = p.sub.name;
@@ -174,7 +176,9 @@ export class Hud {
     if (player.magSize > 12) e.ammoCount.textContent = `${player.ammo} / ${player.magSize}`;
     else this._pips(e.ammo, player.ammo, player.magSize, '_lastAmmo');
     this._missilePips(player);
-    if (player.ability) e.cannonFill.style.width = `${(1 - player.cannonCd / player.ability.cooldown) * 100}%`;
+    const [m0, m1] = player.mounts;
+    if (m0) e.cannonFill.style.width = `${(1 - m0.cd / m0.def.cooldown) * 100}%`;
+    if (m1) e.cannon2Fill.style.width = `${(1 - m1.cd / m1.def.cooldown) * 100}%`;
     if (player.sub) this._updateSubRow(player);
     e.reload.classList.toggle('on', player.reloadT > 0);
     if (player.reloadT > 0) e.reload.textContent = `RELOADING ${Math.round((1 - player.reloadT / player.reloadDur) * 100)}%`;

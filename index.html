@@ -66,6 +66,10 @@
         <div class="wname"><span id="cannon-name">SHOULDER CANNON</span> <kbd>F</kbd></div>
         <div class="bar cannon"><i id="cannon-fill"></i></div>
       </div>
+      <div class="weapon" id="cannon2-row">
+        <div class="wname"><span id="cannon2-name">SHOULDER CANNON</span> <kbd>G</kbd></div>
+        <div class="bar cannon"><i id="cannon2-fill"></i></div>
+      </div>
       <div class="weapon" id="sub-row">
         <div class="wname"><span id="sub-name">HEAD VULCANS</span> <kbd>V</kbd></div>
         <div class="bar sub"><i id="sub-fill"></i></div>
@@ -146,6 +150,7 @@
 
   <!-- garage: the 3D canvas shows the mech on a turntable; these panels float over it -->
   <div id="screen-garage" class="hidden">
+    <div id="g-markers" class="g-markers"></div>
     <div class="g-panel g-left">
       <div class="g-title">GARAGE</div>
       <div id="g-pit" class="g-pit hidden">
@@ -154,9 +159,13 @@
         <div id="p-hostiles" class="p-hostiles"></div>
         <div id="p-status" class="p-status"></div>
       </div>
+      <div id="g-hangar" class="g-hangar"></div>
       <label class="g-name">CALLSIGN <input id="g-name" type="text" maxlength="14" spellcheck="false" autocomplete="off"></label>
       <div id="g-tabs" class="g-tabs"></div>
+      <div id="g-hphead" class="g-hphead"></div>
+      <div id="g-slots" class="g-slots hidden"></div>
       <div id="g-options" class="g-options"></div>
+      <div id="g-detail" class="g-detail"></div>
     </div>
     <div class="g-panel g-right">
       <div class="g-title">LOADOUT</div>
@@ -177,7 +186,7 @@
         <button id="g-reset" class="secondary">RESET</button>
         <button id="g-go" class="primary">SORTIE</button>
       </div>
-      <div class="g-hint">Drag to rotate &middot; <span class="no-touch">scroll</span><span class="touch-only">pinch</span> to zoom</div>
+      <div class="g-hint">Click a marker &middot; drag to rotate &middot; <span class="no-touch">scroll</span><span class="touch-only">pinch</span> to zoom</div>
     </div>
   </div>
 

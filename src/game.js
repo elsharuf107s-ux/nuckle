@@ -11,10 +11,27 @@ import { Missions } from './missions.js';
 import { Player } from './player.js';
 import { Projectiles } from './weapons.js';
 import { World } from './world.js';
-import { clamp, fmtTime } from './util.js';
+import { clamp, damp, dampAngle, fmtTime } from './util.js';
 
 const STEP = 1 / 60;
 const ZERO = new THREE.Vector3();
+// Where the garage camera goes when a hardpoint is picked: the height it looks at, its distance, and the
+// side it looks from (yaw PI is straight in front of the mech; a larger yaw is the mech's left).
+const GARAGE_FOCUS = {
+  all:       { y: 10, dist: 54, yaw: null },
+  head:      { y: 17.8, dist: 27, yaw: Math.PI + 0.3 },
+  chest:     { y: 13.2, dist: 35, yaw: Math.PI },
+  arms:      { y: 10.5, dist: 38, yaw: Math.PI - 0.6 },
+  legs:      { y: 5.5, dist: 42, yaw: Math.PI + 0.25 },
+  shoulderL: { y: 15, dist: 31, yaw: Math.PI + 0.85 },
+  shoulderR: { y: 15, dist: 31, yaw: Math.PI - 0.85 },
+  back:      { y: 12.5, dist: 40, yaw: 0.25 },
+  waist:     { y: 9.5, dist: 34, yaw: Math.PI },
+  handR:     { y: 9, dist: 38, yaw: Math.PI - 1.0 },
+  handL:     { y: 9, dist: 38, yaw: Math.PI + 1.0 },
+  hips:      { y: 9.5, dist: 36, yaw: Math.PI - 0.7 },
+};
+
 // the garage's saber preview: the player's combo (see player.js) and a pause in guard
 const GARAGE_COMBO = [['slash1', 0.5], ['slash2', 0.5], ['slash3', 0.72], [null, 1.1]];
 const GARAGE_COMBO_LENGTH = GARAGE_COMBO.reduce((n, [, d]) => n + d, 0);
@@ -35,7 +52,8 @@ export class Game {
     this.rig = new CameraRig(this.camera);
 
     this.state = 'title'; // title | garage | playing | paused | intermission (the pit stop between waves) | ended
-    this.garageCam = { yaw: Math.PI * 0.82, pitch: 0.16, dist: 54, dragging: false };
+    // yaw/pitch/dist orbit the mech; lookY is the height looked at; `goal` (see garageFocus) eases the view toward a hardpoint
+    this.garageCam = { yaw: Math.PI * 0.82, pitch: 0.16, dist: 54, lookY: 10, dragging: false, spin: true, goal: null };
     this.garagePose = 'idle'; // idle | saber | boost (preview only)
     this.time = 0;
     this.acc = 0;
@@ -239,6 +257,7 @@ export class Game {
 
   render() {
     this.touch?.update();
+    if (this.inGarage) this.onGarageFrame?.(); // the garage keeps its hardpoint markers on the mech
     this.fx.setView(this.renderer.domElement.height, this.camera.fov);
     this.renderer.render(this.scene, this.camera);
   }
@@ -342,7 +361,7 @@ export class Game {
     this.hud.show(false);
     this.world.setGarage(true);
     this.garagePose = 'idle';
-    this.garageCam.dragging = false;
+    Object.assign(this.garageCam, { dragging: false, goal: null, spin: true, lookY: 10, dist: 54 });
     p.lock = null;
     p.melee = null;
     p.fieldT = 0;
@@ -383,6 +402,10 @@ export class Game {
     this.garagePose = 'idle';
     this.player.mech.place(0, 0, 0, 0);
     this.garageCam.dragging = false;
+    this.garageCam.goal = null;
+    this.garageCam.spin = true;
+    this.garageCam.lookY = 10;
+    this.garageCam.dist = 54;
   }
 
   exitGarage() {
@@ -395,13 +418,23 @@ export class Game {
 
   garageLook(dx, dy) {
     const c = this.garageCam;
+    c.goal = null; // the player has taken over the camera
     c.yaw -= dx * 0.008;
     c.pitch = clamp(c.pitch + dy * 0.006, -0.15, 0.75);
   }
 
   garageZoom(delta) {
     const c = this.garageCam;
-    c.dist = clamp(c.dist + delta * 0.04, 30, 95);
+    c.goal = null;
+    c.dist = clamp(c.dist + delta * 0.04, 18, 95);
+  }
+
+  /** Swing the garage camera toward a hardpoint (a key of GARAGE_FOCUS; 'all' returns to the whole mech and the slow spin). */
+  garageFocus(id) {
+    const f = GARAGE_FOCUS[id] ?? GARAGE_FOCUS.all;
+    const c = this.garageCam;
+    c.goal = f;
+    c.spin = id === 'all';
   }
 
   /** Idle flyaround on the title; a draggable turntable with preview poses in the garage. */
@@ -425,11 +458,18 @@ export class Game {
       cam.lookAt(c.x - cz * 26, 11, c.z + cx * 26);
     } else {
       const g = this.garageCam;
-      if (!g.dragging) g.yaw += dt * 0.3;
+      if (g.dragging) g.goal = null;
+      if (g.goal) {
+        g.lookY = damp(g.lookY, g.goal.y, 6, dt);
+        g.dist = damp(g.dist, g.goal.dist, 5, dt);
+        if (g.goal.yaw !== null) g.yaw = dampAngle(g.yaw, g.goal.yaw, 5, dt);
+      } else if (!g.dragging && g.spin) {
+        g.yaw += dt * 0.3;
+      }
       this._garagePose(dt);
       const cp = Math.cos(g.pitch);
-      cam.position.set(c.x + Math.sin(g.yaw) * cp * g.dist, 10 + Math.sin(g.pitch) * g.dist, c.z + Math.cos(g.yaw) * cp * g.dist);
-      cam.lookAt(c.x, c.y + 10, c.z);
+      cam.position.set(c.x + Math.sin(g.yaw) * cp * g.dist, g.lookY + Math.sin(g.pitch) * g.dist, c.z + Math.cos(g.yaw) * cp * g.dist);
+      cam.lookAt(c.x, c.y + g.lookY, c.z);
     }
     cam.updateMatrixWorld(true);
   }

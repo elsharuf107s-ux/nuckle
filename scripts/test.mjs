@@ -38,17 +38,31 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
 };
 
+// The slots were reorganised (the two shoulders are separate, and the cannon and micro-missile pod moved from the off-hand to the
+// shoulder mounts). Most checks below are still written in terms of the old shape, so this translates it: `shoulder: X` fits both
+// shoulders, `offhand: 'cannon'` / `'swarm'` fits that mount on the left shoulder (and leaves the off-hand empty), and any other
+// off-hand clears the mounts (the old off-hand slot held either a shield or a cannon, never both).
+const legacy = (patch) => {
+  const q = { ...patch };
+  if ('shoulder' in q) { q.shoulderL = q.shoulderR = q.shoulder; delete q.shoulder; }
+  if ('offhand' in q) {
+    if (q.offhand === 'cannon' || q.offhand === 'swarm') { q.mountL = q.offhand; q.offhand = 'none'; } else q.mountL = 'none';
+  }
+  return q;
+};
+const LEGACY_SRC = legacy.toString();
+
 // ---------------------------------------------------------------- parts logic (plain Node, no browser)
 
 {
   const P = await import(path.join(root, 'src', 'parts.js'));
   const def = P.deriveStats(P.DEFAULT_BUILD);
-  const vary = (slot, id) => P.deriveStats({ ...P.DEFAULT_BUILD, [slot]: id });
+  const vary = (slot, id) => P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ [slot]: id }) });
 
   check('default build matches the original Vanguard', Math.abs(def.hp - 2600) <= 50 && def.speed === 40 && def.en === 100 && def.weapon.mag === 8, `armor ${def.hp}`);
 
   const every = [];
-  for (const slot of P.SLOTS) for (const part of P.PARTS[slot]) every.push([slot, part.id, vary(slot, part.id)]);
+  for (const slot of P.SLOTS) for (const part of P.partsFor(slot)) every.push([slot, part.id, P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ [slot]: part.id }) })]);
   const finite = every.every(([, , s]) => [s.hp, s.speed, s.airSpeed, s.en, s.dashSpeed, s.dashCost, s.dps, s.melee, s.weight, s.turn].every(Number.isFinite) && s.hp > 0 && s.speed > 0);
   check('every part yields finite, positive stats', finite, `${every.length} parts`);
 
@@ -70,12 +84,12 @@ const check = (name, ok, detail = '') => {
   dir('assault arms: more armor, slower reload', vary('arms', 'assault').hp > def.hp && vary('arms', 'assault').weapon.reload > def.weapon.reload);
   dir('twin sabers: melee-only with a melee bonus', vary('weapon', 'sabers').weapon.kind === 'melee' && vary('weapon', 'sabers').melee > 1.3);
   dir('shield guards, no off-hand is lighter', vary('offhand', 'shield').guard > 0 && vary('offhand', 'none').weight < def.weight && vary('offhand', 'none').guard === 0);
-  dir('shoulder cannon grants an ability', !!vary('offhand', 'cannon').ability && vary('offhand', 'cannon').ability.cooldown > 0);
+  dir('shoulder cannon grants an ability', !!vary('offhand', 'cannon').ability && vary('offhand', 'cannon').ability.cooldown > 0 && vary('offhand', 'cannon').abilities.length === 1);
   dir('weapon kinds differ as advertised', vary('weapon', 'mg').weapon.kind === 'bullet' && vary('weapon', 'bazooka').weapon.kind === 'cannon' && !!vary('weapon', 'bazooka').weapon.splash && vary('weapon', 'sniper').weapon.speed > vary('weapon', 'rifle').weapon.speed);
 
   // weight really is what slows a mech down: the heaviest build is slower than the lightest
-  const heavy = P.deriveStats({ ...P.DEFAULT_BUILD, head: 'visor', torso: 'heavy', arms: 'assault', legs: 'tank', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon' });
-  const light = P.deriveStats({ ...P.DEFAULT_BUILD, head: 'scout', torso: 'light', arms: 'precision', legs: 'sprint', backpack: 'wing', weapon: 'rifle', offhand: 'none' });
+  const heavy = P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ head: 'visor', torso: 'heavy', arms: 'assault', legs: 'tank', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon' }) });
+  const light = P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ head: 'scout', torso: 'light', arms: 'precision', legs: 'sprint', backpack: 'wing', weapon: 'rifle', offhand: 'none' }) });
   check('heaviest build is slower than the lightest', heavy.speed < def.speed && light.speed > def.speed && heavy.weight > light.weight && heavy.hp > light.hp, `${heavy.speed.toFixed(1)} vs ${light.speed.toFixed(1)}`);
 
   // sanitising: bad saved data can never break the game
@@ -95,7 +109,7 @@ const check = (name, ok, detail = '') => {
 
   // ---- deeper building: shoulders, cores, pilots, sub-weapons
   dir('bulwark shoulders: armor, stagger resist and a little guard', vary('shoulder', 'bulwark').hp > def.hp && vary('shoulder', 'bulwark').guard > def.guard && vary('shoulder', 'bulwark').staggerAt > def.staggerAt);
-  dir('spike shoulders: melee bonus', vary('shoulder', 'spike').melee > 1.1);
+  dir('spike shoulders: melee bonus (per side, so a matched pair stacks)', vary('shoulder', 'spike').melee > 1.1 && P.deriveStats({ ...P.DEFAULT_BUILD, shoulderL: 'spike' }).melee > 1.05 && P.deriveStats({ ...P.DEFAULT_BUILD, shoulderL: 'spike' }).melee < vary('shoulder', 'spike').melee);
   dir('vernier shoulders: turning and dashing', vary('shoulder', 'vernier').turn > def.turn && vary('shoulder', 'vernier').dashSpeed > def.dashSpeed && vary('shoulder', 'vernier').dashCost < def.dashCost);
   dir('capacitor core: boost fuel and EN regen', vary('core', 'capacitor').en > def.en && vary('core', 'capacitor').enGround > def.enGround);
   dir('overclock core: longer BURST', vary('core', 'overclock').burstTime === 18 && def.burstTime === 12 && vary('core', 'overclock').burstGain > 1);
@@ -110,9 +124,12 @@ const check = (name, ok, detail = '') => {
   dir('sub-weapons are defined', def.sub === null && vary('sub', 'vulcan').sub.kind === 'vulcan' && vary('sub', 'flare').sub.kind === 'flare' && vary('sub', 'repair').sub.kind === 'repair');
 
   // ---- the expanded catalogue: two to four new parts in every slot
-  check('the catalogue has 75 parts across 11 slots', P.SLOTS.length === 11 && P.SLOTS.reduce((n, s) => n + P.PARTS[s].length, 0) === 75);
-  check('every part id is unique within its slot and every part has a name, a description and a model', P.SLOTS.every((slot) => new Set(P.PARTS[slot].map((p) => p.id)).size === P.PARTS[slot].length
-    && P.PARTS[slot].every((p) => p.name && p.desc.length > 20 && typeof p.model === 'string')));
+  const pools = [...new Set(P.SLOTS.map(P.poolOf))];
+  check('the catalogue has 16 slots on 11 hardpoints and 97 distinct parts', P.SLOTS.length === 16 && P.HARDPOINTS.length === 11 && pools.reduce((n, pl) => n + P.PARTS[pl].length, 0) === 97, `${pools.reduce((n, pl) => n + P.PARTS[pl].length, 0)} parts`);
+  check('every part id is unique within its pool and every part has a name, a description and a model', pools.every((pl) => new Set(P.PARTS[pl].map((p) => p.id)).size === P.PARTS[pl].length
+    && P.PARTS[pl].every((p) => p.name && p.desc.length > 20 && typeof p.model === 'string')));
+  check('every hardpoint holds real slots, and every slot belongs to exactly one hardpoint', P.HARDPOINTS.every((h) => h.slots.length >= 1 && h.slots.every((s) => P.SLOTS.includes(s)))
+    && P.SLOTS.every((s) => P.HARDPOINTS.filter((h) => h.slots.includes(s)).length === 1));
   dir('ace visor: faster trigger and burst gauge, a little melee', vary('head', 'ace').weapon.cooldown < def.weapon.cooldown && vary('head', 'ace').burstGain > 1 && vary('head', 'ace').melee > 1);
   dir('ECM crown: jams enemy missiles', vary('head', 'jammer').jam === 0.4 && def.jam === 0);
   dir('missile bay chest: an extra missile charge and harder missiles', vary('torso', 'bay').missileCharges === 3 && vary('torso', 'bay').missileDamage > 1);
@@ -121,8 +138,8 @@ const check = (name, ok, detail = '') => {
   dir('recoil arms: a harder-hitting but slower gun', vary('arms', 'recoil').weapon.damage > def.weapon.damage && vary('arms', 'recoil').weapon.cooldown > def.weapon.cooldown);
   dir('strider legs: quicker on foot, longer dash', vary('legs', 'strider').speed > def.speed && vary('legs', 'strider').dashSpeed > def.dashSpeed);
   dir('siege legs: big stagger resistance and a steadier gun, but slow', vary('legs', 'siege').staggerAt > def.staggerAt + 100 && vary('legs', 'siege').weapon.reload < def.weapon.reload && vary('legs', 'siege').speed < def.speed);
-  dir('missile racks: an extra missile charge and tighter homing', vary('shoulder', 'rack').missileCharges === 3 && vary('shoulder', 'rack').missileTurn > def.missileTurn);
-  dir('aegis emitters: 10% more gunfire absorption', Math.abs(vary('shoulder', 'aegis').guard - 0.32) < 1e-9);
+  dir('missile racks: harder missiles and tighter homing', vary('shoulder', 'rack').missileDamage > 1.2 && vary('shoulder', 'rack').missileTurn > def.missileTurn);
+  dir('aegis emitters: 5% per side, 10% as a pair', Math.abs(vary('shoulder', 'aegis').guard - 0.32) < 1e-9 && Math.abs(P.deriveStats({ ...P.DEFAULT_BUILD, shoulderL: 'aegis' }).guard - 0.27) < 1e-9);
   dir('generator pack: more power output, and it draws less than the standard pack', vary('backpack', 'gen').supply === def.supply + 28 && vary('backpack', 'gen').draw < def.draw);
   dir('armor backplate: armor and stagger resistance, a weaker climb', vary('backpack', 'plate').hp > def.hp && vary('backpack', 'plate').staggerAt > def.staggerAt && vary('backpack', 'plate').ascendSpeed < def.ascendSpeed);
   dir('burst siphon: a much faster burst gauge', vary('core', 'siphon').burstGain === 1.5);
@@ -135,43 +152,43 @@ const check = (name, ok, detail = '') => {
   dir('arc lance: a piercing beam', vary('weapon', 'lance').weapon.pierce === true && vary('weapon', 'lance').weapon.damage > vary('weapon', 'sniper').weapon.damage);
   dir('greatsword: melee only, the biggest melee bonus and the longest reach', vary('weapon', 'greatsword').weapon.kind === 'melee' && vary('weapon', 'greatsword').melee > vary('weapon', 'sabers').melee && vary('weapon', 'greatsword').reach > vary('weapon', 'sabers').reach);
   dir('buckler and tower shield: guard, the tower heavier and slower', vary('offhand', 'buckler').guard < def.guard && vary('offhand', 'buckler').guard > 0 && vary('offhand', 'tower').guard > def.guard && vary('offhand', 'tower').weight > def.weight && vary('offhand', 'tower').speed < def.speed);
-  dir('micro-missile arm: a swarm ability', vary('offhand', 'swarm').ability.kind === 'swarm' && vary('offhand', 'swarm').ability.count === 6);
+  dir('micro-missile pod: a swarm ability', vary('offhand', 'swarm').ability.kind === 'swarm' && vary('offhand', 'swarm').ability.count === 6);
   dir('the three new sub-weapons are defined', ['injector', 'pulse', 'field'].every((id) => vary('sub', id).sub?.kind === id));
-  const stackedGuard2 = P.deriveStats({ ...P.DEFAULT_BUILD, offhand: 'tower', shoulder: 'aegis', pilot: 'guardian', arms: 'guard' });
-  check('guard from every kind of part stacks, up to the cap', P.deriveStats({ ...P.DEFAULT_BUILD, offhand: 'buckler', arms: 'guard' }).guard > 0.15 && stackedGuard2.guard === 0.35);
-  check('missile charges are capped at four', P.deriveStats({ ...P.DEFAULT_BUILD, backpack: 'pod', torso: 'bay', shoulder: 'rack' }).missileCharges === 4);
-  check('the burst gauge never fills more than twice as fast', P.deriveStats({ ...P.DEFAULT_BUILD, head: 'horn', torso: 'reactor', core: 'siphon', pilot: 'veteran' }).burstGain === 2);
-  check('ECM jamming is capped', P.deriveStats({ ...P.DEFAULT_BUILD, head: 'jammer' }).jam <= 0.8);
+  const stackedGuard2 = P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ offhand: 'tower', shoulder: 'aegis', pilot: 'guardian', arms: 'guard' }) });
+  check('guard from every kind of part stacks, up to the cap', P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ offhand: 'buckler', arms: 'guard' }) }).guard > 0.15 && stackedGuard2.guard === 0.35);
+  check('missile charges top out at four (a pod pack and a bay chest)', P.deriveStats({ ...P.DEFAULT_BUILD, backpack: 'pod', torso: 'bay' }).missileCharges === 4 && P.deriveStats({ ...P.DEFAULT_BUILD, torso: 'bay' }).missileCharges === 3);
+  check('the burst gauge never fills more than twice as fast', P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ head: 'horn', torso: 'reactor', core: 'siphon', pilot: 'veteran' }) }).burstGain === 2);
+  check('ECM jamming is capped', P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ head: 'jammer' }) }).jam <= 0.8);
   check('the firepower bar counts a shotgun by its pellets', vary('weapon', 'scatter').dps > 150 && vary('weapon', 'scatter').dps < 400, `${vary('weapon', 'scatter').dps}`);
   check('every new weapon has a sane firepower rating next to the rifle', ['scatter', 'seeker', 'lance'].every((id) => vary('weapon', id).dps > def.dps * 0.6 && vary('weapon', id).dps < def.dps * 1.3), ['scatter', 'seeker', 'lance'].map((id) => vary('weapon', id).dps).join(' '));
 
   // ---- budgets: weight against the legs' load limit, power draw against the torso's output
   check('the stock build is inside both budgets', def.overload === 0 && def.loadFactor === 1 && def.powerFactor === 1 && def.draw < def.supply && def.weight < def.load, `${def.weight}/${def.load}, ${def.draw}/${def.supply}`);
-  const overloaded = P.deriveStats({ ...P.DEFAULT_BUILD, legs: 'sprint', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster' });
-  const sameParts = P.deriveStats({ ...P.DEFAULT_BUILD, legs: 'tank', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster' });
+  const overloaded = P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ legs: 'sprint', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster' }) });
+  const sameParts = P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ legs: 'tank', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster' }) });
   check('exceeding the load limit slows the mech down', overloaded.overload > 0 && overloaded.loadFactor < 1 && overloaded.speed < sameParts.speed * 1.2 && overloaded.dashSpeed < P.deriveStats(P.DEFAULT_BUILD).dashSpeed,
     `over by ${overloaded.overload}, factor ${overloaded.loadFactor.toFixed(2)}`);
-  const crushed = P.deriveStats({ ...P.DEFAULT_BUILD, legs: 'sprint', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon', sub: 'repair', head: 'visor' });
+  const crushed = P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ legs: 'sprint', torso: 'heavy', shoulder: 'bulwark', arms: 'assault', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon', sub: 'repair', head: 'visor' }) });
   check('overload never stops the mech: the slowdown has a floor', crushed.loadFactor === 0.55 && crushed.speed > 0);
-  const hungryBuild = { ...P.DEFAULT_BUILD, torso: 'light', head: 'recon', arms: 'precision', legs: 'jump', shoulder: 'vernier', backpack: 'booster', core: 'phase', weapon: 'sniper', offhand: 'cannon', sub: 'vulcan' };
+  const hungryBuild = { ...P.DEFAULT_BUILD, ...legacy({ torso: 'light', head: 'recon', arms: 'precision', legs: 'jump', shoulder: 'vernier', backpack: 'booster', core: 'phase', weapon: 'sniper', offhand: 'cannon', sub: 'vulcan' }) };
   const hungry = P.deriveStats(hungryBuild);
-  const fed = P.deriveStats({ ...hungryBuild, torso: 'reactor', shoulder: 'std', offhand: 'none', sub: 'none' }); // same gun and arms, but inside the power budget
+  const fed = P.deriveStats({ ...hungryBuild, ...legacy({ torso: 'reactor', shoulder: 'std', offhand: 'none', sub: 'none' }) }); // same gun and arms, but inside the power budget
   check('a power shortfall slows EN recovery and weapon cycling by the power factor', hungry.draw > hungry.supply && hungry.powerFactor < 1 && fed.powerFactor === 1
     && Math.abs(fed.weapon.cooldown / hungry.weapon.cooldown - hungry.powerFactor) < 0.01 && Math.abs(fed.weapon.reload / hungry.weapon.reload - hungry.powerFactor) < 0.01
     && hungry.enAir < (hungry.enAir / hungry.powerFactor) - 1, `power factor ${hungry.powerFactor.toFixed(2)}`);
-  check('a power shortfall has a floor too', hungry.powerFactor >= 0.4 && Number.isFinite(hungry.weapon.cooldown) && P.deriveStats({ ...hungryBuild, torso: 'light', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon' }).powerFactor >= 0.4);
+  check('a power shortfall has a floor too', hungry.powerFactor >= 0.4 && Number.isFinite(hungry.weapon.cooldown) && P.deriveStats({ ...hungryBuild, ...legacy({ torso: 'light', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon' }) }).powerFactor >= 0.4);
   check('a power shortfall bites harder than the raw shortfall', hungry.powerFactor < hungry.supply / hungry.draw, `${hungry.powerFactor.toFixed(2)} vs ${(hungry.supply / hungry.draw).toFixed(2)}`);
   check('the reactor torso out-supplies the light frame', vary('torso', 'reactor').supply > vary('torso', 'light').supply && vary('torso', 'heavy').supply > def.supply);
   check('tank legs carry the most, sprint legs the least', vary('legs', 'tank').load > vary('legs', 'std').load && vary('legs', 'std').load > vary('legs', 'sprint').load);
 
   // ---- stacking is capped so no single trick runs away
-  const stackedMelee = P.deriveStats({ ...P.DEFAULT_BUILD, weapon: 'sabers', arms: 'blade', shoulder: 'spike', pilot: 'duelist', head: 'horn' });
+  const stackedMelee = P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ weapon: 'sabers', arms: 'blade', shoulder: 'spike', pilot: 'duelist', head: 'horn' }) });
   check('melee bonuses are soft-capped (raw product would be about x2.5)', stackedMelee.melee > 1.9 && stackedMelee.melee < 2.2, `x${stackedMelee.melee.toFixed(2)}`);
-  const stackedGuard = P.deriveStats({ ...P.DEFAULT_BUILD, weapon: 'sabers', offhand: 'shield', shoulder: 'bulwark' });
+  const stackedGuard = P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ weapon: 'sabers', offhand: 'shield', shoulder: 'bulwark' }) });
   check('gunfire absorption is capped at 35%', stackedGuard.guard === 0.35, `${stackedGuard.guard}`);
 
   // ---- tuning points
-  const tune = (t) => P.deriveStats({ ...P.DEFAULT_BUILD, tuning: t });
+  const tune = (t) => P.deriveStats({ ...P.DEFAULT_BUILD, ...legacy({ tuning: t }) });
   check('plating raises armor', tune({ plating: 6 }).hp > def.hp * 1.2 && tune({ plating: 6 }).hp < def.hp * 1.3);
   check('servos raise speed, dash and turning', tune({ servos: 6 }).speed > def.speed * 1.1 && tune({ servos: 6 }).dashSpeed > def.dashSpeed * 1.1 && tune({ servos: 6 }).turn > def.turn);
   check('thrusters raise boost fuel and climb', tune({ thrusters: 6 }).en > def.en * 1.2 && tune({ thrusters: 6 }).ascendSpeed > def.ascendSpeed);
@@ -181,7 +198,7 @@ const check = (name, ok, detail = '') => {
   check('tuning survives junk input', JSON.stringify(P.cleanTuning({ plating: 'x', servos: -4, thrusters: 2.6, weapons: null })) === JSON.stringify({ plating: 0, servos: 0, thrusters: 3, weapons: 0 }) && P.tuningSpent(P.cleanTuning(undefined)) === 0);
   check('an older save (before these slots existed) loads with sensible defaults', (() => {
     const old = P.sanitizeBuild({ name: 'OLD ONE', head: 'horn', weapon: 'mg', offhand: 'none' });
-    return old.shoulder === 'std' && old.core === 'std' && old.pilot === 'rookie' && old.sub === 'none' && P.tuningSpent(old.tuning) === 0 && old.head === 'horn';
+    return old.shoulderL === 'std' && old.shoulderR === 'std' && old.core === 'std' && old.pilot === 'rookie' && old.sub === 'none' && old.crest === 'auto' && old.skirt === 'std' && old.marks === 'none' && P.tuningSpent(old.tuning) === 0 && old.head === 'horn';
   })());
   const t0 = Date.now();
   const sampled = P.statRanges();
@@ -218,6 +235,8 @@ await page.addInitScript(() => {
   };
 });
 
+await page.addInitScript(`window.__L = ${LEGACY_SRC};`); // the same old-to-new build translator, inside the page
+
 const shot = async (name) => {
   if (!SHOTS) return;
   await page.evaluate(() => window.__game.render());
@@ -234,22 +253,54 @@ try {
   check('title screen is visible', await page.isVisible('#screen-title'));
 
   // ------------------------------------------------------------ garage UI (real clicks)
-  const counts = { head: 7, torso: 6, arms: 6, legs: 6, shoulder: 6, backpack: 6, core: 7, pilot: 9, weapon: 9, offhand: 6, sub: 7 };
+  // hardpoint tab -> the slots behind it (and how many parts each lists)
+  const counts = {
+    head: { head: 10, crest: 7 }, chest: { torso: 8, pilot: 9 }, arms: { arms: 6 }, legs: { legs: 6 },
+    shoulderL: { shoulderL: 8, mountL: 4 }, shoulderR: { shoulderR: 8, mountR: 4 },
+    back: { backpack: 6 }, waist: { core: 7, skirt: 6 }, handR: { weapon: 9 }, handL: { offhand: 4 }, hips: { sub: 7 },
+  };
   await page.click('#btn-garage');
   const opened = await page.evaluate(() => ({ state: window.__game.state, shown: !document.getElementById('screen-garage').classList.contains('hidden'), titleHidden: document.getElementById('screen-title').classList.contains('hidden') }));
   check('GARAGE button opens the garage', opened.state === 'garage' && opened.shown && opened.titleHidden);
-  check('garage has a tab for each of the 11 slots, tuning and paint', (await page.$$('.g-tab')).length === 13);
+  check('garage has a tab for each of the 11 hardpoints, tuning and paint', (await page.$$('.g-tab')).length === 13);
 
-  const tabIds = Object.keys(counts);
   const optionCounts = {};
-  for (const id of tabIds) {
-    await page.click(`.g-tab[data-tab="${id}"]`);
-    optionCounts[id] = (await page.$$('.opt')).length;
+  for (const [hp, slots] of Object.entries(counts)) {
+    await page.click(`.g-tab[data-tab="${hp}"]`);
+    for (const slot of Object.keys(slots)) {
+      if (Object.keys(slots).length > 1) await page.click(`.g-slot[data-slot="${slot}"]`);
+      optionCounts[slot] = (await page.$$('.opt')).length;
+    }
   }
-  check('every slot lists all its parts', tabIds.every((id) => optionCounts[id] === counts[id]), JSON.stringify(optionCounts));
+  const expectedCounts = Object.assign({}, ...Object.values(counts));
+  check('every slot lists all its parts', Object.keys(expectedCounts).every((slot) => optionCounts[slot] === expectedCounts[slot]), JSON.stringify(optionCounts));
+
+  // the markers on the 3D mech: one per hardpoint, on screen, and clicking one opens that hardpoint and swings the camera
+  await page.evaluate(() => { window.__game.garageFocus('all'); window.__game.garageCam.goal = null; window.__game.render(); });
+  const markers = await page.evaluate(() => [...document.querySelectorAll('.g-marker')].map((m) => ({ id: m.dataset.hp, off: m.classList.contains('off'), at: m.style.transform })));
+  check('the garage floats a clickable marker over each of the 11 hardpoints', markers.length === 11 && markers.every((m) => !m.off && /translate/.test(m.at)), JSON.stringify(markers.filter((m) => m.off).map((m) => m.id)));
+  const spread = await page.evaluate(() => {
+    const pts = [...document.querySelectorAll('.g-marker')].map((m) => { const r = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(m.style.transform); return [Number(r[1]), Number(r[2])]; });
+    const ys = pts.map((p) => p[1]);
+    return { top: Math.min(...ys), bottom: Math.max(...ys), inView: pts.every(([x, y]) => x > 0 && y > 0 && x < window.innerWidth && y < window.innerHeight) };
+  });
+  check('the markers sit on the mech, head above feet, all inside the window', spread.inView && spread.bottom - spread.top > 150, JSON.stringify(spread));
+  const focusLog = [];
+  for (const hp of ['head', 'shoulderL', 'legs']) {
+    await page.click(`.g-marker[data-hp="${hp}"] i`);
+    focusLog.push(await page.evaluate(() => ({ tab: window.__garage.tab, activeTab: document.querySelector('.g-tab.active')?.dataset.tab, activeMarker: document.querySelector('.g-marker.active')?.dataset.hp, goal: window.__game.garageCam.goal?.y ?? null })));
+  }
+  check('clicking a marker opens that hardpoint and sends the camera to it', focusLog.every((f, i) => f.tab === ['head', 'shoulderL', 'legs'][i] && f.activeTab === f.tab && f.activeMarker === f.tab && f.goal !== null)
+    && focusLog[0].goal > focusLog[2].goal, JSON.stringify(focusLog));
+  const view = await page.evaluate(() => { const g = window.__game; g.step(240); return { y: g.garageCam.lookY, dist: g.garageCam.dist }; });
+  check('the garage camera really moves to the hardpoint (low and wide for the legs)', view.y < 8 && view.dist > 35, JSON.stringify(view));
+  await page.evaluate(() => window.__game.garageLook(40, 0));
+  check('dragging the mech hands the camera back to you', (await page.evaluate(() => window.__game.garageCam.goal)) === null);
+  await page.click('.g-tab[data-tab="paint"]');
+  check('the paint and tuning tabs show the whole mech again', await page.evaluate(() => window.__game.garageCam.goal?.y === 10 && window.__game.garageCam.spin === true));
 
   // equip a part by clicking it: the build, stats and live model all change
-  await page.click('.g-tab[data-tab="torso"]');
+  await page.click('.g-tab[data-tab="chest"]');
   const armorText = () => page.$eval('#g-stats .stat:nth-child(1) .s-head b', (e) => e.firstChild.textContent);
   const armorBefore = Number(await armorText());
   await page.click('.opt[data-id="heavy"]');
@@ -314,7 +365,7 @@ try {
   // budgets are shown with warnings
   await page.evaluate(() => {
     const g = window.__garage;
-    g.commit({ ...g.build, torso: 'heavy', legs: 'sprint', shoulder: 'bulwark', arms: 'assault', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon', sub: 'repair', head: 'visor' });
+    g.commit({ ...g.build, ...window.__L({ torso: 'heavy', legs: 'sprint', shoulder: 'bulwark', arms: 'assault', backpack: 'booster', weapon: 'bazooka', offhand: 'cannon', sub: 'repair', head: 'visor' }) });
     g.tab = 'weapon'; g._renderOptions(); g._renderStats();
   });
   await page.mouse.move(720, 120);
@@ -339,8 +390,72 @@ try {
   const reset = await page.evaluate(() => { const b = window.__game.player.build; return { head: b.head, torso: b.torso, weapon: b.weapon, name: b.name }; });
   check('RESET restores the stock Vanguard build', reset.head === 'vfin' && reset.torso === 'std' && reset.weapon === 'rifle' && reset.name === 'AEGIS-01');
 
+  // ---- shoulders, mounts and the symmetry switch
+  await page.click('#g-reset');
+  await page.click('.g-tab[data-tab="shoulderL"]');
+  check('the shoulder hardpoint offers an armor slot and a weapon mount, with symmetry on by default', (await page.$$('#g-slots .g-slot')).length === 2 && /ON/.test(await page.textContent('#g-sym')));
+  await page.click('.opt[data-id="bulwark"]');
+  const symOn = await page.evaluate(() => ({ L: window.__game.player.build.shoulderL, R: window.__game.player.build.shoulderR, sym: window.__game.player.build.sym, spec: [window.__game.player.mech.def.spec.shoulderL, window.__game.player.mech.def.spec.shoulderR] }));
+  check('with symmetry on, one pick fits both shoulders', symOn.L === 'bulwark' && symOn.R === 'bulwark' && symOn.sym && symOn.spec.every((x) => x === 'bulwark'), JSON.stringify(symOn));
+  await page.click('#g-sym');
+  check('the SYMMETRY switch turns off', /OFF/.test(await page.textContent('#g-sym')) && !(await page.evaluate(() => window.__game.player.build.sym)));
+  await page.click('.opt[data-id="spike"]');
+  const symOff = await page.evaluate(() => ({ L: window.__game.player.build.shoulderL, R: window.__game.player.build.shoulderR, hp: window.__game.player.stats.hp }));
+  check('with symmetry off, the left shoulder changes alone and the two sides can differ', symOff.L === 'spike' && symOff.R === 'bulwark', JSON.stringify(symOff));
+  await page.click('.g-tab[data-tab="shoulderR"]');
+  check('the right shoulder tab shows its own pick', (await page.$eval('.opt.selected', (e) => e.dataset.id)) === 'bulwark');
+  await page.click('#g-sym');
+  const symBack = await page.evaluate(() => ({ L: window.__game.player.build.shoulderL, R: window.__game.player.build.shoulderR }));
+  check('turning symmetry back on copies the side you are looking at across', symBack.L === 'bulwark' && symBack.R === 'bulwark', JSON.stringify(symBack));
+  await page.click('#g-sym'); // off again for the mounts
+  await page.click('.g-tab[data-tab="shoulderL"]');
+  await page.click('.g-slot[data-slot="mountL"]');
+  await page.click('.opt[data-id="cannon"]');
+  await page.click('.g-tab[data-tab="shoulderR"]');
+  await page.click('.g-slot[data-slot="mountR"]');
+  await page.click('.opt[data-id="swarm"]');
+  const mounts = await page.evaluate(() => {
+    const p = window.__game.player;
+    return { build: [p.build.mountL, p.build.mountR], mounts: p.mounts.map((m) => `${m.key}:${m.def.kind}:${m.def.side}`), spec: [p.mech.def.spec.mountL, p.mech.def.spec.mountR],
+      rows: ['cannon-row', 'cannon2-row'].map((id) => getComputedStyle(document.getElementById(id)).display !== 'none'), summary: document.getElementById('g-summary').textContent };
+  });
+  check('each shoulder carries its own mount; the first fires on F and the second on G', mounts.build[0] === 'cannon' && mounts.build[1] === 'swarm' && mounts.mounts.join(',') === 'KeyF:cannon:L,KeyG:swarm:R' && mounts.spec.join() === 'cannon,swarm', JSON.stringify(mounts));
+  check('the loadout panel lists both mounts', /MOUNT F[^]*cannon|MOUNT F\s*SHOULDER CANNON/i.test(mounts.summary) && /MOUNT G/.test(mounts.summary), mounts.summary.slice(0, 120));
+  const markingsTab = await page.evaluate(() => { document.querySelector('.g-tab[data-tab="paint"]').click(); return [...document.querySelectorAll('.mark')].map((b) => b.dataset.mark); });
+  check('the paint tab offers markings', markingsTab.join() === 'none,stripe,chevron,hazard', markingsTab.join());
+  await page.click('.mark[data-mark="hazard"]');
+  check('a marking is applied to the model and saved', await page.evaluate(() => window.__game.player.mech.def.spec.marks === 'hazard' && JSON.parse(localStorage.getItem('steel-vanguard.hangar')).slots[0].marks === 'hazard'));
+  await page.click('.mark[data-mark="none"]');
+
+  // ---- the hangar: six builds, one on the pad
+  const hangar0 = await page.evaluate(() => ({ slots: document.querySelectorAll('.hg-slot').length, empty: document.querySelectorAll('.hg-slot.empty').length, active: document.querySelector('.hg-slot.active')?.textContent, copyOff: document.getElementById('hg-copy').disabled, clearOff: document.getElementById('hg-clear').disabled }));
+  check('the hangar bar has six slots, one filled; CLEAR is disabled while it is the only build', hangar0.slots === 6 && hangar0.empty === 5 && hangar0.active === '1' && !hangar0.copyOff && hangar0.clearOff, JSON.stringify(hangar0));
+  await page.click('.hg-slot[data-slot="2"]');
+  const slot3 = await page.evaluate(() => ({ active: window.__game.player.build.name, weapon: window.__game.player.build.weapon, shoulder: window.__game.player.build.shoulderL, mount: window.__game.player.build.mountL }));
+  check('an empty hangar slot starts a fresh stock mech', slot3.active === 'MECH-03' && slot3.weapon === 'rifle' && slot3.shoulder === 'std' && slot3.mount === 'none', JSON.stringify(slot3));
+  await page.click('.g-tab[data-tab="handR"]');
+  await page.click('.opt[data-id="lance"]');
+  await page.click('.hg-slot[data-slot="0"]');
+  check('switching back restores the first build, untouched', (await page.evaluate(() => [window.__game.player.build.name, window.__game.player.build.weapon, window.__game.player.build.mountL])).join() === 'AEGIS-01,rifle,cannon');
+  await page.click('.hg-slot[data-slot="2"]');
+  check('and the third kept its own weapon', (await page.evaluate(() => window.__game.player.build.weapon)) === 'lance');
+  await page.click('#hg-copy');
+  const copied = await page.evaluate(() => ({ active: window.__game.player.build.name, weapon: window.__game.player.build.weapon, slot: document.querySelector('.hg-slot.active')?.dataset.slot, filled: document.querySelectorAll('.hg-slot:not(.empty)').length }));
+  check('COPY duplicates the build into the next empty slot', copied.weapon === 'lance' && copied.slot === '1' && copied.filled === 3 && /-2$/.test(copied.active), JSON.stringify(copied));
+  await page.click('#hg-clear');
+  const cleared = await page.evaluate(() => ({ filled: document.querySelectorAll('.hg-slot:not(.empty)').length, active: document.querySelector('.hg-slot.active')?.dataset.slot }));
+  check('CLEAR empties the slot and moves to another build', cleared.filled === 2 && cleared.active !== '1', JSON.stringify(cleared));
+  const savedHangar = await page.evaluate(() => { const h = JSON.parse(localStorage.getItem('steel-vanguard.hangar')); return { n: h.slots.filter(Boolean).length, active: h.active }; });
+  check('the whole hangar is saved', savedHangar.n === 2, JSON.stringify(savedHangar));
+  await page.evaluate(async () => { // back to a single stock build for the rest of the suite
+    const H = await import('/src/hangar.js');
+    window.__garage.hangar = H.cleanHangar(null);
+    window.__garage._loadActive();
+  });
+  check('the hangar can be reset to one stock build', (await page.evaluate(() => [window.__game.player.build.name, document.querySelectorAll('.hg-slot:not(.empty)').length])).join() === 'AEGIS-01,1');
+
   // persistence across a reload, and the title screen reflects it
-  await page.click('.g-tab[data-tab="weapon"]');
+  await page.click('.g-tab[data-tab="handR"]');
   await page.click('.opt[data-id="sniper"]');
   await page.fill('#g-name', 'longshot');
   await page.keyboard.press('Enter');
@@ -628,7 +743,7 @@ try {
     const out = {};
     const fresh = (patch) => {
       g.cheat.invincible = true;
-      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, ...patch });
+      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, ...window.__L(patch) });
       g.startMission();
       g.manual = true;
       g.missions.state = 'idle'; // no waves: we place our own dummies
@@ -838,7 +953,7 @@ try {
     const out = {};
     const fresh = (patch) => {
       g.cheat.invincible = true;
-      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning }, ...patch });
+      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning }, ...window.__L(patch) });
       g.startMission();
       g.manual = true;
       g.missions.state = 'idle';
@@ -1088,7 +1203,7 @@ try {
     Math.random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     const fresh = (patch) => {
       g.cheat.invincible = true;
-      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning }, ...patch });
+      g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning }, ...window.__L(patch) });
       g.startMission();
       g.manual = true;
       g.missions.state = 'idle';
@@ -1281,7 +1396,7 @@ try {
   const pitTest = await page.evaluate(() => {
     const g = window.__game;
     g.cheat.invincible = true;
-    g.setBuild({ ...window.__garage.build, name: 'PITTER', head: 'vfin', torso: 'std', arms: 'std', legs: 'std', shoulder: 'std', backpack: 'std', core: 'std', pilot: 'rookie', weapon: 'rifle', offhand: 'shield', sub: 'none', tuning: { plating: 0, servos: 0, thrusters: 0, weapons: 0 } });
+    g.setBuild({ ...window.__garage.build, name: 'PITTER', head: 'vfin', torso: 'std', arms: 'std', legs: 'std', shoulderL: 'std', shoulderR: 'std', mountL: 'none', mountR: 'none', backpack: 'std', core: 'std', pilot: 'rookie', weapon: 'rifle', offhand: 'shield', sub: 'none', tuning: { plating: 0, servos: 0, thrusters: 0, weapons: 0 } });
     g.settings.pitStops = true;
     g.startMission();
     g.manual = true;
@@ -1323,10 +1438,10 @@ try {
   check('the pit card names the next wave, its hostiles and your armor', /WAVE 1 OF 5 CLEARED/.test(pitTest.card) && /NEXT: WAVE 2/.test(pitTest.card) && /PINCER/.test(pitTest.card) && /4 × DR-12 DRONE/.test(pitTest.card) && /1 × ST-21 STRIKER/.test(pitTest.card) && /ARMOR 75%/.test(pitTest.card), pitTest.card);
   check('the only way out of the pit is to launch the next wave', pitTest.go === 'LAUNCH WAVE 2' && !pitTest.backShown);
   check('time stands still in the pit stop', pitTest.timeStopped < 12, `${pitTest.timeStopped.toFixed(1)} s passed since the wave began`);
-  await page.click('.g-tab[data-tab="torso"]');
+  await page.click('.g-tab[data-tab="chest"]');
   await page.locator('.opt[data-id="heavy"]').scrollIntoViewIfNeeded();
   await page.click('.opt[data-id="heavy"]');
-  await page.click('.g-tab[data-tab="weapon"]');
+  await page.click('.g-tab[data-tab="handR"]');
   await page.locator('.opt[data-id="scatter"]').scrollIntoViewIfNeeded();
   await page.click('.opt[data-id="scatter"]');
   const swapped = await page.evaluate(() => {
@@ -1402,6 +1517,84 @@ try {
     g.enemies.length = 0; g.projectiles.clear();
   });
 
+  // ------------------------------------------------------------ 5g. models: every part builds, and the model exposes what the garage needs
+  const models = await page.evaluate(async () => {
+    const P = await import('/src/parts.js');
+    const { buildMech, ANCHORS } = await import('/src/mechModel.js');
+    const THREE = await import('three');
+    const out = { failures: [], built: 0, meshCounts: {}, anchors: null, mountsNeeded: [], distinct: {} };
+    const base = P.deriveMech(P.DEFAULT_BUILD).spec;
+    const seen = new Map();
+    const box = new THREE.Box3();
+    for (const slot of P.SLOTS) {
+      const pool = P.poolOf(slot);
+      for (const part of P.partsFor(slot)) {
+        try {
+          const patch = { [slot]: part.id };
+          const spec = P.deriveMech({ ...P.DEFAULT_BUILD, ...patch }).spec;
+          const model = buildMech(spec);
+          out.built++;
+          model.update(1 / 60, { speed: 0, localFwd: 0, localRight: 0, grounded: true, boost: 0, pitch: 0, stagger: 0, charge: 0 });
+          model.root.updateWorldMatrix(true, true);
+          let n = 0;
+          const sig = [];
+          const mb = new THREE.Box3();
+          model.root.traverse((o) => {
+            if (!o.isMesh) return;
+            n++;
+            mb.setFromObject(o);
+            sig.push([mb.min.x, mb.min.y, mb.min.z, mb.max.x, mb.max.y, mb.max.z].map((v) => Math.round(v * 10)).join(','));
+          });
+          const key = `${pool}:${part.id}`;
+          out.meshCounts[key] = n;
+          seen.set(key, sig.sort().join('|'));
+          box.setFromObject(model.root);
+          if (![box.min.x, box.max.x, box.min.y, box.max.y].every(Number.isFinite) || box.max.y < 12 || box.max.y > 40) out.failures.push(`${key} height ${box.max.y.toFixed(1)}`);
+          if (box.min.y < -0.5) out.failures.push(`${key} below ground ${box.min.y.toFixed(2)}`);
+        } catch (err) {
+          out.failures.push(`${slot}:${part.id} ${err.message}`);
+        }
+      }
+    }
+    // the default mech: every anchor exists, and the markers' anchors are spread from the head to the feet
+    const m = buildMech(base);
+    m.update(1 / 60, { speed: 0, localFwd: 0, localRight: 0, grounded: true, boost: 0, pitch: 0, stagger: 0, charge: 0 });
+    const ys = {};
+    for (const a of ANCHORS) { const v = m.anchorWorld(a, new THREE.Vector3()); ys[a] = [Number(v.x.toFixed(1)), Number(v.y.toFixed(1)), Number(v.z.toFixed(1))]; }
+    out.anchors = ys;
+    // mounts: the muzzles of a cannon on the left shoulder and a pod on the right are on the right sides and above the shoulders
+    const withMounts = buildMech(P.deriveMech({ ...P.DEFAULT_BUILD, mountL: 'cannon', mountR: 'swarm' }).spec);
+    withMounts.update(1 / 60, { speed: 0, localFwd: 0, localRight: 0, grounded: true, boost: 0, pitch: 0, stagger: 0, charge: 0 });
+    const mL = withMounts.mountMuzzleWorld('L', new THREE.Vector3()), mR = withMounts.mountMuzzleWorld('R', new THREE.Vector3());
+    const mainMuzzle = withMounts.muzzleWorld(new THREE.Vector3());
+    out.muzzles = { L: [mL.x, mL.y, mL.z].map((v) => Number(v.toFixed(1))), R: [mR.x, mR.y, mR.z].map((v) => Number(v.toFixed(1))), main: [mainMuzzle.x, mainMuzzle.y, mainMuzzle.z].map((v) => Number(v.toFixed(1))) };
+    const bare = buildMech(base);
+    const bareL = bare.mountMuzzleWorld('L', new THREE.Vector3());
+    const bareMain = bare.muzzleWorld(new THREE.Vector3());
+    out.fallback = bareL.distanceTo(bareMain);
+    // different parts really look different: the shape signature (triangle count per part) is not the same for every option in a pool
+    out.sameLook = [];
+    for (const slot of ['head', 'torso', 'arms', 'legs', 'shoulderL', 'mountL', 'backpack', 'core', 'skirt', 'weapon', 'offhand', 'sub', 'crest']) {
+      const ids = P.partsFor(slot).map((p) => p.id);
+      const sigs = ids.map((id) => seen.get(`${P.poolOf(slot)}:${id}`));
+      // every option is its own silhouette (the crest that comes with a helmet is the same as that crest picked by hand, so one repeat is fine there)
+      const allowed = slot === 'crest' ? 1 : 0;
+      const dupes = ids.filter((id, i) => sigs.indexOf(sigs[i]) !== i);
+      if (dupes.length > allowed) out.sameLook.push(`${slot}: ${dupes.join(',')} repeat another option`);
+    }
+    // the redesign's proportions: a slim mech with long legs
+    const dims = new THREE.Box3().setFromObject(m.root);
+    out.size = { h: Number((dims.max.y - dims.min.y).toFixed(1)), w: Number((dims.max.x - dims.min.x).toFixed(1)) };
+    return out;
+  });
+  dump('models', models);
+  check('every part in every slot builds a model without errors, standing on the ground', models.failures.length === 0 && models.built >= 100, `${models.built} models${models.failures.length ? ': ' + models.failures.slice(0, 3).join(' | ') : ''}`);
+  check('the model locates all 11 hardpoints, head highest and the legs lowest', Object.keys(models.anchors).length === 11 && models.anchors.head[1] > models.anchors.chest[1] && models.anchors.chest[1] > models.anchors.waist[1] && models.anchors.waist[1] > models.anchors.legs[1] && models.anchors.legs[1] > 0, JSON.stringify(models.anchors));
+  check('the left and right shoulder anchors are on opposite sides', models.anchors.shoulderL[0] * models.anchors.shoulderR[0] < 0 && Math.abs(models.anchors.shoulderL[0] + models.anchors.shoulderR[0]) < 1.5);
+  check('each shoulder mount fires from its own shoulder (L is the mech\'s left, R its right), well clear of the hand gun', models.muzzles.L[0] < -2 && models.muzzles.R[0] > 2 && models.muzzles.L[1] > 14 && models.muzzles.R[1] > 14 && models.fallback < 1e-6, JSON.stringify(models.muzzles));
+  check('every option in every pool is its own silhouette (no part reuses another\'s model)', models.sameLook.length === 0, models.sameLook.join(' | '));
+  check('the redesigned mech is slim and tall: taller than it is wide', models.size.h > 17 && models.size.w < models.size.h * 1.0, JSON.stringify(models.size));
+
   // ------------------------------------------------------------ 5f. animation
   const anim = await page.evaluate(async () => {
     const g = window.__game;
@@ -1467,6 +1660,9 @@ try {
     out.dashLift = dashLift;
 
     // a hard landing crouches, then stands back up
+    reset(0, 0, 0, Math.PI / 2);
+    for (let i = 0; i < 60; i++) step(m, {});
+    const standing = m.model.hips.position.y;
     reset(0, 0, 60, Math.PI / 2);
     m.vel.y = -90;
     let minHip = Infinity, landedAt = -1;
@@ -1475,7 +1671,7 @@ try {
       if (m.grounded && landedAt < 0) landedAt = i;
       if (landedAt >= 0 && i - landedAt < 20) minHip = Math.min(minHip, m.model.hips.position.y);
     }
-    out.landing = { minHip, settled: m.model.hips.position.y };
+    out.landing = { standing, minHip, settled: m.model.hips.position.y };
 
     // idle breathes (not frozen); the garage and title stand at ease with the rifle lowered
     reset(0, 0, 0, 0);
@@ -1544,7 +1740,7 @@ try {
   check('feet neither sink into the ground nor float above it while walking', allGaits.every((r) => r.sink > -0.12 && r.float < 0.12), allGaits.map((r) => `${r.sink.toFixed(2)}..${r.float.toFixed(2)}`).join(' '));
   check('a strafe turns the hips toward travel; backing up steps backward instead of moonwalking', anim.strafeHips < -0.9 && Math.abs(anim.backHips) < 0.15, `strafe hips ${anim.strafeHips.toFixed(2)}, back ${anim.backHips.toFixed(2)}`);
   check('a dash glides with both feet down instead of sprinting', anim.dashLift < 0.3, `highest foot ${anim.dashLift.toFixed(2)}`);
-  check('a hard landing crouches and then stands back up', anim.landing.minHip < 8.5 && anim.landing.settled > 9.2, JSON.stringify(anim.landing));
+  check('a hard landing crouches (the pelvis drops over a unit) and then stands back up', anim.landing.minHip < anim.landing.standing - 1.0 && anim.landing.settled > anim.landing.standing - 0.4, JSON.stringify(anim.landing));
   check('an idle mech breathes; at ease (garage, title) it lowers the rifle', anim.breath > 0.03 && anim.relaxedArm < 0.6 && anim.readyArm > 0.9, `breath ${anim.breath.toFixed(3)}, arm ${anim.readyArm.toFixed(2)} -> ${anim.relaxedArm.toFixed(2)}`);
   check('a shot kicks the gun arm up and it settles again', anim.recoil.kicked > anim.recoil.rest + 0.15 && Math.abs(anim.recoil.settled - anim.recoil.rest) < 0.02, JSON.stringify(anim.recoil));
   const S = anim.slashes;

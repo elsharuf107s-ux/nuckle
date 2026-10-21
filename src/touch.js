@@ -27,11 +27,13 @@ const BUTTONS = [
   ['boost', 'BOOST', 'Space', 'cluster'],
   ['burst', 'BURST', 'KeyX', 'cluster'],
   ['cannon', 'CANNON', 'KeyF', 'cluster'],
+  ['cannon2', 'MOUNT', 'KeyG', 'cluster'],
   ['sub', 'SUB', 'KeyV', 'cluster'],
   ['lock', 'LOCK', 'KeyQ', 'util'],
   ['switch', 'SWITCH', 'Tab', 'util'],
   ['reload', 'RELOAD', 'KeyR', 'util'],
 ];
+const MOUNT_LABEL = { cannon: 'CANNON', swarm: 'SWARM', rail: 'RAIL' };
 const SUB_LABEL = { vulcan: 'VULCAN', flare: 'FLARE', repair: 'REPAIR', injector: 'INJECT', pulse: 'PULSE', field: 'FIELD' };
 
 export class TouchControls {
@@ -302,16 +304,18 @@ export class TouchControls {
     if (!show) return;
 
     const p = g.player;
-    const shape = `${p.meleeOnly}|${p.ability?.kind ?? ''}|${p.sub?.kind ?? ''}`;
+    const shape = `${p.meleeOnly}|${p.mounts.map((m) => m.def.kind).join(',')}|${p.sub?.kind ?? ''}`;
     if (shape !== this._shape) {
       this._shape = shape;
       this._hide('saber', p.meleeOnly);
       this._hide('reload', p.meleeOnly);
-      this._hide('cannon', !p.ability);
+      this._hide('cannon', !p.mounts[0]);
+      this._hide('cannon2', !p.mounts[1]);
       this._hide('sub', !p.sub);
       this._text('fire', 'label', p.meleeOnly ? 'SABER' : 'FIRE');
       this._text('sub', 'label', SUB_LABEL[p.sub?.kind] ?? 'SUB');
-      this._text('cannon', 'label', p.ability?.kind === 'swarm' ? 'SWARM' : 'CANNON');
+      this._text('cannon', 'label', MOUNT_LABEL[p.mounts[0]?.def.kind] ?? 'CANNON');
+      this._text('cannon2', 'label', MOUNT_LABEL[p.mounts[1]?.def.kind] ?? 'MOUNT');
     }
     if (this.boostLatched && p.mech.overheat) {
       // out of boost fuel: the latch lets go on its own
@@ -326,10 +330,11 @@ export class TouchControls {
     this._text('missile', 'sub', `${p.missiles}/${max}`);
     this._gauge('missile', p.missiles < max ? p.missileT / 7 : 0);
     this._flag('missile', 'empty', p.missiles === 0);
-    if (p.ability) {
-      const k = 1 - p.cannonCd / p.ability.cooldown;
-      this._gauge('cannon', k);
-      this._flag('cannon', 'empty', p.cannonCd > 0);
+    for (const [i, id] of ['cannon', 'cannon2'].entries()) {
+      const m = p.mounts[i];
+      if (!m) continue;
+      this._gauge(id, 1 - m.cd / m.def.cooldown);
+      this._flag(id, 'empty', m.cd > 0);
     }
     if (p.sub) {
       const el = g.hud.el;

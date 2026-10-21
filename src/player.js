@@ -16,6 +16,7 @@ const MELEE = [
   { kind: 'slash3', dur: 0.72, damage: 470, stagger: true },
 ];
 const LOCK_RANGE = 800;
+const MOUNT_KEYS = ['KeyF', 'KeyG']; // the first shoulder mount fitted fires on F, the second on G
 // Touch aim assist: with no lock-on, shots bend toward the enemy nearest the crosshair
 const ASSIST_CONE = 0.14;   // radians off the crosshair (less the target's own angular size)
 const ASSIST_PULL = 0.8;    // how far toward the target the shot is pulled (0 = none, 1 = dead centre)
@@ -35,7 +36,7 @@ export class Player {
     this.missiles = 0;
     this.missileT = 0;
     this.missileQueue = []; // seconds until each queued missile launches
-    this.cannonCd = 0;      // shoulder cannon cooldown (0 = ready)
+    this.mounts = [];       // fitted shoulder mounts: { def, cd, key } (see applyBuild)
     this.subHeat = 0;       // head vulcans: 0..1, locked out when it reaches 1 until it has cooled
     this.subLocked = false;
     this.subCd = 0;         // decoy flares cooldown, and the vulcans' fire interval timer
@@ -75,7 +76,8 @@ export class Player {
     this.build = d.build;
     this.stats = d.stats;
     this.weapon = d.stats.weapon;
-    this.ability = d.stats.ability;
+    // one entry per fitted shoulder mount: its ability, its own cooldown and the key that fires it
+    this.mounts = d.stats.abilities.map((def, i) => ({ def, cd: 0, key: MOUNT_KEYS[i] }));
     this.sub = d.stats.sub;
     this.energy = d.energy;
     this.mech = new Mech(this.game, 'custom', 'player', d.def);
@@ -83,6 +85,11 @@ export class Player {
     this.lock = null;
     this._resetLoadout();
   }
+
+  /** The F ability and its cooldown (the single-mount view that older code and the tests use). */
+  get ability() { return this.mounts[0]?.def ?? null; }
+  get cannonCd() { return this.mounts[0]?.cd ?? 0; }
+  set cannonCd(v) { if (this.mounts[0]) this.mounts[0].cd = v; }
 
   get magSize() {
     return this.weapon.mag;
@@ -100,7 +107,7 @@ export class Player {
     this.missiles = this.stats.missileCharges;
     this.missileT = 0;
     this.missileQueue.length = 0;
-    this.cannonCd = 0;
+    for (const m of this.mounts) m.cd = 0; // shoulder mount cooldowns (0 = ready)
     this.subHeat = 0;
     this.subLocked = false;
     this.subCd = 0;
@@ -146,7 +153,7 @@ export class Player {
     this.ammo = this.magSize;
     this.reloadT = 0;
     this.missiles = this.stats.missileCharges;
-    this.cannonCd = 0;
+    for (const m of this.mounts) m.cd = 0;
     this.subCd = 0;
     this.repairCharges = this.sub?.kind === 'repair' ? this.sub.charges : 0;
     this.mech.en = this.mech.maxEn;
@@ -305,7 +312,7 @@ export class Player {
       this.missileT += dt * recharge;
       if (this.missileT >= MISSILE_RECHARGE) { this.missiles++; this.missileT = 0; }
     }
-    this.cannonCd = Math.max(0, this.cannonCd - dt * recharge);
+    for (const m of this.mounts) m.cd = Math.max(0, m.cd - dt * recharge);
     if (this.saberHold > 0) {
       this.saberHold -= dt;
       if (this.saberHold <= 0 && !this.melee) mech.setSaber(false);
@@ -342,7 +349,7 @@ export class Player {
 
     // ---- missiles
     if (input.pressed('KeyE') && this.missiles > 0 && !this.melee) this._fireMissiles();
-    if (input.pressed('KeyF') && this.ability && this.cannonCd <= 0 && !this.melee) this._fireShoulderCannon();
+    for (const m of this.mounts) if (input.pressed(m.key) && m.cd <= 0 && !this.melee) this._fireMount(m);
     for (let i = this.missileQueue.length - 1; i >= 0; i--) {
       this.missileQueue[i].t -= dt;
       if (this.missileQueue[i].t <= 0) {
@@ -617,13 +624,14 @@ export class Player {
     }
   }
 
-  /** The shoulder cannon (off-hand): one heavy splash shell, then a cooldown. */
-  _fireShoulderCannon() {
-    if (this.ability.kind === 'swarm') { this._fireSwarm(); return; }
+  /** Fire one shoulder mount (cannon, micro-missile pod or rail lance), then it cools down. */
+  _fireMount(mount) {
+    if (mount.def.kind === 'swarm') { this._fireSwarm(mount); return; }
+    if (mount.def.kind === 'rail') { this._fireRail(mount); return; }
     const game = this.game;
     const mech = this.mech;
-    const a = this.ability;
-    mech.model.shoulderMuzzleWorld(this._muzzle);
+    const a = mount.def;
+    mech.model.mountMuzzleWorld(a.side, this._muzzle);
     const dir = this._aimDir(this._muzzle, a.speed, this._w);
     if (dir.dot(mech.forward()) < -0.2) dir.copy(mech.forward());
     game.projectiles.spawn({
@@ -635,7 +643,29 @@ export class Player {
     game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.12, 14, 4, [1, 1, 1], [1, 0.55, 0.2], 0.9);
     game.audio.cannon();
     game.shake(0.4);
-    this.cannonCd = a.cooldown;
+    mech.model.recoil(0.6);
+    mount.cd = a.cooldown;
+    this.lastFired = game.time;
+  }
+
+  /** Rail lance: a fast slug that pierces everything along its line. */
+  _fireRail(m) {
+    const game = this.game;
+    const mech = this.mech;
+    const a = m.def;
+    mech.model.mountMuzzleWorld(a.side, this._muzzle);
+    const dir = this._aimDir(this._muzzle, a.speed, this._w);
+    if (dir.dot(mech.forward()) < -0.2) dir.copy(mech.forward());
+    game.projectiles.spawn({
+      type: 'beam', team: 'player', source: mech, pos: this._muzzle, dir,
+      damage: a.damage * this.dmgMul, color: 0xbfe6ff, knock: a.knock, speed: a.speed, radius: 2.2, life: 0.9, pierce: true,
+    });
+    const p = this._muzzle;
+    game.fx.glow.spawn(p.x, p.y, p.z, 0, 0, 0, 0.12, 14, 4, [1, 1, 1], [0.6, 0.85, 1], 0.9);
+    game.audio.beam();
+    game.shake(0.35);
+    mech.model.recoil(0.7);
+    m.cd = a.cooldown;
     this.lastFired = game.time;
   }
 
@@ -651,12 +681,12 @@ export class Player {
     return v.dot(this.game.rig.forward) < 0.8 ? null : target;
   }
 
-  /** Micro-missile arm: a quick volley of small homing missiles from the shoulder. */
-  _fireSwarm() {
-    const a = this.ability;
+  /** Micro-missile pod: a quick volley of small homing missiles from the shoulder it is mounted on. */
+  _fireSwarm(m) {
+    const a = m.def;
     const target = this._missileTarget();
-    for (let i = 0; i < a.count; i++) this.missileQueue.push({ t: i * 0.07, side: i % 2 ? 1 : -1, target, micro: true });
-    this.cannonCd = a.cooldown;
+    for (let i = 0; i < a.count; i++) this.missileQueue.push({ t: i * 0.07, side: i % 2 ? 1 : -1, target, micro: m });
+    m.cd = a.cooldown;
     this.lastFired = this.game.time;
     this.game.audio.missile(this.mech.pos);
   }
@@ -677,11 +707,12 @@ export class Player {
     const fwd = mech.forward(this._v).clone();
     const right = new THREE.Vector3(Math.cos(mech.yaw), 0, -Math.sin(mech.yaw));
     if (q.micro) {
-      // micro-missiles leave the shoulder launcher in a fan
-      const a = this.ability;
-      mech.model.shoulderMuzzleWorld(this._muzzle);
+      // micro-missiles leave the shoulder launcher in a fan, leaning to the side they are mounted on
+      const a = q.micro.def;
+      mech.model.mountMuzzleWorld(a.side, this._muzzle);
+      const lean = (a.side === 'L' ? -1 : 1) * rand(0.05, 0.3) + q.side * rand(0.05, 0.2);
       const dir = new THREE.Vector3(0, 0.35, 0).addScaledVector(fwd, 1)
-        .addScaledVector(right, q.side * rand(0.1, 0.45)).add(new THREE.Vector3(0, rand(0, 0.4), 0)).normalize();
+        .addScaledVector(right, lean).add(new THREE.Vector3(0, rand(0, 0.4), 0)).normalize();
       game.projectiles.spawn({
         type: 'missile', team: 'player', source: mech, pos: this._muzzle, dir, color: 0xffd070,
         damage: a.damage * this.dmgMul, speed: 130, maxSpeed: 290, delay: 0.18, turn: 6.2 + this.stats.missileTurn, target: q.target,

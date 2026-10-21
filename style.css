@@ -155,7 +155,7 @@ button.secondary { margin-left: 10px; }
 #sub-state { margin-top: 4px; letter-spacing: 0.14em; }
 #build-flags { font-size: 10px; letter-spacing: 0.1em; color: var(--amber); margin: -2px 0 6px; line-height: 1.5; }
 #build-flags:empty { display: none; }
-#cannon-row .bar { margin-top: 6px; }
+#cannon-row .bar, #cannon2-row .bar { margin-top: 6px; }
 .title-buttons { display: flex; gap: 12px; }
 .build-line { margin-top: 14px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; color: var(--dim); }
 .build-line b { color: var(--cyan); font-weight: 600; }
@@ -235,7 +235,69 @@ button.secondary { margin-left: 10px; }
 .g-poses { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.2em; color: var(--dim); }
 .g-poses .pose { padding: 4px 12px; font-size: 10px; letter-spacing: 0.14em; clip-path: none; background: rgba(8, 16, 26, 0.7); }
 .g-poses .pose.active { border-color: var(--cyan); color: var(--cyan); }
-.g-hint { position: absolute; right: 26px; bottom: 14px; font-size: 10px; letter-spacing: 0.18em; color: var(--dim); }
+.g-hint { position: absolute; right: 26px; bottom: 14px; font-size: 10px; letter-spacing: 0.1em; color: var(--dim); }
+
+/* ---------- the garage: hardpoint markers, inventory grid, hangar ---------- */
+.g-markers { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.g-marker {
+  position: absolute; left: 0; top: 0; width: 0; height: 0; padding: 0; margin: 0; border: 0; background: none; clip-path: none;
+  pointer-events: none; transition: opacity 0.2s; will-change: transform;
+}
+.g-marker i {
+  position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; pointer-events: auto; cursor: pointer;
+  border: 2px solid var(--cyan); background: rgba(9, 14, 24, 0.55); box-shadow: 0 0 10px rgba(82, 224, 255, 0.5);
+  animation: pulse 1.1s infinite alternate;
+}
+.g-marker i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--cyan); }
+.g-marker span {
+  position: absolute; left: 20px; top: -9px; padding: 2px 7px; font: 700 10px/14px var(--mono); letter-spacing: 0.14em; white-space: nowrap;
+  color: var(--cyan); background: rgba(9, 14, 24, 0.82); border: 1px solid var(--line); opacity: 0; pointer-events: none; transition: opacity 0.15s;
+}
+.g-marker:hover i { background: rgba(82, 224, 255, 0.3); }
+.g-marker:hover span, .g-marker.active span { opacity: 1; }
+.g-marker.active i { border-color: var(--amber); box-shadow: 0 0 14px rgba(255, 182, 46, 0.8); animation: none; }
+.g-marker.active i::after { background: var(--amber); }
+.g-marker.active span { color: var(--amber); border-color: rgba(255, 182, 46, 0.6); }
+.g-marker.linked i { border-color: var(--green); }
+.g-marker.behind { opacity: 0.35; }
+.g-marker.off { display: none; }
+
+.g-hangar { display: flex; gap: 5px; margin-bottom: 10px; align-items: stretch; }
+.hg-slot { width: 34px; padding: 6px 0; font-size: 12px; letter-spacing: 0; clip-path: none; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(120, 220, 255, 0.2); color: var(--dim); }
+.hg-slot.active { background: rgba(82, 224, 255, 0.2); border-color: var(--cyan); color: var(--cyan); }
+.hg-slot.empty { border-style: dashed; }
+.hg-act { margin-left: auto; padding: 6px 10px; font-size: 10px; letter-spacing: 0.14em; clip-path: none; border: 1px solid rgba(120, 220, 255, 0.25); }
+.hg-act + .hg-act { margin-left: 0; }
+.hg-act:disabled { opacity: 0.3; cursor: default; }
+@media (hover: hover) { .hg-slot:hover { background: rgba(82, 224, 255, 0.14); color: var(--text); } .hg-act:disabled:hover { background: transparent; color: var(--text); } }
+
+/* the markers on the mech are the main way in; the tabs are a compact strip for keyboard and touch */
+.g-tabs { display: flex; overflow-x: auto; gap: 5px; margin-bottom: 8px; padding-bottom: 4px; flex: none; scrollbar-width: thin; }
+.g-tabs::-webkit-scrollbar { height: 5px; }
+.g-tabs::-webkit-scrollbar-thumb { background: rgba(120, 220, 255, 0.3); }
+.g-tab { flex: 0 0 auto; padding: 7px 10px; }
+.g-hphead { font-size: 11px; letter-spacing: 0.2em; color: var(--amber); margin: 0 0 8px; }
+.g-slots { display: flex; gap: 5px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; }
+.g-slot { padding: 6px 12px; font-size: 10px; letter-spacing: 0.14em; clip-path: none; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(120, 220, 255, 0.2); color: var(--dim); }
+.g-slot.active { background: rgba(82, 224, 255, 0.2); border-color: var(--cyan); color: var(--cyan); }
+.g-sym { margin-left: auto; padding: 6px 10px; font-size: 10px; letter-spacing: 0.12em; clip-path: none; border: 1px solid rgba(120, 220, 255, 0.3); color: var(--dim); }
+.g-sym.on { border-color: var(--green); color: var(--green); background: rgba(93, 255, 165, 0.1); }
+
+.g-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-content: start; }
+.g-options > .paint-section, .g-options > .tune-row, .g-options > .tune-left { grid-column: 1 / -1; }
+.g-options .opt { padding: 8px 9px; }
+.g-options .opt .o-name { flex-direction: column; gap: 1px; font-size: 11px; }
+.g-options .opt .o-name i { min-height: 12px; }
+.g-options .opt .o-desc { display: none; }
+.g-options .opt .o-chips { margin-top: 5px; }
+.g-options .opt .chip { font-size: 9px; padding: 1px 4px; }
+.g-detail { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(120, 220, 255, 0.25); background: rgba(8, 16, 26, 0.7); min-height: 92px; }
+.g-detail .d-name { font-size: 12px; letter-spacing: 0.12em; font-weight: 700; display: flex; justify-content: space-between; gap: 8px; }
+.g-detail .d-name i { font-style: normal; font-size: 10px; letter-spacing: 0.1em; color: var(--cyan); }
+.g-detail .d-desc { margin-top: 4px; font-size: 11px; color: var(--dim); line-height: 1.45; font-family: var(--sans); }
+.marks { display: flex; gap: 6px; flex-wrap: wrap; }
+.mark { padding: 8px 12px; font-size: 10px; letter-spacing: 0.1em; clip-path: none; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(120, 220, 255, 0.2); color: var(--text); }
+.mark.selected { border-color: var(--cyan); background: rgba(82, 224, 255, 0.16); }
 
 @media (max-width: 1000px) and (min-height: 561px) {
   .g-right { display: none; }
@@ -277,7 +339,7 @@ button.secondary { margin-left: 10px; }
 .g-pit .p-hostiles { color: var(--dim); font-family: var(--sans); font-size: 11px; }
 .g-pit .p-status { margin-top: 3px; letter-spacing: 0.1em; font-size: 10px; color: var(--green); }
 .g-pit .p-status.low { color: var(--red); }
-#screen-garage.pit #g-back, #screen-garage.pit .g-name { display: none; }
+#screen-garage.pit #g-back, #screen-garage.pit .g-name, #screen-garage.pit .g-hangar { display: none; }
 #screen-garage.pit .g-title { color: var(--amber); }
 
 /* ---------- touch and small screens ---------- */
@@ -348,6 +410,7 @@ html:not(.touch) .touch-only, html.touch .no-touch { display: none !important; }
 #tc-burst { --s: 58px; right: 166px; bottom: 108px; border-color: var(--pink); color: var(--pink); animation: pulse 0.5s infinite alternate; }
 #tc-cannon { --s: 50px; right: 8px; bottom: 172px; border-color: var(--amber); }
 #tc-sub { --s: 50px; right: 66px; bottom: 172px; border-color: var(--green); }
+#tc-cannon2 { --s: 50px; right: 124px; bottom: 172px; border-color: var(--amber); }
 #tc-util .tc-btn { position: static; --s: 46px; }
 #tc-util .tc-btn b { font-size: 9px; letter-spacing: 0.04em; }
 #tc-pause {
@@ -419,8 +482,23 @@ html.touch .g-tabs { touch-action: pan-x; }
   .g-tabs { display: flex; overflow-x: auto; gap: 5px; margin-bottom: 6px; padding-bottom: 4px; flex: none; scrollbar-width: none; }
   .g-tabs::-webkit-scrollbar { display: none; }
   .g-tab { flex: 0 0 auto; padding: 8px 12px; font-size: 10px; }
-  .opt { padding: 7px 9px; }
-  .opt .o-desc { font-size: 10px; margin-top: 2px; }
+  .g-hangar { margin-bottom: 5px; }
+  .hg-slot { flex: 0 0 28px; width: 28px; padding: 4px 0; min-height: 0; }
+  .hg-act { padding: 4px 6px; font-size: 9px; letter-spacing: 0.08em; }
+  .g-hangar { gap: 4px; }
+  .g-hphead { display: none; }
+  .g-slots { margin-bottom: 5px; }
+  .g-slot, .g-sym { padding: 4px 9px; }
+  html.touch .g-slot, html.touch .g-sym, html.touch .hg-slot, html.touch .hg-act { min-height: 30px; }
+  .g-name { margin-bottom: 5px; font-size: 0; gap: 0; }
+  html.touch .g-name input, .g-name input { font-size: 13px; padding: 3px 8px; }
+  html.touch .g-tab, .g-tab { min-height: 0; padding: 5px 9px; }
+  .g-detail { margin-top: 5px; padding: 5px 8px; min-height: 0; }
+  .g-detail .d-name { font-size: 10px; }
+  .g-detail .d-desc { font-size: 10px; line-height: 1.35; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .g-detail .o-chips { display: none; }
+  .opt { padding: 6px 8px; }
+  .g-options .opt .o-chips .chip:nth-child(n+3) { display: none; }
   .opt .o-chips { margin-top: 5px; }
   .chip { font-size: 9px; }
   .stat { margin: 0 0 6px; }

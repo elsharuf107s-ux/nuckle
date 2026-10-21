@@ -158,8 +158,27 @@ try {
   check('garage: the 13 tabs form one scrollable row', tabScroll.scrolls && tabScroll.h < 60, JSON.stringify(tabScroll));
   await shot('02-garage');
 
+  // the Crossout-style hardpoints on a phone: tappable markers pinned to the mech, a hangar bar, a two-column parts grid
+  const gm = await G(() => {
+    window.__game.render();
+    const ms = [...document.querySelectorAll('.g-marker')].map((m) => { const r = m.querySelector('i').getBoundingClientRect(); return { id: m.dataset.hp, w: r.width, h: r.height, x: r.x + r.width / 2, y: r.y + r.height / 2, off: m.classList.contains('off') }; });
+    return { ms, cols: getComputedStyle(document.getElementById('g-options')).gridTemplateColumns.split(' ').length, desc: getComputedStyle(document.querySelector('.opt .o-desc')).display, detail: getComputedStyle(document.getElementById('g-detail')).display };
+  });
+  check('garage: eleven hardpoint markers, each at least 28px, on screen', gm.ms.length === 11 && gm.ms.every((m) => !m.off && m.w >= 28 && m.h >= 28 && m.x > 0 && m.y > 0 && m.x < W && m.y < H), JSON.stringify(gm.ms.filter((m) => m.off || m.w < 28).map((m) => m.id)));
+  check('garage: the parts grid is two columns with a compact detail strip instead of long descriptions', gm.cols === 2 && gm.desc === 'none' && gm.detail !== 'none', JSON.stringify([gm.cols, gm.desc, gm.detail]));
+  const hg = await G(() => [...document.querySelectorAll('.hg-slot')].map((b) => { const r = b.getBoundingClientRect(); return { w: r.width, h: r.height }; }));
+  check('garage: the hangar slots are tappable', hg.length === 6 && hg.every((b) => b.h >= 28 && b.w >= 26), JSON.stringify(hg[0]));
+  const markerTarget = await G(() => { const m = [...document.querySelectorAll('.g-marker')].find((x) => x.dataset.hp === 'handR'); const r = m.querySelector('i').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.touchscreen.tap(markerTarget.x, markerTarget.y);
+  check('garage: tapping the hand marker opens the weapon slot', (await G(() => [window.__garage.tab, document.querySelector('.opt.selected')?.dataset.id].join())) === 'handR,rifle');
+  await tap('.hg-slot[data-slot="1"]');
+  check('garage: tapping an empty hangar slot starts a new build', (await G(() => window.__game.player.build.name)) === 'MECH-02');
+  await tap('.hg-slot[data-slot="0"]');
+  await G(async () => { const H = await import('/src/hangar.js'); window.__garage.hangar = H.cleanHangar(null); window.__garage._loadActive(); });
+  await tap('.g-tab[data-tab="head"]');
+
   // tapping equips; the stats and the mech follow
-  await tap('.g-tab[data-tab="torso"]');
+  await tap('.g-tab[data-tab="chest"]');
   await tap('.opt[data-id="heavy"]');
   const eq = await G(() => ({ torso: window.__game.player.build.torso, selected: document.querySelector('.opt.selected')?.dataset.id }));
   check('garage: tapping a part equips it', eq.torso === 'heavy' && eq.selected === 'heavy', JSON.stringify(eq));
@@ -171,21 +190,21 @@ try {
 
   // one finger turns the turntable, two fingers zoom it
   const cam0 = await G(() => ({ ...window.__game.garageCam }));
-  await touch.down(1, 420, 200);
-  for (let i = 1; i <= 6; i++) await touch.move(1, 420 + i * 12, 200);
+  await touch.down(1, 480, 50); // open background above the mech, clear of the hardpoint markers
+  for (let i = 1; i <= 6; i++) await touch.move(1, 480 + i * 12, 50);
   await touch.up(1);
   const cam1 = await G(() => ({ ...window.__game.garageCam }));
   check('garage: dragging a finger rotates the mech', Math.abs(cam1.yaw - cam0.yaw) > 0.3 && !cam1.dragging, `${(cam1.yaw - cam0.yaw).toFixed(2)} rad`);
-  await touch.down(1, 400, 200);
-  await touch.down(2, 440, 200);
-  for (let i = 1; i <= 6; i++) { await touch.move(1, 400 - i * 12, 200); await touch.move(2, 440 + i * 12, 200); }
+  await touch.down(1, 450, 50);
+  await touch.down(2, 490, 50);
+  for (let i = 1; i <= 6; i++) { await touch.move(1, 450 - i * 12, 50); await touch.move(2, 490 + i * 12, 50); }
   await touch.up(2);
   await touch.up(1);
   const cam2 = await G(() => ({ ...window.__game.garageCam }));
   check('garage: spreading two fingers zooms in', cam2.dist < cam1.dist - 5 && !cam2.dragging, `${cam1.dist.toFixed(1)} -> ${cam2.dist.toFixed(1)}`);
-  await touch.down(1, 380, 200);
-  await touch.down(2, 480, 200);
-  for (let i = 1; i <= 6; i++) { await touch.move(1, 380 + i * 10, 200); await touch.move(2, 480 - i * 10, 200); }
+  await touch.down(1, 400, 50);
+  await touch.down(2, 540, 50);
+  for (let i = 1; i <= 6; i++) { await touch.move(1, 400 + i * 10, 50); await touch.move(2, 540 - i * 10, 50); }
   await touch.up(2);
   await touch.up(1);
   const cam3 = await G(() => ({ ...window.__game.garageCam }));
@@ -568,19 +587,20 @@ try {
       g.setBuild({ ...window.__garage.build, ...patch });
       g.startMission(); g.manual = true; g.missions.state = 'idle'; g.hud.reset(); g.step(3);
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      out[label] = { cannon: vis('cannon'), sub: vis('sub'), saber: vis('saber'), reload: vis('reload'), fire: document.querySelector('#tc-fire b').textContent, subLabel: document.querySelector('#tc-sub b').textContent, cannonLabel: document.querySelector('#tc-cannon b').textContent };
+      out[label] = { cannon: vis('cannon'), cannon2: vis('cannon2'), cannon2Label: document.querySelector('#tc-cannon2 b').textContent, sub: vis('sub'), saber: vis('saber'), reload: vis('reload'), fire: document.querySelector('#tc-fire b').textContent, subLabel: document.querySelector('#tc-sub b').textContent, cannonLabel: document.querySelector('#tc-cannon b').textContent };
     };
-    await field({ offhand: 'cannon', sub: 'vulcan' }, 'cannonVulcan');
-    await field({ weapon: 'sabers', offhand: 'none', sub: 'flare' }, 'sabersFlare');
-    await field({ weapon: 'rifle', offhand: 'swarm', sub: 'injector' }, 'swarmInject');
-    await field({ weapon: 'rifle', offhand: 'shield', sub: 'pulse' }, 'pulse');
-    await field({ weapon: 'rifle', offhand: 'shield', sub: 'none' }, 'stock');
+    await field({ mountL: 'cannon', mountR: 'none', sub: 'vulcan' }, 'cannonVulcan');
+    await field({ weapon: 'sabers', offhand: 'none', mountL: 'none', mountR: 'none', sub: 'flare' }, 'sabersFlare');
+    await field({ weapon: 'rifle', mountL: 'swarm', mountR: 'rail', sub: 'injector' }, 'swarmInject');
+    await field({ weapon: 'rifle', offhand: 'shield', mountL: 'none', mountR: 'none', sub: 'pulse' }, 'pulse');
+    await field({ weapon: 'rifle', offhand: 'shield', mountL: 'none', mountR: 'none', sub: 'none' }, 'stock');
     g.cheat.invincible = true;
     return out;
   });
   check('a shoulder cannon and vulcans add their buttons', shapes.cannonVulcan.cannon && shapes.cannonVulcan.sub && shapes.cannonVulcan.subLabel === 'VULCAN', JSON.stringify(shapes.cannonVulcan));
   check('twin sabers turn FIRE into SABER and drop the reload and extra saber buttons', shapes.sabersFlare.fire === 'SABER' && !shapes.sabersFlare.saber && !shapes.sabersFlare.reload && shapes.sabersFlare.sub && shapes.sabersFlare.subLabel === 'FLARE', JSON.stringify(shapes.sabersFlare));
-  check('the micro-missile arm labels its button SWARM, and the EN injector gets an INJECT button', shapes.swarmInject.cannon && shapes.swarmInject.cannonLabel === 'SWARM' && shapes.swarmInject.sub && shapes.swarmInject.subLabel === 'INJECT' && shapes.pulse.subLabel === 'PULSE', JSON.stringify([shapes.swarmInject, shapes.pulse.subLabel]));
+  check('two shoulder mounts get two buttons (F and G), each labelled for its weapon', shapes.swarmInject.cannon && shapes.swarmInject.cannon2 && shapes.swarmInject.cannon2Label === 'RAIL' && !shapes.cannonVulcan.cannon2 && !shapes.stock.cannon2, JSON.stringify([shapes.swarmInject.cannon2, shapes.swarmInject.cannon2Label, shapes.cannonVulcan.cannon2]));
+  check('the micro-missile pod labels its button SWARM, and the EN injector gets an INJECT button', shapes.swarmInject.cannon && shapes.swarmInject.cannonLabel === 'SWARM' && shapes.swarmInject.sub && shapes.swarmInject.subLabel === 'INJECT' && shapes.pulse.subLabel === 'PULSE', JSON.stringify([shapes.swarmInject, shapes.pulse.subLabel]));
   check('back to a stock loadout the extras disappear again', !shapes.stock.cannon && !shapes.stock.sub && shapes.stock.saber && shapes.stock.fire === 'FIRE');
   await G(() => { const p = window.__game.player; p.reset(0, 0); p.burst = 100; window.__game.step(3); });
   await page.waitForTimeout(150);
@@ -592,7 +612,7 @@ try {
   // ------------------------------------------------------------ 10b. the pit stop between waves, on a phone
   await G(() => {
     const g = window.__game;
-    g.setBuild({ ...window.__garage.build, weapon: 'rifle', offhand: 'shield', sub: 'none', torso: 'std' });
+    g.setBuild({ ...window.__garage.build, weapon: 'rifle', offhand: 'shield', mountL: 'none', mountR: 'none', sub: 'none', torso: 'std' });
     g.settings.pitStops = true;
     g.startMission();
     g.manual = true;
@@ -617,13 +637,14 @@ try {
   check('the pit card fits inside the panel and the parts list keeps room to scroll', pitPhone.card.shown && inside(pitPhone.card, W, H) && pitPhone.card.b <= pitPhone.left.b && pitPhone.opts.h >= 100, `list ${Math.round(pitPhone.opts.h)}px`);
   check('the pit stop hides BACK and the callsign field, and offers a big LAUNCH button', !pitPhone.back.shown && !pitPhone.name.shown && /^LAUNCH WAVE 2$/.test(pitPhone.label) && inside(pitPhone.go, W, H) && pitPhone.go.h >= 32);
   await shot('09-pit');
-  await tap('.g-tab[data-tab="shoulder"]');
+  await tap('.g-marker[data-hp="shoulderL"] i');
   await tap('.opt[data-id="bulwark"]');
-  check('tapping a part in the pit equips it', (await G(() => window.__game.player.build.shoulder)) === 'bulwark');
-  await touch.down(1, 420, 200);
-  for (let i = 1; i <= 5; i++) await touch.move(1, 420 + i * 10, 200);
+  check('tapping a hardpoint marker and a part in the pit equips it (both shoulders: symmetry is on)', (await G(() => [window.__game.player.build.shoulderL, window.__game.player.build.shoulderR].join())) === 'bulwark,bulwark');
+  const pitYaw0 = await G(() => window.__game.garageCam.yaw);
+  await touch.down(1, 480, 50);
+  for (let i = 1; i <= 5; i++) await touch.move(1, 480 + i * 10, 50);
   await touch.up(1);
-  check('dragging the mech around in the pit turns the turntable', !(await G(() => window.__game.garageCam.dragging)));
+  check('dragging the background in the pit turns the turntable', Math.abs((await G(() => window.__game.garageCam.yaw)) - pitYaw0) > 0.15 && !(await G(() => window.__game.garageCam.dragging)));
   await tap('#g-go');
   await page.waitForFunction(() => window.__game.state === 'playing');
   await page.waitForFunction(() => !document.getElementById('touch').classList.contains('hidden'));
