@@ -1,9 +1,10 @@
 // The garage's parts catalogue and everything derived from a build.
 //
-// A build picks one part for each of sixteen slots, spends tuning points, and paints the result. The
-// slots sit on eleven HARDPOINTS, the places on the machine that the garage lets you click: the
-// shoulders are separate left and right (each with an armor pad and a weapon mount on top), so the
-// two sides can differ. Each part contributes additive (`add`) and multiplicative (`mul`) stat changes,
+// A build picks one part for each slot, spends tuning points, sets the proportions and paints the result.
+// The slots sit on HARDPOINTS, the places on the machine that the garage lets you click: the shoulders are
+// separate left and right (each with an armor pad and a weapon mount on top), so the two sides can differ.
+// Beyond the base body there are SOCKETS you bolt more onto: a leg layout (two legs, four, six, treads or
+// hover pods), a second and third pair of arms, a head on each shoulder, a tail and two back pods. Each part contributes additive (`add`) and multiplicative (`mul`) stat changes,
 // and a model style that the model builder knows how to draw. deriveMech() folds a build into the same
 // "def" shape the fixed enemy mechs use, so the Mech class needs no special casing.
 //
@@ -18,19 +19,34 @@ export const SLOTS = [
   'head', 'crest', 'torso', 'pilot', 'arms', 'legs',
   'shoulderL', 'shoulderR', 'mountL', 'mountR',
   'backpack', 'core', 'skirt', 'weapon', 'offhand', 'sub',
+  // the rig: what the legs are, and what else grows from the body
+  'layout',
+  'armLowerL', 'armLowerR', 'armUpperL', 'armUpperR',
+  'headL', 'headR', 'tail', 'podL', 'podR',
 ];
 
-/** The two shoulders pick from one catalogue, and so do the two weapon mounts. */
-const POOL = { shoulderL: 'shoulder', shoulderR: 'shoulder', mountL: 'mount', mountR: 'mount' };
+/** Sockets that share a catalogue: both shoulders, both mounts, all four extra arms, both side heads, both pods. */
+const POOL = {
+  shoulderL: 'shoulder', shoulderR: 'shoulder', mountL: 'mount', mountR: 'mount',
+  armLowerL: 'limb', armLowerR: 'limb', armUpperL: 'limb', armUpperR: 'limb',
+  headL: 'head2', headR: 'head2', podL: 'pod', podR: 'pod',
+};
 export const poolOf = (slot) => POOL[slot] ?? slot;
-/** The other side of a left/right slot (shoulders and mounts), for the symmetry switch. */
-export const MIRROR = { shoulderL: 'shoulderR', shoulderR: 'shoulderL', mountL: 'mountR', mountR: 'mountL' };
+/** The other side of a left/right slot, for the symmetry switch. */
+export const MIRROR = {
+  shoulderL: 'shoulderR', shoulderR: 'shoulderL', mountL: 'mountR', mountR: 'mountL',
+  armLowerL: 'armLowerR', armLowerR: 'armLowerL', armUpperL: 'armUpperR', armUpperR: 'armUpperL',
+  headL: 'headR', headR: 'headL', podL: 'podR', podR: 'podL',
+};
 
 /** What the garage calls each slot. */
 export const SLOT_LABELS = {
-  head: 'HELMET', crest: 'CREST', torso: 'FRAME', pilot: 'PILOT', arms: 'ARMS', legs: 'LEGS',
+  head: 'HELMET', crest: 'CREST', torso: 'FRAME', pilot: 'PILOT', arms: 'ARM STYLE', legs: 'LEG STYLE',
   shoulderL: 'ARMOR', shoulderR: 'ARMOR', mountL: 'WEAPON MOUNT', mountR: 'WEAPON MOUNT',
   backpack: 'BACKPACK', core: 'CORE', skirt: 'SKIRT', weapon: 'WEAPON', offhand: 'OFF-HAND', sub: 'SUB-WEAPON',
+  layout: 'LEG LAYOUT',
+  armLowerL: 'LOWER ARM', armLowerR: 'LOWER ARM', armUpperL: 'BACK ARM', armUpperR: 'BACK ARM',
+  headL: 'SIDE HEAD', headR: 'SIDE HEAD', tail: 'TAIL', podL: 'BACK POD', podR: 'BACK POD',
 };
 
 /**
@@ -41,7 +57,7 @@ export const HARDPOINTS = [
   { id: 'head', name: 'HEAD', slots: ['head', 'crest'] },
   { id: 'chest', name: 'CHEST', slots: ['torso', 'pilot'] },
   { id: 'arms', name: 'ARMS', slots: ['arms'] },
-  { id: 'legs', name: 'LEGS', slots: ['legs'] },
+  { id: 'legs', name: 'LEGS', slots: ['layout', 'legs'] },
   { id: 'shoulderL', name: 'L SHOULDER', slots: ['shoulderL', 'mountL'] },
   { id: 'shoulderR', name: 'R SHOULDER', slots: ['shoulderR', 'mountR'] },
   { id: 'back', name: 'BACKPACK', slots: ['backpack'] },
@@ -49,8 +65,38 @@ export const HARDPOINTS = [
   { id: 'handR', name: 'R HAND', slots: ['weapon'] },
   { id: 'handL', name: 'L HAND', slots: ['offhand'] },
   { id: 'hips', name: 'HIPS', slots: ['sub'] },
+  // sockets for more: empty until you bolt something on
+  { id: 'armLowerL', name: 'L LOWER ARM', slots: ['armLowerL'], socket: true },
+  { id: 'armLowerR', name: 'R LOWER ARM', slots: ['armLowerR'], socket: true },
+  { id: 'armUpperL', name: 'L BACK ARM', slots: ['armUpperL'], socket: true },
+  { id: 'armUpperR', name: 'R BACK ARM', slots: ['armUpperR'], socket: true },
+  { id: 'headL', name: 'L SIDE HEAD', slots: ['headL'], socket: true },
+  { id: 'headR', name: 'R SIDE HEAD', slots: ['headR'], socket: true },
+  { id: 'tail', name: 'TAIL', slots: ['tail'], socket: true },
+  { id: 'podL', name: 'L BACK POD', slots: ['podL'], socket: true },
+  { id: 'podR', name: 'R BACK POD', slots: ['podR'], socket: true },
 ];
 export const hardpointOf = (slot) => HARDPOINTS.find((h) => h.slots.includes(slot));
+
+/** The slots of a hardpoint that make sense for this build: the leg style means nothing on treads or hover pods, the skirt only hangs from a biped's hips. */
+export function hardpointSlots(hp, build) {
+  const layout = partOf('layout', build?.layout);
+  return hp.slots.filter((slot) => {
+    if (slot === 'legs') return layout.legScale > 0;
+    if (slot === 'skirt') return layout.id === 'biped';
+    return true;
+  });
+}
+
+/** What the garage calls the sliders on the proportions screen, with their limits and what they do. */
+export const PROPORTIONS = [
+  { id: 'size', name: 'OVERALL SIZE', min: 0.85, max: 1.3, effect: 'Bigger: more armor, more weight, slower, a bigger target. Smaller: the reverse.' },
+  { id: 'legs', name: 'LEG LENGTH', min: 0.7, max: 1.4, effect: 'Longer legs run faster and climb higher but make a taller, easier-to-topple machine.' },
+  { id: 'arms', name: 'ARM LENGTH', min: 0.7, max: 1.4, effect: 'Longer arms give the saber more reach and a little more punch.' },
+  { id: 'torso', name: 'TORSO WIDTH', min: 0.8, max: 1.4, effect: 'A broader chest holds more armor and a bigger reactor, and dashes a little slower.' },
+  { id: 'head', name: 'HEAD SIZE', min: 0.7, max: 1.5, effect: 'A bigger head carries better sensors: a longer radar range.' },
+];
+export const PROP_STEP = 0.05;
 
 /** Cosmetic markings painted on the machine. */
 export const MARKS = [
@@ -77,6 +123,8 @@ const BASE = {
   resupplyHeal: 0.25, // fraction of armor repaired between waves
   jam: 0,             // fraction of the turning rate enemy missiles lose against this mech
   barrier: 0,         // energy barrier that soaks damage before armor, then recharges
+  lock: 1,            // enemies the missiles can be locked onto at once (every side head adds one)
+  salvoBonus: 0,      // missiles added to every E salvo (launcher arms)
   supply: 0, draw: 0, load: 0, // power budget (torso supplies, parts draw) and weight limit (legs)
 };
 
@@ -92,6 +140,7 @@ const MELEE_SOFT_CAP = 1.6;  // melee bonuses stack multiplicatively; beyond thi
 const GUN_SOFT_CAP = 1.3;    // likewise for gun damage bonuses
 const BURST_GAIN_CAP = 2.0;  // the burst gauge never fills more than twice as fast
 const MAX_MISSILE_CHARGES = 4;
+const MISSILES_PER_SALVO = 4; // an E salvo with no launcher arms
 const PELLET_COVERAGE = 0.8; // share of a shotgun's pellets that land on a typical target (for the firepower bar)
 
 /** Tuning: spend points on four dials. Each point is a small flat bonus. */
@@ -348,7 +397,76 @@ export const PARTS = {
       add: { weight: 7, draw: 18 },
       sub: { name: 'AEGIS FIELD', kind: 'field', cooldown: 22, duration: 2.5 } },
   ],
+
+  // ---- the rig. LAYOUT is what the machine walks on; `legScale` says how many sets of legs it carries (the leg style's
+  // armor, weight, power draw and load limit are multiplied by it; treads and hover pods have no legs, so the style is ignored).
+  layout: [
+    { id: 'biped', name: 'BIPED', model: 'biped', legScale: 1, legs: 2,
+      desc: 'Two legs: the classic mobile suit. Quick and agile, and the only layout that skates through a dash.',
+      add: {} },
+    { id: 'quad', name: 'QUAD WALKER', model: 'quad', legScale: 1.5, legs: 4,
+      desc: 'Four legs under a long chassis: a very steady gun platform that is hard to stagger and carries a lot, but dashes poorly and climbs badly.',
+      add: { weight: 14, draw: 6, staggerAt: 120, ascendSpeed: -4, dashSpeed: -30 }, mul: { mobility: 0.97, reload: 1.06, fireRate: 1.04 } },
+    { id: 'hexa', name: 'SPIDER', model: 'hexa', legScale: 2.2, legs: 6,
+      desc: 'Six legs: almost impossible to knock down and able to carry enormous loads, but slow, a poor jumper, and the dash is a scuttle.',
+      add: { weight: 26, draw: 12, hp: 150, staggerAt: 260, ascendSpeed: -8, dashSpeed: -60 }, mul: { mobility: 0.88, dash: 0.82 } },
+    { id: 'tread', name: 'TANK TREADS', model: 'tread', legScale: 0, legs: 0,
+      desc: 'Continuous tracks: fast on the ground, with huge armor and load limits, but heavy in the air and a weak climber.',
+      add: { weight: 38, draw: 8, hp: 480, load: 150, staggerAt: 180, ascendSpeed: -10, airSpeed: -18, enGround: 10 }, mul: { mobility: 1.1 } },
+    { id: 'hover', name: 'HOVER PODS', model: 'hover', legScale: 0, legs: 0,
+      desc: 'Repulsor pods in place of legs: it skims the ground with great air speed and dashes, but has little armor and a small load limit. Power hungry.',
+      add: { weight: 12, draw: 16, hp: 200, load: 96, ascendSpeed: 8, airSpeed: 14, dashSpeed: 28, enAir: 8 }, mul: { mobility: 1.04 } },
+  ],
+  // Extra arms. They fit any of the four arm sockets (a lower pair at the waist, a back pair over the shoulders) and all
+  // fire together with the gun button; `limb` says what each does. Every one draws power, so a many-armed machine pays for it.
+  limb: [
+    { id: 'none', name: 'NO ARM', model: 'none', desc: 'An empty socket: no weight, no power draw.',
+      add: {} },
+    { id: 'gun', name: 'ARM BEAM GUN', model: 'gun', desc: 'A rapid beam gun on its own arm. Fires with the gun button, never runs dry, and aims along with your crosshair.',
+      add: { weight: 6, draw: 14 }, limb: { name: 'ARM BEAM GUN', kind: 'gun', damage: 17, interval: 0.2, speed: 620 } },
+    { id: 'cannon', name: 'ARM CANNON', model: 'cannon', desc: 'A heavy arm cannon: a slow explosive shell every couple of seconds, fired with the gun button.',
+      add: { weight: 11, draw: 20 }, limb: { name: 'ARM CANNON', kind: 'cannon', damage: 240, interval: 2.6, speed: 260, splash: { radius: 20, damage: 120 } } },
+    { id: 'blade', name: 'ARM SABER', model: 'blade', desc: 'A beam saber on its own arm: it lights when you swing and adds to every stroke of the combo.',
+      add: { weight: 5, draw: 8 }, mul: { melee: 1.14 }, limb: { name: 'ARM SABER', kind: 'blade' } },
+    { id: 'shield', name: 'ARM SHIELD', model: 'shield', desc: 'A shield on its own arm: absorbs 6% of incoming fire and makes you harder to stagger.',
+      add: { weight: 8, draw: 2, staggerAt: 40 }, guard: 0.06, limb: { name: 'ARM SHIELD', kind: 'shield' } },
+    { id: 'launcher', name: 'ARM LAUNCHER', model: 'launcher', desc: 'A missile launcher arm: two more missiles in every salvo.',
+      add: { weight: 9, draw: 10, salvoBonus: 2 }, limb: { name: 'ARM LAUNCHER', kind: 'launcher' } },
+    { id: 'repair', name: 'NANO ARM', model: 'repair', desc: 'A repair arm: mends armor steadily once you have been left alone for a moment.',
+      add: { weight: 7, draw: 12, regen: 6 }, limb: { name: 'NANO ARM', kind: 'repair' } },
+  ],
+  // A tail grows from the rear of the body.
+  tail: [
+    { id: 'none', name: 'NO TAIL', model: 'none', desc: 'Nothing at the back: no extra weight or power draw.',
+      add: {} },
+    { id: 'stabilizer', name: 'STABILIZER BOOM', model: 'stabilizer', desc: 'A long counterweighted tail: much harder to stagger, and quicker, cheaper dashes.',
+      add: { weight: 9, draw: 3, staggerAt: 90, dashCost: -3 } },
+    { id: 'lash', name: 'LASH BLADE', model: 'lash', desc: 'A segmented tail ending in a blade: it whips round with every saber stroke for extra damage.',
+      add: { weight: 7, draw: 6 }, mul: { melee: 1.12 } },
+    { id: 'booster', name: 'BOOST TAIL', model: 'booster', desc: 'A tail with a thruster in its tip: more boost fuel and a stronger climb. Power hungry.',
+      add: { weight: 10, draw: 12, ascendSpeed: 6, en: 25 } },
+  ],
+  // Two pods on the back, one per side (the values are PER SIDE).
+  pod: [
+    { id: 'none', name: 'NO POD', model: 'none', desc: 'Nothing on this side of the back: no extra weight or power draw.',
+      add: {} },
+    { id: 'thruster', name: 'THRUSTER POD', model: 'thruster', desc: 'An extra thruster: more boost fuel, a stronger climb and cheaper dashes. Power hungry.',
+      add: { weight: 7, draw: 9, ascendSpeed: 4, en: 18, dashCost: -2 } },
+    { id: 'missile', name: 'MISSILE POD', model: 'missile', desc: 'A pod of missiles: one more missile charge.',
+      add: { weight: 9, draw: 8, missileCharges: 1 } },
+    { id: 'plate', name: 'ARMOR PLATE POD', model: 'plate', desc: 'A slab of armor on the back: armor and stagger resistance, no power draw to speak of.',
+      add: { hp: 160, weight: 12, staggerAt: 30, draw: 2 } },
+  ],
 };
+
+/**
+ * Side heads: any helmet can be fitted on a shoulder socket. A side head works at half strength (see EXT_HEADS) and adds
+ * one more lock-on target for missiles, so it is a worse sensor but a wider one.
+ */
+PARTS.head2 = [
+  { id: 'none', name: 'NO HEAD', model: 'none', desc: 'An empty socket: no weight, no power draw.', add: {} },
+  ...PARTS.head.map((h) => ({ ...h, desc: `${h.desc} On a shoulder it works at half strength and adds a missile lock-on target.` })),
+];
 
 // ------------------------------------------------------------------ paint
 
@@ -388,7 +506,11 @@ export const DEFAULT_BUILD = Object.freeze({
   head: 'vfin', crest: 'auto', torso: 'std', pilot: 'rookie', arms: 'std', legs: 'std',
   shoulderL: 'std', shoulderR: 'std', mountL: 'none', mountR: 'none',
   backpack: 'std', core: 'std', skirt: 'std', weapon: 'rifle', offhand: 'shield', sub: 'none',
-  sym: true, // the garage keeps the left and right shoulders matched while this is on
+  layout: 'biped',
+  armLowerL: 'none', armLowerR: 'none', armUpperL: 'none', armUpperR: 'none',
+  headL: 'none', headR: 'none', tail: 'none', podL: 'none', podR: 'none',
+  prop: { size: 1, legs: 1, arms: 1, torso: 1, head: 1 },
+  sym: true, // the garage keeps the left and right sockets matched while this is on
   tuning: { plating: 0, servos: 0, thrusters: 0, weapons: 0 },
   paint: { main: '#eceff6', sub: '#2a56b8', accent: '#d23a32', trim: '#f5c518' },
   marks: 'none',
@@ -432,10 +554,21 @@ export function cleanTuning(src) {
 
 export const tuningSpent = (t) => TUNING.reduce((n, { id }) => n + (t?.[id] ?? 0), 0);
 
+/** Each proportion within its limits, in whole steps; anything unreadable is 1 (unchanged). */
+export function cleanProp(src) {
+  const out = {};
+  for (const { id, min, max } of PROPORTIONS) {
+    const v = Number(src?.[id]);
+    out[id] = Number.isFinite(v) ? Math.round(clamp(v, min, max) / PROP_STEP) * PROP_STEP : 1;
+    out[id] = Math.round(out[id] * 100) / 100; // 0.05 steps in floating point: 1.1500000000000001 is not a value worth saving
+  }
+  return out;
+}
+
 /** Turn anything (e.g. parsed localStorage JSON) into a valid build, filling gaps from the default. */
 export function sanitizeBuild(input) {
   const src = input && typeof input === 'object' ? input : {};
-  const out = { ...DEFAULT_BUILD, paint: { ...DEFAULT_BUILD.paint }, tuning: { ...DEFAULT_BUILD.tuning } };
+  const out = { ...DEFAULT_BUILD, paint: { ...DEFAULT_BUILD.paint }, tuning: { ...DEFAULT_BUILD.tuning }, prop: { ...DEFAULT_BUILD.prop } };
   out.name = cleanName(src.name);
   const valid = (slot, id) => typeof id === 'string' && partsFor(slot).some((p) => p.id === id);
   for (const slot of SLOTS) if (valid(slot, src[slot])) out[slot] = src[slot];
@@ -451,6 +584,7 @@ export function sanitizeBuild(input) {
   if (typeof src.sym === 'boolean') out.sym = src.sym;
   if (MARKS.some((m) => m.id === src.marks)) out.marks = src.marks;
   out.tuning = cleanTuning(src.tuning);
+  out.prop = cleanProp(src.prop);
   for (const k of ['main', 'sub', 'accent', 'trim']) {
     if (typeof src.paint?.[k] === 'string' && HEX.test(src.paint[k])) out.paint[k] = src.paint[k].toLowerCase();
   }
@@ -463,8 +597,18 @@ export function randomBuild(rand = Math.random) {
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
   const b = sanitizeBuild({});
   for (const slot of SLOTS) b[slot] = pick(partsFor(slot)).id;
+  // the rig: mostly a biped, sometimes something stranger, and now and then a few extra limbs
+  b.layout = rand() < 0.55 ? 'biped' : pick(PARTS.layout).id;
+  for (const pair of [['armLowerL', 'armLowerR'], ['armUpperL', 'armUpperR'], ['headL', 'headR'], ['podL', 'podR']]) {
+    const on = rand() < 0.28;
+    const id = on ? pick(partsFor(pair[0]).filter((p) => p.id !== 'none')).id : 'none';
+    b[pair[0]] = id;
+    b[pair[1]] = rand() < 0.8 ? id : (rand() < 0.5 ? 'none' : pick(partsFor(pair[1])).id);
+  }
+  b.tail = rand() < 0.3 ? pick(PARTS.tail.filter((p) => p.id !== 'none')).id : 'none';
+  b.prop = cleanProp(Object.fromEntries(PROPORTIONS.map(({ id, min, max }) => [id, rand() < 0.5 ? 1 : min + rand() * (max - min)])));
   if (rand() < 0.7) { b.shoulderR = b.shoulderL; b.mountR = b.mountL; } // usually matched, sometimes not
-  b.sym = b.shoulderL === b.shoulderR && b.mountL === b.mountR;
+  b.sym = b.shoulderL === b.shoulderR && b.mountL === b.mountR && Object.keys(MIRROR).every((slot) => b[slot] === b[MIRROR[slot]]);
   b.marks = pick(MARKS).id;
   const paint = pick(PAINTS);
   b.paint = { main: paint.main, sub: paint.sub, accent: paint.accent, trim: paint.trim };
@@ -493,16 +637,51 @@ function sustainedDps(w, melee, damage) {
 /** Above `cap`, each extra point of a stacking multiplier counts half. */
 const softCap = (v, cap) => (v <= cap ? v : cap + (v - cap) * 0.5);
 
+/** A side head works at half strength (its weight and power draw are 60%): it is a wider sensor, not a better one. */
+const EXT_HEADS = new Set(['headL', 'headR']);
+const EXT_EFFECT = 0.5;
+const EXT_COST = 0.6;
+const MAX_LOCK = 3;
+const MAX_SALVO = 10;
+const LIMB_SLOTS = ['armLowerL', 'armLowerR', 'armUpperL', 'armUpperR'];
+
 /** Fold a build into numbers. Pure and cheap, so the garage calls it for every hover preview. */
 export function deriveStats(build) {
   const b = sanitizeBuild(build);
-  const parts = SLOTS.map((slot) => partOf(slot, b[slot]));
+  const layout = partOf('layout', b.layout);
+  const legK = layout.legScale; // sets of legs the leg style is multiplied by (0: treads and hover pods ignore it)
   const s = { ...BASE };
   const mul = { mobility: 1, dash: 1, melee: 1, fireRate: 1, reload: 1, gunDamage: 1, missileDamage: 1, burstGain: 1 };
-  for (const p of parts) {
-    for (const [k, v] of Object.entries(p.add ?? {})) s[k] = (s[k] ?? 0) + v;
-    for (const [k, v] of Object.entries(p.mul ?? {})) mul[k] *= v;
+  let guard = 0;
+  for (const slot of SLOTS) {
+    const p = partOf(slot, b[slot]);
+    const ext = EXT_HEADS.has(slot);
+    if (ext && p.id !== 'none') s.lock += 1;
+    const addK = slot === 'legs' ? legK : 1;
+    for (const [k, v] of Object.entries(p.add ?? {})) {
+      const f = ext ? (k === 'weight' || k === 'draw' ? EXT_COST : EXT_EFFECT) : addK;
+      s[k] = (s[k] ?? 0) + v * f;
+    }
+    for (const [k, v] of Object.entries(p.mul ?? {})) {
+      if (slot === 'legs' && legK <= 0) continue;
+      mul[k] *= ext ? Math.pow(v, EXT_EFFECT) : v;
+    }
+    guard += (p.guard ?? 0) * (ext ? EXT_EFFECT : slot === 'legs' ? Math.min(1, legK) : 1);
   }
+
+  // proportions: every stretch is a trade
+  const pr = b.prop;
+  const dLeg = legK > 0 ? pr.legs - 1 : 0;
+  s.hp *= Math.pow(pr.size, 1.5) * (1 + 0.45 * (pr.torso - 1));
+  s.weight = s.weight * Math.pow(pr.size, 2) + 14 * dLeg * Math.max(1, legK) + 10 * (pr.arms - 1) + 24 * (pr.torso - 1) + 3 * (pr.head - 1);
+  s.load *= Math.pow(pr.size, 1.6);
+  s.supply *= 1 + 0.4 * (pr.torso - 1);
+  s.staggerAt = s.staggerAt * pr.size - 60 * dLeg;
+  s.ascendSpeed += 10 * dLeg;
+  s.radar *= 1 + 0.5 * (pr.head - 1);
+  mul.mobility *= Math.pow(pr.size, -0.3) * (1 + 0.4 * dLeg);
+  mul.dash *= 1 - 0.08 * (pr.torso - 1);
+  mul.melee *= 1 + 0.12 * (pr.arms - 1);
 
   // tuning points: small flat bonuses
   const t = b.tuning;
@@ -528,6 +707,11 @@ export function deriveStats(build) {
   if (w.kind !== 'melee') w.damage *= softCap(mul.gunDamage, GUN_SOFT_CAP);
 
   const subPart = partOf('sub', b.sub);
+  // extra arms: every one is listed (the model draws them all); the guns and cannons also fire with the gun button
+  const limbs = LIMB_SLOTS
+    .map((slot) => ({ part: partOf(slot, b[slot]), slot }))
+    .filter(({ part }) => part.limb)
+    .map(({ part, slot }) => ({ ...part.limb, id: part.id, slot, row: slot.includes('Lower') ? 'lower' : 'upper', side: slot.endsWith('L') ? 'L' : 'R' }));
   // weapon mounts: the first one fitted fires on F, the second on G
   const abilities = ['mountL', 'mountR']
     .map((slot, i) => ({ part: partOf(slot, b[slot]), side: i === 0 ? 'L' : 'R' }))
@@ -557,7 +741,7 @@ export function deriveStats(build) {
     turn: s.turn * move,
     staggerAt: s.staggerAt,
     // every part that absorbs fire (shields, saber deflection, shells, emitters, some arms and pilots) stacks, capped
-    guard: Math.min(GUARD_CAP, parts.reduce((n, part) => n + (part.guard ?? 0), 0)),
+    guard: Math.min(GUARD_CAP, guard),
     melee: softCap(mul.melee, MELEE_SOFT_CAP),
     damage,
     burstGain: Math.min(BURST_GAIN_CAP, mul.burstGain),
@@ -565,15 +749,21 @@ export function deriveStats(build) {
     regen: s.regen,
     jam: Math.min(0.8, s.jam),
     barrier: s.barrier,
-    reach: w.reach ?? 30,
+    reach: (w.reach ?? 30) * pr.arms,
     radar: s.radar,
     resupplyHeal: Math.min(0.9, s.resupplyHeal),
     missileCharges: clamp(s.missileCharges, 1, MAX_MISSILE_CHARGES),
+    salvo: clamp(MISSILES_PER_SALVO + s.salvoBonus, MISSILES_PER_SALVO, MAX_SALVO),
+    lock: clamp(s.lock, 1, MAX_LOCK),
     missileDamage: mul.missileDamage,
     missileTurn: s.missileTurn,
     weapon: w,
     abilities,
     ability: abilities[0] ?? null, // the F ability (kept for the single-ability code paths and the tests)
+    limbs,
+    counts: { arms: 2 + limbs.length, legs: layout.legs, heads: clamp(s.lock, 1, MAX_LOCK) },
+    layout: { id: layout.id, legs: layout.legs },
+    prop: { ...pr },
     sub: subPart.sub ? { ...subPart.sub } : null,
     tuning: { ...t },
   };
@@ -597,12 +787,16 @@ export function deriveMech(build) {
   const stats = deriveStats(b);
   const m = (slot) => partOf(slot, b[slot]).model;
   const spec = {
-    scale: 1,
+    scale: b.prop.size,
     head: m('head'), crest: m('crest'), torso: m('torso'), arms: m('arms'), legs: m('legs'),
     shoulderL: m('shoulderL'), shoulderR: m('shoulderR'), mountL: m('mountL'), mountR: m('mountR'),
     backpack: m('backpack'), core: m('core'), skirt: m('skirt'), weapon: m('weapon'), offhand: m('offhand'), sub: m('sub'),
+    layout: m('layout'),
+    armLowerL: m('armLowerL'), armLowerR: m('armLowerR'), armUpperL: m('armUpperL'), armUpperR: m('armUpperR'),
+    headL: m('headL'), headR: m('headR'), tail: m('tail'), podL: m('podL'), podR: m('podR'),
+    prop: { ...b.prop },
     marks: b.marks,
-    bulk: partOf('torso', b.torso).bulk,
+    bulk: partOf('torso', b.torso).bulk * b.prop.torso,
     palette: paletteOf(b),
   };
   const def = {

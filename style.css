@@ -268,7 +268,21 @@ button.secondary { margin-left: 10px; }
 .g-marker.active i::after { background: var(--amber); }
 .g-marker.active span { color: var(--amber); border-color: rgba(255, 182, 46, 0.6); }
 .g-marker.linked i { border-color: var(--green); }
+/* the sockets for more parts: smaller and glowing green while empty, a small cyan dot once something is bolted on */
+.g-marker.socket i { left: -11px; top: -11px; width: 22px; height: 22px; border-color: var(--green); box-shadow: 0 0 10px rgba(93, 255, 165, 0.55); }
+.g-marker.socket i::after { content: "+"; width: auto; height: auto; margin: 0; left: 0; top: 0; right: 0; bottom: 0; transform: none; border-radius: 0; background: none; color: var(--green); font: 700 15px/18px var(--mono); text-align: center; }
+.g-marker.socket:not(.empty) i { border-color: var(--cyan); box-shadow: 0 0 8px rgba(82, 224, 255, 0.45); animation: none; }
+.g-marker.socket:not(.empty) i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--cyan); right: auto; bottom: auto; }
+.g-marker.socket.active i { border-color: var(--amber); box-shadow: 0 0 14px rgba(255, 182, 46, 0.8); }
+.g-marker.socket.active i::after { color: var(--amber); }
+.g-marker.socket.active:not(.empty) i::after { background: var(--amber); }
 .g-marker.behind { opacity: 0.35; }
+/* on a small screen the mech is small and twenty markers would bury it: the sockets show while the RIG tab (or a socket) is open, the body markers otherwise */
+@media (max-height: 520px), (pointer: coarse) {
+  .g-marker.socket { display: none; }
+  #screen-garage.rigmode .g-marker.socket { display: block; }
+  #screen-garage.rigmode .g-marker:not(.socket) { display: none; }
+}
 .g-marker.off { display: none; }
 
 .g-hangar { display: flex; gap: 5px; margin-bottom: 10px; align-items: stretch; }
@@ -279,6 +293,23 @@ button.secondary { margin-left: 10px; }
 .hg-act + .hg-act { margin-left: 0; }
 .hg-act:disabled { opacity: 0.3; cursor: default; }
 @media (hover: hover) { .hg-slot:hover { background: rgba(82, 224, 255, 0.14); color: var(--text); } .hg-act:disabled:hover { background: transparent; color: var(--text); } }
+
+/* the rig and size screens */
+.rig-counts { display: flex; gap: 8px; margin-bottom: 8px; }
+.rig-count { flex: 1; padding: 8px 0; text-align: center; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(120, 220, 255, 0.2); }
+.rig-count b { display: block; font-size: 22px; color: var(--cyan); line-height: 1.1; }
+.rig-count span { font-size: 10px; letter-spacing: 0.16em; color: var(--dim); }
+.sockets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.socket-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 9px; clip-path: none; background: rgba(255, 255, 255, 0.04); border: 1px dashed rgba(93, 255, 165, 0.5); text-align: left; }
+.socket-btn .sb-name { font-size: 10px; letter-spacing: 0.14em; color: var(--dim); }
+.socket-btn .sb-part { font-size: 12px; color: var(--green); letter-spacing: 0.06em; }
+.socket-btn.filled { border-style: solid; border-color: rgba(120, 220, 255, 0.35); }
+.socket-btn.filled .sb-part { color: var(--text); }
+@media (hover: hover) { .socket-btn:hover { background: rgba(82, 224, 255, 0.14); } }
+.size-val { font-size: 12px; color: var(--dim); }
+.size-val.changed { color: var(--amber); }
+
+.tune-row input[type=range] { width: 100%; margin: 4px 0 2px; }
 
 /* the markers on the mech are the main way in; the tabs are a compact strip for keyboard and touch */
 .g-tabs { display: flex; overflow-x: auto; gap: 5px; margin-bottom: 8px; padding-bottom: 4px; flex: none; scrollbar-width: thin; }
@@ -420,6 +451,7 @@ html:not(.touch) .touch-only, html.touch .no-touch { display: none !important; }
 #tc-cannon { --s: 50px; right: 8px; bottom: 172px; border-color: var(--amber); }
 #tc-sub { --s: 50px; right: 66px; bottom: 172px; border-color: var(--green); }
 #tc-cannon2 { --s: 50px; right: 124px; bottom: 172px; border-color: var(--amber); }
+#tc-arms { --s: 50px; right: 182px; bottom: 172px; border-color: var(--pink); }
 #tc-util .tc-btn { position: static; --s: 46px; }
 #tc-util .tc-btn b { font-size: 9px; letter-spacing: 0.04em; }
 #tc-pause {
@@ -443,6 +475,8 @@ html.touch .alert { font-size: 13px; }
 
 /* tap targets */
 html.touch .tune-btn { width: 40px; height: 40px; }
+html.touch .g-marker.socket i, .g-marker.socket.big i { left: -16px; top: -16px; width: 32px; height: 32px; }
+.tune-btn.size-reset, html.touch .tune-btn.size-reset { width: auto; padding: 0 12px; font-size: 10px; letter-spacing: 0.14em; }
 html.touch .swatch { width: 38px; height: 38px; }
 html.touch .preset { padding: 10px 6px; }
 html.touch .g-tab { min-height: 38px; }

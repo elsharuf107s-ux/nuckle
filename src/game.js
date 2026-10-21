@@ -39,6 +39,16 @@ const GARAGE_FOCUS = {
   handR:     { y: 9, dist: 38, yaw: Math.PI - 1.0 },
   handL:     { y: 9, dist: 38, yaw: Math.PI + 1.0 },
   hips:      { y: 9.5, dist: 36, yaw: Math.PI - 0.7 },
+  // the sockets for more parts (left is the mech's left; yaw 0 looks at its back)
+  armLowerL: { y: 8.5, dist: 32, yaw: Math.PI + 0.9 },
+  armLowerR: { y: 8.5, dist: 32, yaw: Math.PI - 0.9 },
+  armUpperL: { y: 14.5, dist: 32, yaw: -0.7 },
+  armUpperR: { y: 14.5, dist: 32, yaw: 0.7 },
+  headL:     { y: 18, dist: 26, yaw: Math.PI + 0.7 },
+  headR:     { y: 18, dist: 26, yaw: Math.PI - 0.7 },
+  tail:      { y: 8, dist: 44, yaw: 0.35 },
+  podL:      { y: 11.5, dist: 34, yaw: -0.65 },
+  podR:      { y: 11.5, dist: 34, yaw: 0.65 },
 };
 
 // the garage's saber preview: the player's combo (see player.js) and a pause in guard
@@ -64,6 +74,7 @@ export class Game {
     // yaw/pitch/dist orbit the mech; lookY is the height looked at; `goal` (see garageFocus) eases the view toward a hardpoint
     this.garageCam = { yaw: Math.PI * 0.82, pitch: 0.16, dist: 54, lookY: 10, dragging: false, spin: true, goal: null };
     this.garagePose = 'idle'; // idle | saber | boost (preview only)
+    this._pops = [];          // parts just bolted on in the garage, growing into place: { node, t }
     this.time = 0;
     this.acc = 0;
     this.timeScale = 1;
@@ -470,12 +481,32 @@ export class Game {
     c.spin = id === 'all';
   }
 
+  /** A part was bolted on in the garage: sparks, a flash and a clank at its socket. */
+  garageWeld(hardpoint) {
+    const p = this.player.mech.model.anchorWorld(hardpoint, new THREE.Vector3());
+    this.fx.sparks(p, null, 22, [1, 0.85, 0.5]);
+    this.fx.glow.spawn(p.x, p.y, p.z, 0, 0, 0, 0.18, 7, 2, [1, 1, 1], [1, 0.8, 0.4], 0.9);
+    this.audio.weld();
+    const node = this.player.mech.model.partNode(hardpoint);
+    if (node) {
+      node.scale.setScalar(0.05);
+      this._pops.push({ node, t: 0 });
+    }
+  }
+
   /** Idle flyaround on the title; a draggable turntable with preview poses in the garage. */
   _updateShowroom(dt) {
     const mech = this.player.mech;
     const c = mech.pos;
     const cam = this.camera;
     const garage = this.inGarage;
+    for (let i = this._pops.length - 1; i >= 0; i--) { // a part just welded on grows into place, overshooting a little
+      const p = this._pops[i];
+      p.t = Math.min(1, p.t + dt / 0.32);
+      const x = p.t - 1;
+      p.node.scale.setScalar(p.t >= 1 ? 1 : Math.max(0.05, 1 + 2.7 * x * x * x + 1.7 * x * x));
+      if (p.t >= 1) this._pops.splice(i, 1);
+    }
     const fov = garage ? 42 : 66;
     if (Math.abs(cam.fov - fov) > 0.01) {
       cam.fov = fov;

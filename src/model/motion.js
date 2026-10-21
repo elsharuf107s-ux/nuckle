@@ -18,7 +18,7 @@
 
 import * as THREE from 'three';
 import { clamp, damp, lerp } from '../util.js';
-import { HIP_Y, PIVOT, SHIN, SOLE, THIGH } from './skeleton.js';
+import { HIP_Y as STOCK_HIP_Y, PIVOT, SOLE } from './skeleton.js';
 
 const TAU = Math.PI * 2;
 const ease = (t) => t * t * (3 - 2 * t);
@@ -26,7 +26,6 @@ const easeOut = (t) => 1 - (1 - t) * (1 - t) * (1 - t);
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const unit = (t) => clamp(t, 0, 1);
 
-const UPPER = 3.8, FORE = 4.0;  // arm segments: shoulder to elbow, elbow to the grip (see buildArms)
 const SHOT_HOLD = 0.5;          // seconds the firing pose is held after a shot
 const DRAW_TIME = 0.26;         // reach back for the hilt, then out with the blade
 const SHEATH_TIME = 0.42;       // blade off, rack the hilt, take the gun back
@@ -94,7 +93,7 @@ const X_AXIS = new THREE.Vector3(1, 0, 0), DOWN = new THREE.Vector3(0, -1, 0);
  * Two-bone IK for an arm, in torso space: the shoulder rotation (written to `outQ`) and the elbow bend (returned)
  * that put the grip at `target`, with the elbow swung toward `pole`.
  */
-function solveArm(shoulder, target, pole, outQ) {
+function solveArm(UPPER, FORE, shoulder, target, pole, outQ) {
   _d.subVectors(target, shoulder);
   const d = clamp(_d.length(), Math.abs(UPPER - FORE) + 0.05, UPPER + FORE - 0.05);
   const bend = Math.acos(clamp((d * d - UPPER * UPPER - FORE * FORE) / (2 * UPPER * FORE), -1, 1));
@@ -117,8 +116,8 @@ function solveArm(shoulder, target, pole, outQ) {
  * Two-bone IK in a leg's plane: the thigh and knee angles that put the ankle at (fx ahead of the hip joint,
  * fy above it; negative is below). The knee bends backward, like a person's. Out of reach, the leg straightens.
  */
-const REACH = THIGH + SHIN - 0.05;
-function ik(fx, fy, out) {
+function ik(THIGH, SHIN, fx, fy, out) {
+  const REACH = THIGH + SHIN - 0.05;
   const d = clamp(Math.hypot(fx, fy), Math.abs(THIGH - SHIN) + 0.05, REACH);
   const toward = Math.atan2(fx, -fy); // the target's angle forward of straight down
   const hip = Math.acos(clamp((THIGH * THIGH + d * d - SHIN * SHIN) / (2 * THIGH * d), -1, 1));
@@ -128,9 +127,36 @@ function ik(fx, fy, out) {
   return out;
 }
 
+/**
+ * One foot's step cycle at phase `psi`: half planted, moving back under the body at the body's speed, half arcing
+ * forward with the knee lifted. Writes the foot's offset ahead (fx) and across (fz) and its lift and swing.
+ */
+function stepCycle(psi, stride, sideStride, clearance, g) {
+  if (psi >= Math.PI / 2 && psi < 1.5 * Math.PI) {
+    const u = (psi - Math.PI / 2) / Math.PI;
+    g.fx = (stride / 2) * (1 - 2 * u);
+    g.fz = (sideStride / 2) * (1 - 2 * u);
+    g.lift = 0;
+    g.swing = 0;
+  } else {
+    const w = ((psi - 1.5 * Math.PI + TAU) % TAU) / Math.PI;
+    g.fx = -(stride / 2) * Math.cos(Math.PI * w);
+    g.fz = -(sideStride / 2) * Math.cos(Math.PI * w);
+    g.swing = Math.sin(Math.PI * w);
+    g.lift = clearance * g.swing;
+  }
+}
+
 export function createMotion(rig) {
   const { spec, hips, torso, head, legs, armL, armR, saber, blade, rifle, flames, chargeGlow, chargeMat, eyeNode, L } = rig;
   const scale = spec.scale ?? 1;
+  const SK = rig.sk;                 // this mech's skeleton (see makeSkeleton): leg and arm lengths, the leg layout
+  const { thigh: THIGH, shin: SHIN, reach: REACH, hipY: HIP_Y } = SK;
+  const HK = HIP_Y / STOCK_HIP_Y;    // the whole-body poses below are written for the stock height
+  const kind = SK.kind === 'legs' ? (SK.layout === 'biped' ? 'biped' : 'multi') : SK.kind; // biped | multi | tread | hover
+  const drive = kind === 'tread' || kind === 'hover';
+  const STRIDE_K = SK.layout === 'hexa' ? 0.75 : 1;
+  const solve = (shoulder, target, pole, q) => solveArm(SK.upper, SK.fore, shoulder, target, pole, q);
   const meleeOnly = spec.weapon === 'saber' || spec.weapon === 'greatsword'; // the "gun" is the hilt itself
   const twoHanded = rig.foregrip !== null && rig.foregrip !== undefined;
   const PELVIS = PIVOT; // the hip joint's drop below the pelvis centre
@@ -140,6 +166,8 @@ export function createMotion(rig) {
   const glowColor = rig.k.glow.color.clone();
 
   const gait = [{ fx: 0, fz: 0, lift: 0, swing: 0 }, { fx: 0, fz: 0, lift: 0, swing: 0 }];
+  const gaitM = legs.map(() => ({ fx: 0, fz: 0, lift: 0, swing: 0 })); // a quad's or a spider's feet
+  const hull = sp();  // a tread's or a hover's suspension
   const st = {
     phase: 0, back: false, legYaw: 0, air: 0, skate: 0, idle: 1, fight: 0, lean: 0, roll: 0, crouch: 0, pace: 0,
     land: 0, kneel: 0, recoil: 0, shot: 0, aim: 0, brace: 0, boost: 0, saberExt: 0, flare: 0, takeoff: 0,
@@ -157,6 +185,12 @@ export function createMotion(rig) {
   const skirt = { FL: sp(), FR: sp(), FC: sp(), SL: sp(), SR: sp(), B: sp() };
   const pads = { L: { x: sp(), z: sp() }, R: { x: sp(), z: sp() } };
   const wings = rig.wings.map(() => sp());
+  // the extra parts: each extra arm has its own pose springs, side heads their own scan, the tail a chain of springs
+  const limbs = rig.limbs ?? [];
+  const limbS = limbs.map((L, i) => ({ x: L.row === 'upper' ? 2.55 : 0.55, y: 0, z: L.side * 0.22, el: L.row === 'upper' ? -1.25 : 0.55, rec: 0, hold: 0, ext: 0, ph: i * 1.7 + 0.6, glow: 0 }));
+  const sideHeads = rig.sideHeads ?? [];
+  const tailS = rig.tail ? rig.tail.segs.map(() => ({ x: sp(), y: sp() })) : [];
+  const swingPoseL = {}; // an extra arm's own copy of the swing pose (a few frames behind the right arm)
   const whips = rig.whips.map(() => ({ x: sp(), z: sp() }));
 
   // the arms ease toward their targets (Euler angles in the YXZ order the arm groups use)
@@ -296,7 +330,7 @@ export function createMotion(rig) {
     const along = (s.localFwd * cy - s.localRight * sy) / scale;   // speed the way the legs face
     const lateral = (s.localFwd * sy + s.localRight * cy) / scale; // and across them
     st.pace = damp(st.pace, Math.min(Math.abs(along), 70), 8, dt); // (a dash glides: the stride stops at a run)
-    const stride = Math.max(clamp(0.8 + st.pace * 0.15, 0.8, 8), turning * 1.6); // one step, foot to foot
+    const stride = Math.max(clamp(0.8 + st.pace * 0.15, 0.8, 8), turning * 1.6) * STRIDE_K; // one step, foot to foot (a spider takes shorter ones)
     const clearance = clamp(0.25 + st.pace * 0.03, 0.25, 1.5) + turning * 0.4;
     // what the legs' turn cannot absorb of a strafe is stepped sideways on the same cycle
     const sideStride = st.pace > 1 ? clamp((lateral / Math.max(st.pace, 1)) * stride, -3, 3) * walk : 0;
@@ -324,83 +358,91 @@ export function createMotion(rig) {
     const hipRoll = st.roll * 0.5;
     hips.rotation.set(hipPitch, st.legYaw, hipRoll);
 
-    // ---- where each ankle wants to be: fx ahead of the hip (along the legs' heading), lift above the ground
+    // ---- the legs and the pelvis height they give, by layout. A biped plants two feet; a quad or a spider plants
+    // one per leg on a trot or a tripod; treads and hover drive have no feet at all (the hull rides and tilts).
     const still = st.idle * (1 - turning);
-    for (let i = 0; i < 2; i++) {
-      const g = gait[i];
-      const lead = legs[i].side < 0; // the left foot leads in a stance and a skate
-      const psi = (((st.phase + (i ? Math.PI : 0)) % TAU) + TAU) % TAU;
-      if (psi >= Math.PI / 2 && psi < 1.5 * Math.PI) {
-        const u = (psi - Math.PI / 2) / Math.PI;          // planted: from heel strike to toe off
-        g.fx = (stride / 2) * (1 - 2 * u);
-        g.fz = (sideStride / 2) * (1 - 2 * u);
-        g.lift = 0;
-        g.swing = 0;
-      } else {
-        const w = ((psi - 1.5 * Math.PI + TAU) % TAU) / Math.PI; // swinging through
-        g.fx = -(stride / 2) * Math.cos(Math.PI * w);
-        g.fz = -(sideStride / 2) * Math.cos(Math.PI * w);
-        g.swing = Math.sin(Math.PI * w);
-        g.lift = clearance * g.swing;
-      }
-      // standing: weight a little on one leg; with the saber out a fighting stance; braced to fire, a wider one
-      const standX = lerp(lerp(lead ? 0.9 : -0.3, lead ? 2.4 : -2.0, st.fight), lead ? 2.2 : -1.8, Math.max(st.aim * 0.6, st.brace));
-      g.fx = lerp(g.fx, standX, still);
-      g.lift *= 1 - still;
-      g.fx = lerp(g.fx, lead ? 2.2 : -2.6, st.skate);
-      g.lift *= 1 - st.skate;
-      g.fz *= (1 - still) * (1 - st.skate);
-      // a skid plants the lead foot well forward; a hard landing drops the trailing knee, up on the toes
-      g.fx = lerp(g.fx, lead ? 3.2 : -1.6, st.skid);
-      g.fx = lerp(g.fx, lead ? 2.6 : -3.3, kneel);
-      g.lift = lerp(g.lift, lead ? 0 : 2.5, kneel);
-    }
-
-    // ---- the pelvis: as high as the stance allows, lower in a crouch, and never higher than the planted legs reach
-    let hipH = HIP_Y - 0.3 - st.crouch * 2.6 - kneel * 2.6;
-    const legDrop = HIP_Y - PELVIS - SOLE; // hip joint to ankle, standing
-    const splays = [0, 1].map((i) => legs[i].side * (0.04 + 0.04 * st.idle + 0.07 * st.skate + 0.05 * st.air + 0.08 * st.skid) + Math.atan2(gait[i].fz, legDrop));
-    for (let i = 0; i < 2; i++) {
-      const g = gait[i];
-      if (g.lift > 0.02) continue;
-      const pivotDrop = PELVIS * Math.cos(hipRoll) - legs[i].side * L.x * Math.sin(hipRoll);
-      const reachY = Math.sqrt(Math.max(0, REACH * REACH - g.fx * g.fx)) * Math.cos(splays[i]) * Math.cos(hipRoll);
-      hipH = Math.min(hipH, reachY + pivotDrop + SOLE);
-    }
-
-    // ---- legs: solve for the ankle targets, blend into the air poses, keep the feet flat on the ground
-    const falling = clamp(-vy / 60, 0, 1);
-    const airTrail = clamp(fwdAir / 150, 0, 0.45);
-    const solved = [0, 0];
+    let hipH = HIP_Y, hipY = HIP_Y;
     const legOut = [];
-    for (let i = 0; i < 2; i++) {
-      const { side } = legs[i];
-      const g = gait[i];
-      const lead = side < 0;
-      const splay = splays[i];
-      const pivotY = hipH - PELVIS * Math.cos(hipRoll) + side * L.x * Math.sin(hipRoll); // the hip joint's height
-      const fy = (SOLE + g.lift - pivotY) / (Math.cos(splay) * Math.cos(hipRoll));
-      ik(g.fx, fy, solved);
-      let th = solved[0], kn = solved[1];
-      let ft = g.swing * 0.12 * walk * (1 - still); // toes come up a little through the swing
-      if (!lead) ft = lerp(ft, -0.9, kneel);         // the kneeling leg is up on its toes
-      // airborne: one knee up and the other leg trailing while rising, both reaching for the ground when falling;
-      // just after a push-off both legs stretch down, toes pointed; in flight they trail in line with the body
-      let airTh = lerp(lead ? 0.45 : -0.14, lead ? 0.22 : 0.04, falling) - airTrail;
-      let airKn = lerp(lead ? -1.15 : -0.38, lead ? -0.6 : -0.3, falling);
-      let airFt = lerp(-0.5, -0.05, falling);
-      airTh = lerp(airTh, lead ? 0.08 : -0.05, st.takeoff);
-      airKn = lerp(airKn, lead ? -0.2 : -0.12, st.takeoff);
-      airFt = lerp(airFt, -0.75, st.takeoff);
-      airTh = lerp(airTh, hipPitch * 0.85 + (lead ? 0.12 : -0.08), st.flight);
-      airKn = lerp(airKn, lead ? -0.55 : -0.3, st.flight);
-      airFt = lerp(airFt, -0.6, st.flight);
-      th = lerp(th, airTh + st.crouch * 0.3, st.air);
-      kn = lerp(kn, airKn - st.crouch * 0.6, st.air);
-      ft = lerp(ft, airFt, st.air);
-      legOut.push({ th: th - hipPitch, kn, ft: ft - th - kn, splay }); // th is relative to the ground: undo the pelvis tilt
+    if (kind === 'biped') {
+      for (let i = 0; i < 2; i++) {
+        const g = gait[i];
+        const lead = legs[i].side < 0; // the left foot leads in a stance and a skate
+        const psi = (((st.phase + (i ? Math.PI : 0)) % TAU) + TAU) % TAU;
+        if (psi >= Math.PI / 2 && psi < 1.5 * Math.PI) {
+          const u = (psi - Math.PI / 2) / Math.PI;          // planted: from heel strike to toe off
+          g.fx = (stride / 2) * (1 - 2 * u);
+          g.fz = (sideStride / 2) * (1 - 2 * u);
+          g.lift = 0;
+          g.swing = 0;
+        } else {
+          const w = ((psi - 1.5 * Math.PI + TAU) % TAU) / Math.PI; // swinging through
+          g.fx = -(stride / 2) * Math.cos(Math.PI * w);
+          g.fz = -(sideStride / 2) * Math.cos(Math.PI * w);
+          g.swing = Math.sin(Math.PI * w);
+          g.lift = clearance * g.swing;
+        }
+        // standing: weight a little on one leg; with the saber out a fighting stance; braced to fire, a wider one
+        const standX = lerp(lerp(lead ? 0.9 : -0.3, lead ? 2.4 : -2.0, st.fight), lead ? 2.2 : -1.8, Math.max(st.aim * 0.6, st.brace));
+        g.fx = lerp(g.fx, standX, still);
+        g.lift *= 1 - still;
+        g.fx = lerp(g.fx, lead ? 2.2 : -2.6, st.skate);
+        g.lift *= 1 - st.skate;
+        g.fz *= (1 - still) * (1 - st.skate);
+        // a skid plants the lead foot well forward; a hard landing drops the trailing knee, up on the toes
+        g.fx = lerp(g.fx, lead ? 3.2 : -1.6, st.skid);
+        g.fx = lerp(g.fx, lead ? 2.6 : -3.3, kneel);
+        g.lift = lerp(g.lift, lead ? 0 : 2.5, kneel);
+      }
+
+      // ---- the pelvis: as high as the stance allows, lower in a crouch, and never higher than the planted legs reach
+      hipH = HIP_Y - 0.3 - st.crouch * 2.6 - kneel * 2.6;
+      const legDrop = HIP_Y - PELVIS - SOLE; // hip joint to ankle, standing
+      const splays = [0, 1].map((i) => legs[i].side * (0.04 + 0.04 * st.idle + 0.07 * st.skate + 0.05 * st.air + 0.08 * st.skid) + Math.atan2(gait[i].fz, legDrop));
+      for (let i = 0; i < 2; i++) {
+        const g = gait[i];
+        if (g.lift > 0.02) continue;
+        const pivotDrop = PELVIS * Math.cos(hipRoll) - legs[i].side * L.x * Math.sin(hipRoll);
+        const reachY = Math.sqrt(Math.max(0, REACH * REACH - g.fx * g.fx)) * Math.cos(splays[i]) * Math.cos(hipRoll);
+        hipH = Math.min(hipH, reachY + pivotDrop + SOLE);
+      }
+
+      // ---- legs: solve for the ankle targets, blend into the air poses, keep the feet flat on the ground
+      const falling = clamp(-vy / 60, 0, 1);
+      const airTrail = clamp(fwdAir / 150, 0, 0.45);
+      const solved = [0, 0];
+      for (let i = 0; i < 2; i++) {
+        const { side } = legs[i];
+        const g = gait[i];
+        const lead = side < 0;
+        const splay = splays[i];
+        const pivotY = hipH - PELVIS * Math.cos(hipRoll) + side * L.x * Math.sin(hipRoll); // the hip joint's height
+        const fy = (SOLE + g.lift - pivotY) / (Math.cos(splay) * Math.cos(hipRoll));
+        ik(THIGH, SHIN, g.fx, fy, solved);
+        let th = solved[0], kn = solved[1];
+        let ft = g.swing * 0.12 * walk * (1 - still); // toes come up a little through the swing
+        if (!lead) ft = lerp(ft, -0.9, kneel);         // the kneeling leg is up on its toes
+        // airborne: one knee up and the other leg trailing while rising, both reaching for the ground when falling;
+        // just after a push-off both legs stretch down, toes pointed; in flight they trail in line with the body
+        let airTh = lerp(lead ? 0.45 : -0.14, lead ? 0.22 : 0.04, falling) - airTrail;
+        let airKn = lerp(lead ? -1.15 : -0.38, lead ? -0.6 : -0.3, falling);
+        let airFt = lerp(-0.5, -0.05, falling);
+        airTh = lerp(airTh, lead ? 0.08 : -0.05, st.takeoff);
+        airKn = lerp(airKn, lead ? -0.2 : -0.12, st.takeoff);
+        airFt = lerp(airFt, -0.75, st.takeoff);
+        airTh = lerp(airTh, hipPitch * 0.85 + (lead ? 0.12 : -0.08), st.flight);
+        airKn = lerp(airKn, lead ? -0.55 : -0.3, st.flight);
+        airFt = lerp(airFt, -0.6, st.flight);
+        th = lerp(th, airTh + st.crouch * 0.3, st.air);
+        kn = lerp(kn, airKn - st.crouch * 0.6, st.air);
+        ft = lerp(ft, airFt, st.air);
+        legOut.push({ th: th - hipPitch, kn, ft: ft - th - kn, splay }); // th is relative to the ground: undo the pelvis tilt
+      }
+      hipY = lerp(hipH, HIP_Y - 0.4, st.air);
+    } else if (kind === 'multi') {
+      ({ hipH, hipY } = multiLegs(dt, { stride, sideStride, clearance, still, walk, kneel, hipPitch, hipRoll, vy, fwdAir }, legOut));
+    } else {
+      ({ hipH, hipY } = driveHull(dt, { along, turning, kneel, hipPitch, dY, vy, s }));
     }
-    let hipY = lerp(hipH, HIP_Y - 0.4, st.air);
 
     // ---- chest: counter the legs' turn so it keeps facing the aim, then lean, bank, breathe and swing
     const breathe = Math.sin(st.t * 1.7) * st.idle;
@@ -489,21 +531,28 @@ export function createMotion(rig) {
     if (down > 0.001) {
       ov = dying > 0 ? breakdownPose(dying) : knockPose(knock ?? { phase: 'rise', t: 1 });
       const w = down;
-      hipY = lerp(hipY, ov.hipY, w);
-      hips.rotation.x = lerp(hips.rotation.x, ov.hipX, w);
-      hips.rotation.z = lerp(hips.rotation.z, 0, w);
+      if (drive) { // a hull does not fold: it rocks back and settles, tipped a little to one side
+        hipY = lerp(hipY, hipH * (0.72 + 0.28 * (ov.hipY / STOCK_HIP_Y)), w);
+        hips.rotation.x = lerp(hips.rotation.x, ov.hipX * 0.42, w);
+        hips.rotation.z = lerp(hips.rotation.z, ov.twist * 1.6, w);
+      } else {
+        hipY = lerp(hipY, ov.hipY * HK, w);
+        hips.rotation.x = lerp(hips.rotation.x, ov.hipX, w);
+        hips.rotation.z = lerp(hips.rotation.z, 0, w);
+      }
       torso.rotation.x = lerp(torso.rotation.x, ov.chestX, w);
       torso.rotation.y = lerp(torso.rotation.y, ov.twist, w);
-      for (let i = 0; i < 2; i++) {
-        const o = legOut[i], t = ov.legs[i];
-        o.th = lerp(o.th, t.th, w); o.kn = lerp(o.kn, t.kn, w); o.ft = lerp(o.ft, t.ft, w); o.splay = lerp(o.splay, legs[i].side * 0.08, w);
+      for (let i = 0; i < legOut.length; i++) {
+        const o = legOut[i], t = ov.legs[legs[i].side < 0 ? 0 : 1];
+        o.th = lerp(o.th, t.th, w); o.kn = lerp(o.kn, t.kn, w); o.ft = lerp(o.ft, t.ft, w);
+        if (!o.yawed) o.splay = lerp(o.splay, legs[i].side * 0.08, w);
       }
       for (const k of ['x', 'y', 'z', 'el']) { aR[k] = lerp(aR[k], ov.armR[k], w); aL[k] = lerp(aL[k], ov.armL[k], w); }
       aR.wr = lerp(aR.wr, 0, w);
       rateR = Math.max(rateR, 26);
     }
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < legOut.length; i++) {
       const { leg, shin, foot } = legs[i];
       const o = legOut[i];
       leg.rotation.x = o.th;
@@ -511,6 +560,11 @@ export function createMotion(rig) {
       foot.rotation.x = o.ft;
       leg.rotation.z = o.splay;
       foot.rotation.z = -o.splay - hips.rotation.z;
+      if (o.yawed) { // a leg that points at its foot, with the foot turned back to face the front
+        leg.rotation.y = o.yaw;
+        foot.rotation.y = -o.yaw;
+        foot.rotation.z = 0;
+      }
     }
     hips.position.y = hipY;
 
@@ -534,7 +588,7 @@ export function createMotion(rig) {
       vT.set(dp.x, dp.y + 0.4, dp.z - 0.2);
       vS.copy(armR.arm.position);
       vPole.set(0.9, 0.5, -0.6);
-      const bend = solveArm(vS, vT, vPole, ikQ);
+      const bend = solve(vS, vT, vPole, ikQ);
       armR.arm.quaternion.slerp(ikQ, reach);
       armR.elbow.rotation.x = lerp(armR.elbow.rotation.x, bend, reach);
     }
@@ -552,7 +606,7 @@ export function createMotion(rig) {
       // the right hand onto the grip
       vS.copy(armR.arm.position);
       vPole.set(0.8, -1, 0.35);
-      let bend = solveArm(vS, gunAt, vPole, ikQ);
+      let bend = solve(vS, gunAt, vPole, ikQ);
       armR.arm.quaternion.slerp(ikQ, st.grip);
       armR.elbow.rotation.x = lerp(armR.elbow.rotation.x, bend, st.grip);
       // turn the gun in the hand so it points along gunDir, whatever the arm is doing
@@ -563,7 +617,7 @@ export function createMotion(rig) {
       vT.copy(gunAt).addScaledVector(gunDir, -rig.foregrip);
       vS.copy(armL.arm.position);
       vPole.set(-0.7, -1, 0.35);
-      bend = solveArm(vS, vT, vPole, ikQ);
+      bend = solve(vS, vT, vPole, ikQ);
       armL.arm.quaternion.slerp(ikQ, st.grip);
       armL.elbow.rotation.x = lerp(armL.elbow.rotation.x, bend, st.grip);
     } else if (twoHanded) rifle.quaternion.identity();
@@ -585,6 +639,9 @@ export function createMotion(rig) {
 
     // ---- secondary motion
     secondary(dt, dF, dR, dY);
+    if (limbs.length || sideHeads.length || tailS.length) {
+      updateExtras(dt, { s, aimUp, aimYaw, chestPitch, twist, swing, lunge, down, relaxed, kneel, flinch, still, walk, hh, hhy, dF, dR, dY, ov });
+    }
 
     // ---- thrusters: steady under boost, flaring on a push-off, a step, a lunge or a get-up
     st.boost = damp(st.boost, s.boost, 14, dt);
@@ -592,7 +649,7 @@ export function createMotion(rig) {
     const flare = 1 + st.flare * 0.9;
     for (let i = 0; i < flames.length; i++) {
       const f = flames[i];
-      const isCalf = i < 2; // creation order: two calf thrusters, then the backpack (and any shoulder) nozzles
+      const isCalf = i < rig.calfFlames; // creation order: the calf thrusters, then the backpack (and any shoulder) nozzles
       let power = st.boost * (isCalf ? 0.8 : 1) * flare;
       if (dying > 0) power = Math.random() < 0.15 ? Math.random() * 0.6 : 0; // sputtering
       f.visible = power > 0.04;
@@ -621,6 +678,226 @@ export function createMotion(rig) {
     }
   }
 
+  // ------------------------------------------------------------------ the extra parts
+
+  /**
+   * Extra arms, side heads and the tail. An arm is posed by what its tool does: guns point along the aim and kick,
+   * blades swing with the saber, shields come up in guard, the repair arm holds its nozzle out. All of them tuck up
+   * in flight, hang limp when knocked down, and ease toward their targets so nothing pops.
+   */
+  function updateExtras(dt, c) {
+    const { s, aimUp, aimYaw, chestPitch, twist, swing, lunge, down, relaxed, kneel, flinch, still, walk, hh, hhy, ov } = c;
+    const sabering = st.fight > 0.5;
+    const kick = clamp(c.dF, -260, 260) * 0.012, side = clamp(c.dR, -260, 260) * 0.012, bump = Math.min(Math.abs(c.dY), 200) * 0.006;
+
+    limbs.forEach((L, i) => {
+      const S = limbS[i];
+      const up = L.row === 'upper', out = L.side;
+      S.rec = Math.max(0, S.rec - dt * 6);
+      S.hold = Math.max(0, S.hold - dt);
+      const sway = Math.sin(st.t * 1.3 + S.ph);
+      // at rest: a lower arm hangs forward a little, a back arm is raised over the shoulder with its forearm forward
+      let x = up ? 2.55 : 0.55, y = -out * 0.06, z = out * (up ? 0.3 : 0.22), el = up ? -1.25 : 0.55;
+      x += sway * 0.04;
+      let rate = 16;
+      // the arms swing against the stride a little
+      const leg = gait[out < 0 ? 0 : 1];
+      x += (up ? 0.1 : -0.35) * (leg.fx / 8) * (1 - st.air) * (1 - still) * walk;
+
+      if (L.kind === 'gun' || L.kind === 'cannon' || L.kind === 'launcher') {
+        // held at the ready; a shot snaps it onto the target and holds it there
+        const aim = canAimLimb(down, relaxed) ? (S.hold > 0 ? 1 : 0) : 0;
+        S.aimW = damp(S.aimW ?? 0, aim, aim ? 40 : 7, dt);
+        const elA = up ? -0.45 : 0.3;
+        x = lerp(x, Math.PI / 2 + aimUp - chestPitch - elA + S.rec * 0.3, S.aimW);
+        y = lerp(y, -twist + aimYaw * 0.9 - out * 0.04, S.aimW);
+        z = lerp(z, out * 0.05, S.aimW);
+        el = lerp(el, elA + S.rec * 0.25, S.aimW);
+        if (S.aimW > 0.05) rate = 44;
+        if (sabering || c.s.attack) { x = lerp(x, up ? 2.7 : 0.35, 0.6); el = lerp(el, up ? -1.0 : 0.5, 0.6); } // out of the way of the blade
+      } else if (L.kind === 'blade') {
+        S.ext = damp(S.ext, sabering || swing || lunge ? 1 : 0, 22, dt);
+        L.blade.scale.y = Math.max(0.001, S.ext);
+        if (S.ext > 0.05) { // blade out: held across the body in guard
+          x = lerp(x, up ? 2.0 : 0.95, S.ext); el = lerp(el, up ? -0.6 : 0.8, S.ext); y = lerp(y, -out * 0.3, S.ext);
+        }
+        if (swing) { // the same stroke as the main arm, a few frames behind, the left side mirrored
+          swingPose(swing.kind, clamp(swing.t - 0.05 - 0.02 * i, 0, 1), swingPoseL);
+          const m = out; // +1 right, -1 left (the left arm's stroke mirrors the right's)
+          x = lerp(x, swingPoseL.x * (up ? 0.95 : 0.8), 0.9);
+          y = lerp(y, swingPoseL.y * 0.75 * m, 0.9);
+          el = lerp(el, swingPoseL.el * 0.7, 0.9);
+          rate = 60;
+        } else if (lunge) { x = lerp(x, 0.2, 0.9); y = lerp(y, -out * 0.5, 0.9); el = lerp(el, 0.4, 0.9); rate = 30; }
+      } else if (L.kind === 'shield') {
+        // raised across the front in guard, harder when fighting
+        const g = 0.7 + 0.3 * st.fight;
+        x = lerp(x, up ? 2.3 : 1.1, g); el = lerp(el, up ? -0.35 : 0.95, g); y = lerp(y, -out * 0.4, g); z = lerp(z, out * 0.1, g);
+        x -= flinch * 0.25;
+      } else if (L.kind === 'repair') {
+        x = lerp(x, up ? 2.3 : 0.75, 0.8); el = lerp(el, up ? -0.7 : 0.7, 0.8); y = lerp(y, -out * 0.2, 0.8);
+        S.glow = damp(S.glow, 0.6 + 0.4 * Math.sin(st.t * 3 + S.ph), 10, dt);
+        L.glow.scale.setScalar(0.8 + 0.4 * S.glow);
+      }
+
+      // in the air the arms stream back (lower ones) or up (back ones); a skid or a landing drops the lower ones
+      const air = Math.max(st.air * 0.55, st.flight);
+      x = lerp(x, up ? 2.95 : -0.25, air); el = lerp(el, up ? -0.25 : 0.3, air); z = lerp(z, out * 0.45, air * 0.8);
+      x = lerp(x, up ? x : 0.25, Math.max(kneel, st.skid * 0.7)); z += st.land * out * 0.4;
+      x -= (flinch * 0.3 + s.stagger * 0.5) * (up ? -0.5 : 1);
+      if (ov) { // knocked down or breaking down: limp
+        const w = down;
+        x = lerp(x, up ? 2.1 : 0.3, w); el = lerp(el, up ? -0.1 : 0.2, w); z = lerp(z, out * 0.5, w); y = lerp(y, 0, w);
+      }
+      const k = 1 - Math.exp(-rate * dt);
+      S.x += (x - S.x) * k; S.y += (y - S.y) * k; S.z += (z - S.z) * k; S.el += (el - S.el) * k;
+      L.arm.rotation.set(S.x, S.y, S.z);
+      L.elbow.rotation.x = S.el;
+    });
+
+    // side heads look about on their own while at ease, and follow the aim in a fight
+    sideHeads.forEach((H, i) => {
+      const scan = relaxed ? Math.sin(st.t * 0.7 + i * 2.4) * 0.35 * st.idle : Math.sin(st.t * 1.1 + i * 2.4) * 0.08;
+      H.head.rotation.x = clamp(aimUp * 0.5, -0.3, 0.45) - torso.rotation.x * 0.6 + hh * 0.8 + s.stagger * 0.3 + (ov ? ov.headX * down : 0);
+      H.head.rotation.y = H.rest + scan + aimYaw * 0.4 * st.aim - twist * 0.5 + hhy * 0.8;
+    });
+
+    // the tail: each segment lags a little more than the one before it
+    if (tailS.length) {
+      const lash = rig.tail.id === 'lash';
+      const swingDir = swing ? (swing.kind === 'slash2' ? -1 : swing.kind === 'slash1' ? 1 : 0.4) : 0;
+      rig.tail.segs.forEach((g, i) => {
+        const T = tailS[i];
+        const stiff = (rig.tail.id === 'stabilizer' ? 260 : 150) / (1 + i * 0.45);
+        T.x.v += (-kick * 0.6 - bump * 0.8 + c.s.stagger * 0.2) / (1 + i * 0.3);
+        T.y.v += (side * 0.9 - (s.turnRate ?? 0) * 0.04) / (1 + i * 0.3);
+        if (lash && swing && swing.t > 0.28 && swing.t < 0.34) T.y.v += swingDir * 9 / (1 + i * 0.4); // the lash cracks with the stroke
+        const rest = -0.1 - st.flight * 0.06 - (i > 0 ? 0.03 * (1 - st.flight) : 0);
+        g.rotation.x = rest + spring(T.x, 0, stiff, 4.2, dt, 0.7) + (i === 0 ? hit.p.x * 0.3 : 0);
+        g.rotation.y = spring(T.y, 0, stiff, 4.2, dt, 0.8);
+      });
+    }
+  }
+  const canAimLimb = (down, relaxed) => down < 0.5 && !relaxed;
+
+  // ------------------------------------------------------------------ the other layouts
+
+  const solvedM = [0, 0];
+  /**
+   * A quad's or a spider's legs. Every foot has a home on the ground (SK.hips) and the gait is a trot (diagonal
+   * pairs) or a tripod. A leg points at its foot: a spider's, with the foot out to the side, is yawed to it, so
+   * its knee stands out and up. Fills `legOut` (one entry per leg) and returns the pelvis height.
+   */
+  function multiLegs(dt, c, legOut) {
+    const { stride, sideStride, clearance, still, walk, kneel, hipPitch, hipRoll, vy, fwdAir } = c;
+    const rows = SK.lay.rows.length;
+    const falling = clamp(-vy / 60, 0, 1);
+    const airTrail = clamp(fwdAir / 150, 0, 0.45);
+    const cr = Math.cos(hipRoll), sr = Math.sin(hipRoll), cp = Math.cos(hipPitch), spn = Math.sin(hipPitch);
+
+    for (let i = 0; i < legs.length; i++) {
+      const h = legs[i].hip, g = gaitM[i];
+      const lead = rows > 1 ? 1 - (2 * h.row) / (rows - 1) : 1; // +1 on the front row, -1 on the last
+      const parity = (h.row + (h.side > 0 ? 1 : 0)) % 2;
+      const psi = (((st.phase + parity * Math.PI) % TAU) + TAU) % TAU;
+      stepCycle(psi, stride, sideStride, clearance, g);
+      // standing, fighting (feet apart front to back), skating and skidding (the front feet lead, the back ones trail)
+      g.fx = lerp(g.fx, lead * (0.5 + 1.1 * st.fight + 0.9 * Math.max(st.aim * 0.6, st.brace)), still);
+      g.lift *= 1 - still;
+      g.fx = lerp(g.fx, lead * 2.4, st.skate);
+      g.lift *= 1 - st.skate;
+      g.fz *= (1 - still) * (1 - st.skate);
+      g.fx = lerp(g.fx, lead * 2.8, st.skid);
+      g.fx = lerp(g.fx, lead * 2.2, kneel);
+    }
+    gait[0].fx = gaitM[0].fx; // (the left arm swings against the first leg)
+
+    // the pelvis: as high as the stance allows, lower in a crouch, never higher than the planted legs reach
+    let hipH = HIP_Y - 0.3 - st.crouch * 2.2 - kneel * 2.2;
+    const aim = legs.map((l, i) => {
+      const h = l.hip, g = gaitM[i];
+      const dx = h.footX + g.fz - h.x, dz = h.footZ - g.fx - h.z;
+      const along = -dx * Math.sin(h.yaw) - dz * Math.cos(h.yaw);
+      const lat = dx * Math.cos(h.yaw) - dz * Math.sin(h.yaw);
+      const safe = Math.abs(along) < 1.5 ? (along < 0 ? -1.5 : 1.5) : along;
+      const fx = (along < 0 ? -1 : 1) * Math.hypot(along, lat);
+      // where the hip joint is, relative to the pelvis centre, once the pelvis is rolled and pitched
+      const off = (h.x * sr - PIVOT * cr) * cp - h.z * spn;
+      return { h, g, fx, yaw: h.yaw - Math.atan(lat / safe), off };
+    });
+    for (const a of aim) {
+      if (a.g.lift > 0.02) continue;
+      const reachY = Math.sqrt(Math.max(0, REACH * REACH - a.fx * a.fx)) * cp * cr;
+      hipH = Math.min(hipH, SOLE + reachY - a.off);
+    }
+
+    for (let i = 0; i < legs.length; i++) {
+      const { h, g, fx, yaw, off } = aim[i];
+      const fy = (SOLE + g.lift - (hipH + off)) / (cp * cr);
+      ik(THIGH, SHIN, fx, fy, solvedM);
+      let th = solvedM[0], kn = solvedM[1];
+      let ft = g.swing * 0.12 * walk * (1 - still);
+      const kneeUp = (h.row + (h.side > 0 ? 1 : 0)) % 2 === 0; // as a biped's lead leg: one knee up while rising
+      let airTh = lerp(kneeUp ? 0.45 : -0.14, kneeUp ? 0.22 : 0.04, falling) - airTrail;
+      let airKn = lerp(kneeUp ? -1.15 : -0.38, kneeUp ? -0.6 : -0.3, falling);
+      let airFt = lerp(-0.5, -0.05, falling);
+      airTh = lerp(airTh, kneeUp ? 0.08 : -0.05, st.takeoff);
+      airKn = lerp(airKn, kneeUp ? -0.2 : -0.12, st.takeoff);
+      airFt = lerp(airFt, -0.75, st.takeoff);
+      airTh = lerp(airTh, hipPitch * 0.85 + (kneeUp ? 0.12 : -0.08), st.flight);
+      airKn = lerp(airKn, kneeUp ? -0.55 : -0.3, st.flight);
+      airFt = lerp(airFt, -0.6, st.flight);
+      th = lerp(th, airTh + st.crouch * 0.3, st.air);
+      kn = lerp(kn, airKn - st.crouch * 0.6, st.air);
+      ft = lerp(ft, airFt, st.air);
+      legOut.push({ th: th - hipPitch * Math.cos(h.yaw), kn, ft: ft - th - kn, splay: 0, yaw: lerp(yaw, h.yaw, st.air), yawed: true });
+    }
+    return { hipH, hipY: lerp(hipH, HIP_Y - 0.4, st.air) };
+  }
+
+  /**
+   * Treads and hover drive: no feet. The hull rides on a spring, tilts into travel (hover banks harder), and the
+   * belts roll with the ground (opposite ways when turning on the spot); hover pods flare under thrust.
+   */
+  function driveHull(dt, c) {
+    const { along, kneel, dY, s } = c;
+    const tread = kind === 'tread';
+    // a landing or a bump pushes the hull down; it rebounds on a spring
+    hull.v -= clamp(dY, -300, 300) * 0.012;
+    const bounce = spring(hull, 0, 240, 9, dt, 0.9);
+    const bob = tread ? 0 : Math.sin(st.t * 2.1) * 0.3 * (1 - st.air * 0.6) + Math.sin(st.t * 3.7 + 1) * 0.1;
+    // tracks stay on the ground (the hull only tilts and rocks); hover sinks a little in a crouch and bobs
+    const hipH = tread ? HIP_Y + Math.max(0, bounce) * 0.4 : HIP_Y - 0.3 - st.crouch * 1.4 - kneel * 1.5 + bounce * 0.5 + bob;
+    const hipY = lerp(hipH, HIP_Y + (tread ? 0.2 : 0.8), st.air);
+
+    if (tread) {
+      const grounded = s.grounded;
+      const vis = clamp(along, -95, 95) * (grounded ? 1 : 0.15);
+      const turnV = clamp((s.turnRate ?? 0) * SK.lay.trackX, -40, 40) * (grounded && st.pace < 6 ? 1 : 0.35);
+      for (const t of rig.treads) {
+        const d = (vis + turnV * t.side) * dt;
+        t.tex.offset.x -= (d * t.repeats) / t.per;
+        for (const w of t.wheels) w.g.rotation.x -= d / w.r;
+      }
+    } else {
+      const lift = 0.65 + st.boost * 0.5 + st.air * 0.25 + st.flare * 0.4;
+      rig.pods.forEach((p, i) => {
+        const f = 0.9 + 0.1 * Math.sin(st.flameTime * 0.6 + i * 1.7);
+        p.jet.scale.set(0.6 + lift * 0.25, Math.max(0.2, 0.7 + lift * 0.45) * f, 0.6 + lift * 0.25);
+        p.jetMat.opacity = Math.min(0.55, 0.1 + lift * 0.2) * f;
+        p.g.rotation.x = -c.hipPitch * 0.7;
+        p.g.rotation.z = -hips.rotation.z * 0.7;
+      });
+      if (rig.groundRing) {
+        const k = 1 - st.air;
+        rig.groundRing.material.opacity = 0.22 * k * (0.8 + 0.2 * Math.sin(st.flameTime * 0.3));
+        rig.groundRing.visible = k > 0.05;
+        rig.groundRing.scale.setScalar(1 + 0.04 * Math.sin(st.flameTime * 0.25));
+      }
+    }
+    return { hipH, hipY };
+  }
+
   // ------------------------------------------------------------------ whole-body poses
 
   const KO = { hipY: 0, hipX: 0, chestX: 0, twist: 0, headX: 0, headY: 0, legs: [{ th: 0, kn: 0, ft: 0 }, { th: 0, kn: 0, ft: 0 }],
@@ -636,7 +913,7 @@ export function createMotion(rig) {
     const o = KO;
     if (k.phase === 'fall') {
       const e = ease(unit(k.t / 0.32));
-      o.hipX = 1.15 * e; o.hipY = HIP_Y - 0.4 - 2.6 * e; o.chestX = 0.25 * e; o.twist = 0.15 * e;
+      o.hipX = 1.15 * e; o.hipY = STOCK_HIP_Y - 0.4 - 2.6 * e; o.chestX = 0.25 * e; o.twist = 0.15 * e;
       o.headX = 0.45 * e; o.headY = 0;
       setLegs(o, 0.3 + 0.5 * e, -0.3 - 0.5 * e, 0.2, 0.15 + 0.3 * e, -0.2 - 0.3 * e, 0.2);
       setArm(o.armR, 1.3 + 0.7 * e, 0.15, -0.5 * e, 0.5);
@@ -662,7 +939,7 @@ export function createMotion(rig) {
   function breakdownPose(d) {
     const o = KO;
     const sink = ease(unit((d - 0.15) / 0.6));
-    o.hipX = -0.12 - 0.3 * sink; o.hipY = HIP_Y - 0.6 - 4.3 * sink; o.chestX = -0.1 - 0.35 * sink; o.twist = 0.25 * sink;
+    o.hipX = -0.12 - 0.3 * sink; o.hipY = STOCK_HIP_Y - 0.6 - 4.3 * sink; o.chestX = -0.1 - 0.35 * sink; o.twist = 0.25 * sink;
     o.headX = -0.55 * sink; o.headY = 0.3 * sink;
     setLegs(o, 0.15 + 0.5 * sink, -0.25 - 1.45 * sink, 0.1 + 0.5 * sink, 0.12 + 0.42 * sink, -0.2 - 1.5 * sink, 0.1 + 0.5 * sink);
     setArm(o.armR, 0.35 - 0.2 * sink, 0.05, -0.12, 0.45 - 0.25 * sink);
@@ -677,7 +954,7 @@ export function createMotion(rig) {
 
     // skirt plates: each is pushed out by the thigh behind it, and swings on its hinge
     const sk = rig.skirt;
-    if (sk) {
+    if (sk && kind === 'biped') {
       const thL = legs[0].leg.rotation.x, thR = legs[1].leg.rotation.x;
       const outF = (th) => Math.max(0, th - 0.12) * 0.95;
       const outB = (th) => Math.max(0, -th - 0.1) * 0.9;
@@ -773,5 +1050,14 @@ export function createMotion(rig) {
     st.flare = Math.max(st.flare, k);
   }
 
-  return { update, land, recoil, setSaber, hit: onHit, flare: flareThrusters, state: st };
+  /** An extra arm fired (`i` is its index in rig.limbs): it snaps onto the target, kicks, and holds the pose. */
+  function fireLimb(i, k = 0.4) {
+    const S = limbS[i];
+    if (!S) return;
+    S.rec = Math.min(1, Math.max(S.rec, k));
+    S.hold = SHOT_HOLD;
+    hit.p.v += k * 0.4;
+  }
+
+  return { update, land, recoil, setSaber, hit: onHit, flare: flareThrusters, fireLimb, state: st };
 }

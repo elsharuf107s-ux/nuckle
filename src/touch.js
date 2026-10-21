@@ -29,6 +29,7 @@ const BUTTONS = [
   ['cannon', 'CANNON', 'KeyF', 'cluster'],
   ['cannon2', 'MOUNT', 'KeyG', 'cluster'],
   ['sub', 'SUB', 'KeyV', 'cluster'],
+  ['arms', 'ARMS', 'KeyH', 'cluster'], // the arm guns of a saber build (on a gun build FIRE fires them too)
   ['lock', 'LOCK', 'KeyQ', 'util'],
   ['switch', 'SWITCH', 'Tab', 'util'],
   ['reload', 'RELOAD', 'KeyR', 'util'],
@@ -304,7 +305,7 @@ export class TouchControls {
     if (!show) return;
 
     const p = g.player;
-    const shape = `${p.meleeOnly}|${p.mounts.map((m) => m.def.kind).join(',')}|${p.sub?.kind ?? ''}`;
+    const shape = `${p.meleeOnly}|${p.mounts.map((m) => m.def.kind).join(',')}|${p.sub?.kind ?? ''}|${p.limbGuns.length}`;
     if (shape !== this._shape) {
       this._shape = shape;
       this._hide('saber', p.meleeOnly);
@@ -312,6 +313,7 @@ export class TouchControls {
       this._hide('cannon', !p.mounts[0]);
       this._hide('cannon2', !p.mounts[1]);
       this._hide('sub', !p.sub);
+      this._hide('arms', !(p.meleeOnly && p.limbGuns.length));
       this._text('fire', 'label', p.meleeOnly ? 'SABER' : 'FIRE');
       this._text('sub', 'label', SUB_LABEL[p.sub?.kind] ?? 'SUB');
       this._text('cannon', 'label', MOUNT_LABEL[p.mounts[0]?.def.kind] ?? 'CANNON');

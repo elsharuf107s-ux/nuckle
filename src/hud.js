@@ -22,6 +22,7 @@ export class Hud {
       ammo: $('ammo-pips'), ammoCount: $('ammo-count'), missiles: $('missile-pips'), reload: $('reload-note'),
       weaponName: $('weapon-name'), weaponKey: $('weapon-key'), gunRow: $('gun-row'), saberRow: $('saber-row'),
       cannonRow: $('cannon-row'), cannonFill: $('cannon-fill'), cannon2Row: $('cannon2-row'), cannon2Fill: $('cannon2-fill'), cannon2Name: $('cannon2-name'), mechName: $('mech-name'), buildFlags: $('build-flags'),
+      armsRow: $('arms-row'), armsName: $('arms-name'), armsKey: $('arms-key'), armsFill: $('arms-fill'),
       subRow: $('sub-row'), subName: $('sub-name'), subFill: $('sub-fill'), subState: $('sub-state'), subBar: $('sub-fill').parentElement,
       boss: $('boss-bar'), bossFill: $('boss-fill'), bossName: $('boss-name'),
       banner: $('banner'), aMissile: $('alert-missile'), aArea: $('alert-area'), aArmor: $('alert-armor'),
@@ -71,6 +72,9 @@ export class Hud {
     e.barrierRow.classList.toggle('on', p.stats.barrier > 0);
     e.subRow.style.display = p.sub ? '' : 'none';
     if (p.sub) e.subName.textContent = p.sub.name;
+    e.armsRow.style.display = p.limbGuns.length ? '' : 'none';
+    e.armsName.textContent = p.limbGuns.length > 1 ? `ARM GUNS ×${p.limbGuns.length}` : 'ARM GUN';
+    e.armsKey.textContent = saberOnly ? 'H' : 'LMB';
 
     // budget warnings: the build's load limit and power supply are fixed for the sortie
     const warn = [];
@@ -186,6 +190,7 @@ export class Hud {
     const [m0, m1] = player.mounts;
     if (m0) e.cannonFill.style.width = `${(1 - m0.cd / m0.def.cooldown) * 100}%`;
     if (m1) e.cannon2Fill.style.width = `${(1 - m1.cd / m1.def.cooldown) * 100}%`;
+    if (player.limbGuns.length) e.armsFill.style.width = `${(player.limbGuns.reduce((n, l) => n + 1 - l.cd / l.def.interval, 0) / player.limbGuns.length) * 100}%`;
     if (player.sub) this._updateSubRow(player);
     e.reload.classList.toggle('on', player.reloadT > 0);
     if (player.reloadT > 0) e.reload.textContent = `RELOADING ${Math.round((1 - player.reloadT / player.reloadDur) * 100)}%`;
@@ -363,6 +368,8 @@ export class Hud {
 
       if (m === lock && onScreen) {
         this._reticle(ctx, s, m);
+      } else if (onScreen && g.player.extraLocks.includes(m)) {
+        this._subReticle(ctx, s, m, g.player.extraLocks.indexOf(m) + 2);
       } else if (onScreen) {
         const hpK = m.hp / m.maxHp;
         ctx.strokeStyle = boss ? 'rgba(255,66,96,0.9)' : 'rgba(255,110,90,0.75)';
@@ -395,6 +402,29 @@ export class Hud {
         ctx.restore();
       }
     }
+  }
+
+  /** The brackets for a secondary lock (a many-headed machine holds several): a smaller green frame and its number. */
+  _subReticle(ctx, s, m, n) {
+    const size = clamp((m.height * 1100) / Math.max(s.dist, 60) / 3.4, 18, 70);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.strokeStyle = GREEN;
+    ctx.fillStyle = GREEN;
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 1.5;
+    const L = size * 0.35;
+    ctx.beginPath();
+    for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      ctx.moveTo(sx * size, sy * (size - L));
+      ctx.lineTo(sx * size, sy * size);
+      ctx.lineTo(sx * (size - L), sy * size);
+    }
+    ctx.stroke();
+    ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`LOCK ${n}`, 0, -size - 6);
+    ctx.restore();
   }
 
   _reticle(ctx, s, m) {

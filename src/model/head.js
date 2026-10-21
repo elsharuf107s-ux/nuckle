@@ -208,7 +208,7 @@ export const CREST = {
 export function buildHead(rig) {
   const { k, torso, spec } = rig;
   const head = k.group(torso, 0, NECK_Y, 0);
-  head.scale.setScalar(1.16); // a slightly large head keeps the narrow frame from looking small-headed
+  head.scale.setScalar(1.16 * (rig.spec.prop?.head ?? 1)); // a slightly large head keeps the narrow frame from looking small-headed
   rig.head = head;
   rig.eyeNode = null;
   const def = HEADS[spec.head] ?? HEADS.v;

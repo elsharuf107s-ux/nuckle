@@ -156,17 +156,28 @@ try {
     && !overlap(gar.go, gar.reset) && !overlap(gar.random, gar.reset) && !overlap(gar.back, gar.random));
   check('garage: the STATS toggle is not needed at this width', !gar.toggle.shown);
   const tabScroll = await G(() => { const t = document.getElementById('g-tabs'); return { scrolls: t.scrollWidth > t.clientWidth, h: t.getBoundingClientRect().height }; });
-  check('garage: the 13 tabs form one scrollable row', tabScroll.scrolls && tabScroll.h < 60, JSON.stringify(tabScroll));
+  check('garage: the 15 tabs form one scrollable row', tabScroll.scrolls && tabScroll.h < 60, JSON.stringify(tabScroll));
   await shot('02-garage');
 
   // the Crossout-style hardpoints on a phone: tappable markers pinned to the mech, a hangar bar, a two-column parts grid
   const gm = await G(() => {
     window.__game.render();
-    const ms = [...document.querySelectorAll('.g-marker')].map((m) => { const r = m.querySelector('i').getBoundingClientRect(); return { id: m.dataset.hp, w: r.width, h: r.height, x: r.x + r.width / 2, y: r.y + r.height / 2, off: m.classList.contains('off') }; });
-    return { ms, cols: getComputedStyle(document.getElementById('g-options')).gridTemplateColumns.split(' ').length, desc: getComputedStyle(document.querySelector('.opt .o-desc')).display, detail: getComputedStyle(document.getElementById('g-detail')).display };
+    const measure = (m) => { const r = m.querySelector('i').getBoundingClientRect(); return { id: m.dataset.hp, w: r.width, h: r.height, x: r.x + r.width / 2, y: r.y + r.height / 2, off: m.classList.contains('off') }; };
+    const ms = [...document.querySelectorAll('.g-marker:not(.socket)')].map(measure);
+    const sockets = [...document.querySelectorAll('.g-marker.socket')].map(measure);
+    return { ms, sockets, cols: getComputedStyle(document.getElementById('g-options')).gridTemplateColumns.split(' ').length, desc: getComputedStyle(document.querySelector('.opt .o-desc')).display, detail: getComputedStyle(document.getElementById('g-detail')).display };
   });
+  check('garage: on a small screen the nine sockets stay hidden until the RIG tab is open (the mech is too small for twenty markers)', gm.sockets.length === 9 && gm.sockets.every((m) => m.w === 0), JSON.stringify(gm.sockets.map((m) => m.w)));
   check('garage: eleven hardpoint markers, each at least 28px, on screen', gm.ms.length === 11 && gm.ms.every((m) => !m.off && m.w >= 28 && m.h >= 28 && m.x > 0 && m.y > 0 && m.x < W && m.y < H), JSON.stringify(gm.ms.filter((m) => m.off || m.w < 28).map((m) => m.id)));
   check('garage: the parts grid is two columns with a compact detail strip instead of long descriptions', gm.cols === 2 && gm.desc === 'none' && gm.detail !== 'none', JSON.stringify([gm.cols, gm.desc, gm.detail]));
+  await tap('.g-tab[data-tab="rig"]');
+  const rigView = await G(() => {
+    window.__game.render();
+    const measure = (m) => { const r = m.querySelector('i').getBoundingClientRect(); return { id: m.dataset.hp, w: r.width, h: r.height, x: r.x + r.width / 2, y: r.y + r.height / 2, off: m.classList.contains('off') }; };
+    return { sockets: [...document.querySelectorAll('.g-marker.socket')].map(measure), body: [...document.querySelectorAll('.g-marker:not(.socket)')].filter((m) => m.getBoundingClientRect().width > 0).length };
+  });
+  check('garage: the RIG tab shows the nine sockets, each at least 28px, on screen, in place of the body markers', rigView.sockets.length === 9 && rigView.sockets.every((m) => !m.off && m.w >= 28 && m.h >= 28 && m.x > 0 && m.y > 0 && m.x < W && m.y < H) && rigView.body === 0, JSON.stringify([rigView.sockets.filter((m) => m.off || m.w < 28).map((m) => m.id), rigView.body]));
+  await tap('.g-tab[data-tab="paint"]'); // (the paint tab keeps the camera on the whole machine, so the markers stay where they were)
   const hg = await G(() => [...document.querySelectorAll('.hg-slot')].map((b) => { const r = b.getBoundingClientRect(); return { w: r.width, h: r.height }; }));
   check('garage: the hangar slots are tappable', hg.length === 6 && hg.every((b) => b.h >= 28 && b.w >= 26), JSON.stringify(hg[0]));
   const markerTarget = await G(() => { const m = [...document.querySelectorAll('.g-marker')].find((x) => x.dataset.hp === 'handR'); const r = m.querySelector('i').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
@@ -595,6 +606,12 @@ try {
     await field({ weapon: 'rifle', mountL: 'swarm', mountR: 'rail', sub: 'injector' }, 'swarmInject');
     await field({ weapon: 'rifle', offhand: 'shield', mountL: 'none', mountR: 'none', sub: 'pulse' }, 'pulse');
     await field({ weapon: 'rifle', offhand: 'shield', mountL: 'none', mountR: 'none', sub: 'none' }, 'stock');
+    await field({ weapon: 'greatsword', offhand: 'none', mountL: 'none', mountR: 'none', sub: 'none', armLowerL: 'gun' }, 'saberArms');
+    out.saberArms.arms = vis('arms');
+    await field({ weapon: 'rifle', offhand: 'shield', armLowerL: 'gun' }, 'gunArms');
+    out.gunArms.arms = vis('arms');
+    await field({ weapon: 'rifle', offhand: 'shield', armLowerL: 'none' }, 'stock2');
+    out.stock2.arms = vis('arms');
     g.cheat.invincible = true;
     return out;
   });
@@ -602,6 +619,7 @@ try {
   check('twin sabers turn FIRE into SABER and drop the reload and extra saber buttons', shapes.sabersFlare.fire === 'SABER' && !shapes.sabersFlare.saber && !shapes.sabersFlare.reload && shapes.sabersFlare.sub && shapes.sabersFlare.subLabel === 'FLARE', JSON.stringify(shapes.sabersFlare));
   check('two shoulder mounts get two buttons (F and G), each labelled for its weapon', shapes.swarmInject.cannon && shapes.swarmInject.cannon2 && shapes.swarmInject.cannon2Label === 'RAIL' && !shapes.cannonVulcan.cannon2 && !shapes.stock.cannon2, JSON.stringify([shapes.swarmInject.cannon2, shapes.swarmInject.cannon2Label, shapes.cannonVulcan.cannon2]));
   check('the micro-missile pod labels its button SWARM, and the EN injector gets an INJECT button', shapes.swarmInject.cannon && shapes.swarmInject.cannonLabel === 'SWARM' && shapes.swarmInject.sub && shapes.swarmInject.subLabel === 'INJECT' && shapes.pulse.subLabel === 'PULSE', JSON.stringify([shapes.swarmInject, shapes.pulse.subLabel]));
+  check('arm guns add an ARMS button only on a saber build (on a gun build FIRE fires them too)', shapes.saberArms.arms && !shapes.gunArms.arms && !shapes.stock2.arms, JSON.stringify([shapes.saberArms.arms, shapes.gunArms.arms, shapes.stock2.arms]));
   check('back to a stock loadout the extras disappear again', !shapes.stock.cannon && !shapes.stock.sub && shapes.stock.saber && shapes.stock.fire === 'FIRE');
   await G(() => { const p = window.__game.player; p.reset(0, 0); p.burst = 100; window.__game.step(3); });
   await page.waitForTimeout(150);

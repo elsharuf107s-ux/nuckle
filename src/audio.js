@@ -240,6 +240,15 @@ export class AudioEngine {
     [523, 659, 880].forEach((f, i) => this._tone({ type: 'triangle', f0: f, dur: 0.22, vol: 0.12, delay: i * 0.08 }));
   }
 
+  /** A part bolted on in the garage: a hiss of sparks and a metallic clank. */
+  weld() {
+    this._play(null, 0, (v) => {
+      this._noise({ type: 'highpass', f0: 5200, f1: 1600, dur: 0.22, vol: 0.2 * v });
+      this._tone({ type: 'square', f0: 200, f1: 100, dur: 0.09, vol: 0.12 * v });
+      this._tone({ type: 'triangle', f0: 880, f1: 1320, dur: 0.14, vol: 0.08 * v, delay: 0.05 });
+    });
+  }
+
   lockOn() {
     if (!this.ctx) return;
     this._tone({ type: 'sine', f0: 1200, dur: 0.07, vol: 0.12 });

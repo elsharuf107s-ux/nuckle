@@ -7,15 +7,17 @@
 import * as THREE from 'three';
 import { makeKit } from './model/kit.js';
 import { createMotion } from './model/motion.js';
-import { HIP_Y, MECH_HEIGHT } from './model/skeleton.js';
+import { HIP_Y, MECH_HEIGHT, makeSkeleton } from './model/skeleton.js';
 import { buildArms, buildLegs, buildPelvis, buildTorso } from './model/body.js';
 import { buildHead } from './model/head.js';
+import { buildLimbs, buildPods, buildSideHeads, buildTail, limbMount, podMount, sideHeadMount } from './model/extras.js';
 import { buildBackpack, buildMarks, buildOffhand, buildShoulders, buildSub, buildWeapon } from './model/gear.js';
 
 export { HIP_Y, MECH_HEIGHT };
 
 /** The names of the garage hardpoints a model can locate (see HARDPOINTS in parts.js). */
-export const ANCHORS = ['head', 'chest', 'arms', 'legs', 'shoulderL', 'shoulderR', 'back', 'waist', 'handR', 'handL', 'hips'];
+export const ANCHORS = ['head', 'chest', 'arms', 'legs', 'shoulderL', 'shoulderR', 'back', 'waist', 'handR', 'handL', 'hips',
+  'armLowerL', 'armLowerR', 'armUpperL', 'armUpperR', 'headL', 'headR', 'tail', 'podL', 'podR'];
 
 /** Accept the older spec shapes (one `shoulder`, a boolean `shield`) alongside the current ones. */
 function normalise(spec) {
@@ -34,8 +36,9 @@ export function buildMech(rawSpec) {
   const { P, flashMats, group, node } = k;
   const bulk = spec.bulk ?? 1;
 
+  const sk = makeSkeleton(spec); // this mech's own proportions: leg and arm lengths, leg layout
   const root = new THREE.Group();
-  const hips = group(root, 0, HIP_Y, 0);
+  const hips = group(root, 0, sk.hipY, 0);
   const flames = [];
   const makeFlame = (parent, x, y, z, rx, radius, length) => {
     const g = group(parent, x, y, z);
@@ -60,7 +63,7 @@ export function buildMech(rawSpec) {
   };
 
   // the order matters: the two calf thrusters must be flames 0 and 1, then the backpack's, then any shoulder verniers
-  const rig = { k, spec, bulk, root, hips, flames, makeFlame, whips: [], wings: [] };
+  const rig = { k, spec, sk, bulk, root, hips, flames, makeFlame, whips: [], wings: [] };
   buildPelvis(rig);
   buildLegs(rig);
   buildTorso(rig);
@@ -72,6 +75,10 @@ export function buildMech(rawSpec) {
   buildOffhand(rig);
   buildSub(rig);
   buildMarks(rig);
+  buildLimbs(rig);
+  buildSideHeads(rig);
+  buildTail(rig);
+  buildPods(rig);
   const { torso, head, legs, armL, armR, saber } = rig;
 
   // hardpoint anchors: where the garage draws its clickable markers
@@ -79,7 +86,7 @@ export function buildMech(rawSpec) {
     head: node(head, 0, 1.2, 0),
     chest: node(torso, 0, 2.6, 0),
     arms: node(armR.elbow, 0, -1.6, 0),
-    legs: node(legs[1].leg, 0, -2.6, 0),
+    legs: rig.legAnchor ?? node(legs[1].leg, 0, -2.6, 0),
     shoulderL: node(rig.pads.L, 0, 1.3, 0),
     shoulderR: node(rig.pads.R, 0, 1.3, 0),
     back: node(torso, 0, 2.8, rig.depth / 2 + 1.7),
@@ -87,6 +94,16 @@ export function buildMech(rawSpec) {
     handR: node(armR.hand, 0, -3.0, 0),
     handL: node(armL.elbow, -2.0, -2.0, -0.4),
     hips: node(hips, 3.4, -0.4, 0.4),
+    // the sockets for the extra parts: empty or not, the garage marks them
+    armLowerL: node(torso, ...limbMount('lower', -1, bulk, rig.depth)),
+    armLowerR: node(torso, ...limbMount('lower', 1, bulk, rig.depth)),
+    armUpperL: node(torso, ...limbMount('upper', -1, bulk, rig.depth)),
+    armUpperR: node(torso, ...limbMount('upper', 1, bulk, rig.depth)),
+    headL: node(torso, ...sideHeadMount(-1, bulk)),
+    headR: node(torso, ...sideHeadMount(1, bulk)),
+    tail: node(hips, (rig.tailAt ?? { x: 0 }).x, (rig.tailAt ?? { y: -0.2 }).y, (rig.tailAt ?? { z: 2.0 }).z + 1.5),
+    podL: node(torso, ...podMount(-1, bulk, rig.depth)),
+    podR: node(torso, ...podMount(1, bulk, rig.depth)),
   };
 
   // the motion layer (src/model/motion.js) owns every moving part from here on
@@ -118,6 +135,20 @@ export function buildMech(rawSpec) {
     return rig.headMuzzle.getWorldPosition(out);
   }
 
+  /** World position of the muzzle of extra arm `i` (an index into rig.limbs); falls back to the main muzzle. */
+  function limbMuzzleWorld(i, out = tmp) {
+    const m = rig.limbs[i]?.muzzle;
+    if (!m) return muzzleWorld(out);
+    root.updateWorldMatrix(true, true);
+    return m.getWorldPosition(out);
+  }
+
+  /** The node of the part fitted in a socket (an extra arm, side head, tail or pod), so the garage can pop it in; null if the socket is empty. */
+  function partNode(slot) {
+    return rig.limbs.find((l) => l.slot === slot)?.base ?? rig.sideHeads.find((h) => h.slot === slot)?.stalk
+      ?? (slot === 'tail' ? rig.tail?.root : null) ?? rig.pods2.find((p) => p.slot === slot)?.g ?? null;
+  }
+
   /** World position of a garage hardpoint (one of ANCHORS). */
   function anchorWorld(name, out = tmp) {
     root.updateWorldMatrix(true, true);
@@ -125,9 +156,9 @@ export function buildMech(rawSpec) {
   }
 
   return {
-    root, tint, muzzleWorld, mountMuzzleWorld, headMuzzleWorld, anchorWorld,
-    update: motion.update, land: motion.land, recoil: motion.recoil, setSaber: motion.setSaber, hit: motion.hit, flare: motion.flare,
-    motion: motion.state, rig,
+    root, tint, muzzleWorld, mountMuzzleWorld, headMuzzleWorld, limbMuzzleWorld, partNode, anchorWorld,
+    update: motion.update, land: motion.land, recoil: motion.recoil, setSaber: motion.setSaber, hit: motion.hit, flare: motion.flare, fireLimb: motion.fireLimb,
+    motion: motion.state, rig, sk, height: sk.height, radius: sk.radius,
     flashMats, hips, torso, armR, armL, head, saber, feet: legs.map((l) => l.foot),
   };
 }

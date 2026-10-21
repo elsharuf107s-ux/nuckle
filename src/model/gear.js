@@ -235,7 +235,8 @@ export function buildWeapon(rig) {
     const rear = rig.skirt?.rear;
     const parent = rear ?? rig.hips;
     const o = rear ? rear.position : { x: 0, y: 0, z: 0 };
-    const holster = group(parent, -2.9 - o.x, -0.95 - o.y, 2.45 - o.z);
+    const at = rig.holsterAt ?? { x: -2.9, y: -0.95, z: 2.45 }; // (a frame without a skirt says where the gun is clipped)
+    const holster = group(parent, at.x - o.x, at.y - o.y, at.z - o.z);
     holster.rotation.set(0, 0, PI / 2 - 0.12);
     for (const child of rifle.children) holster.add(child.clone());
     holster.visible = false;

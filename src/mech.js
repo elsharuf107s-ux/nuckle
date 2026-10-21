@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { MECHS } from './data.js';
-import { buildMech, MECH_HEIGHT } from './mechModel.js';
+import { buildMech } from './mechModel.js';
 import { ARENA } from './world.js';
 import { angleDiff, clamp, damp, dampAngle, lerp, rand, segSegDistSq } from './util.js';
 
@@ -49,8 +49,8 @@ export class Mech {
     game.scene.add(this.root);
 
     const s = this.spec.scale;
-    this.radius = 5.5 * s;
-    this.height = MECH_HEIGHT * s;
+    this.radius = this.model.radius * s; // a spider spreads wider than a biped, a tank is lower
+    this.height = this.model.height * s;
 
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
@@ -447,6 +447,6 @@ export class Mech {
   destroy() {
     this.game.fx.dropGhosts(this);
     this.game.scene.remove(this.root);
-    this.root.traverse((o) => o.material?.dispose?.());
+    this.root.traverse((o) => { o.material?.map?.dispose?.(); o.material?.dispose?.(); }); // (tank belts carry their own scrolling texture)
   }
 }

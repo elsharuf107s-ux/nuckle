@@ -125,7 +125,7 @@ const LEGACY_SRC = legacy.toString();
 
   // ---- the expanded catalogue: two to four new parts in every slot
   const pools = [...new Set(P.SLOTS.map(P.poolOf))];
-  check('the catalogue has 16 slots on 11 hardpoints and 97 distinct parts', P.SLOTS.length === 16 && P.HARDPOINTS.length === 11 && pools.reduce((n, pl) => n + P.PARTS[pl].length, 0) === 97, `${pools.reduce((n, pl) => n + P.PARTS[pl].length, 0)} parts`);
+  check('the catalogue has 26 slots on 20 hardpoints and 128 distinct parts', P.SLOTS.length === 26 && P.HARDPOINTS.length === 20 && pools.reduce((n, pl) => n + P.PARTS[pl].length, 0) === 128, `${pools.reduce((n, pl) => n + P.PARTS[pl].length, 0)} parts`);
   check('every part id is unique within its pool and every part has a name, a description and a model', pools.every((pl) => new Set(P.PARTS[pl].map((p) => p.id)).size === P.PARTS[pl].length
     && P.PARTS[pl].every((p) => p.name && p.desc.length > 20 && typeof p.model === 'string')));
   check('every hardpoint holds real slots, and every slot belongs to exactly one hardpoint', P.HARDPOINTS.every((h) => h.slots.length >= 1 && h.slots.every((s) => P.SLOTS.includes(s)))
@@ -200,6 +200,84 @@ const LEGACY_SRC = legacy.toString();
     const old = P.sanitizeBuild({ name: 'OLD ONE', head: 'horn', weapon: 'mg', offhand: 'none' });
     return old.shoulderL === 'std' && old.shoulderR === 'std' && old.core === 'std' && old.pilot === 'rookie' && old.sub === 'none' && old.crest === 'auto' && old.skirt === 'std' && old.marks === 'none' && P.tuningSpent(old.tuning) === 0 && old.head === 'horn';
   })());
+
+  // ---- the rig: leg layouts, extra arms, side heads, tail, pods and proportions
+  const rig = (patch) => P.deriveStats({ ...P.DEFAULT_BUILD, ...patch });
+  const quad = rig({ layout: 'quad' }), hexa = rig({ layout: 'hexa' }), tread = rig({ layout: 'tread' }), hover = rig({ layout: 'hover' });
+  check('a stock build is a biped with two arms, two legs and one head', def.layout.id === 'biped' && JSON.stringify(def.counts) === JSON.stringify({ arms: 2, legs: 2, heads: 1 }) && def.limbs.length === 0 && def.lock === 1 && def.salvo === 4, JSON.stringify(def.counts));
+  check('leg layouts trade speed for stability: more legs carry more and are harder to stagger, but are slower and dash worse',
+    quad.load > def.load && hexa.load > quad.load && quad.staggerAt > def.staggerAt && hexa.staggerAt > quad.staggerAt && quad.speed < def.speed && hexa.speed < quad.speed && hexa.dashSpeed < quad.dashSpeed && quad.dashSpeed < def.dashSpeed,
+    `load ${def.load}/${quad.load}/${hexa.load} stagger ${def.staggerAt}/${quad.staggerAt}/${hexa.staggerAt}`);
+  check('treads are fast, tough and bad in the air; hover pods are the reverse: quick in the air and on a dash, with little armor',
+    tread.speed > def.speed && tread.hp > def.hp && tread.airSpeed < def.airSpeed && tread.ascendSpeed < def.ascendSpeed && hover.airSpeed > def.airSpeed && hover.dashSpeed > def.dashSpeed && hover.hp < def.hp, `tread ${tread.speed.toFixed(1)}/${Math.round(tread.hp)} hover ${hover.airSpeed.toFixed(1)}/${Math.round(hover.hp)}`);
+  check('the leg style multiplies with the number of legs, and means nothing on treads or hover pods',
+    rig({ layout: 'hexa', legs: 'tank' }).load > rig({ layout: 'hexa', legs: 'std' }).load * 1.2 && rig({ layout: 'tread', legs: 'tank' }).hp === rig({ layout: 'tread', legs: 'sprint' }).hp && rig({ layout: 'hover', legs: 'tank' }).load === rig({ layout: 'hover', legs: 'std' }).load);
+  check('the leg-style slot is hidden for treads and hover pods, and the skirt for everything but a biped', (() => {
+    const hp = (id) => P.HARDPOINTS.find((h) => h.id === id);
+    return P.hardpointSlots(hp('legs'), { layout: 'biped' }).join() === 'layout,legs' && P.hardpointSlots(hp('legs'), { layout: 'tread' }).join() === 'layout' && P.hardpointSlots(hp('legs'), { layout: 'hover' }).join() === 'layout'
+      && P.hardpointSlots(hp('waist'), { layout: 'biped' }).join() === 'core,skirt' && P.hardpointSlots(hp('waist'), { layout: 'quad' }).join() === 'core';
+  })());
+
+  const arm = (id) => rig({ armLowerL: id, armLowerR: id });
+  check('every extra arm costs weight and power: a gun arm weighs 6 and draws 14, and two of them draw 28', rig({ armLowerL: 'gun' }).draw - def.draw === 14 && rig({ armLowerL: 'gun' }).weight - def.weight === 6 && arm('gun').draw - def.draw === 28);
+  check('extra arms are listed with their row, side and weapon, and count toward the arms total', (() => {
+    const s = rig({ armLowerL: 'gun', armUpperR: 'cannon', armUpperL: 'blade' });
+    const by = Object.fromEntries(s.limbs.map((l) => [l.slot, l]));
+    return s.counts.arms === 5 && by.armLowerL.kind === 'gun' && by.armLowerL.row === 'lower' && by.armLowerL.side === 'L' && by.armUpperR.kind === 'cannon' && by.armUpperR.row === 'upper' && by.armUpperR.side === 'R' && by.armUpperL.kind === 'blade' && s.limbs.length === 3;
+  })());
+  check('arm sabers add melee, arm shields guard and stagger resistance, launchers add missiles to a salvo, nano arms repair',
+    arm('blade').melee > def.melee * 1.2 && arm('shield').guard > def.guard + 0.1 && arm('shield').staggerAt > def.staggerAt + 60 && arm('launcher').salvo === 8 && rig({ armLowerL: 'launcher' }).salvo === 6 && arm('repair').regen >= 12);
+  check('arm guns and cannons carry real damage and a rate; the salvo is capped at ten', arm('gun').limbs[0].damage > 0 && arm('gun').limbs[0].interval > 0 && arm('cannon').limbs[0].splash.damage > 0 && rig({ armLowerL: 'launcher', armLowerR: 'launcher', armUpperL: 'launcher', armUpperR: 'launcher' }).salvo === 10);
+  const many = rig({ armLowerL: 'cannon', armLowerR: 'cannon', armUpperL: 'gun', armUpperR: 'gun' });
+  check('four armed sockets overdraw the power budget and slow everything: the price of a many-armed machine', many.draw > many.supply * 1.2 && many.powerFactor < 0.8 && many.weapon.cooldown > def.weapon.cooldown * 1.2, `draw ${many.draw} of ${many.supply}, power x${many.powerFactor.toFixed(2)}`);
+
+  const head = (patch) => rig(patch);
+  check('a side head adds one lock-on target and works at half strength (60% of the weight and power draw)', (() => {
+    const base = head({ head: 'vfin' }), one = head({ headL: 'recon' }), main = head({ head: 'recon' });
+    return one.lock === 2 && head({ headL: 'recon', headR: 'recon' }).lock === 3 && base.lock === 1 && one.radar > base.radar && one.radar < main.radar && Math.abs((one.radar - base.radar) - (main.radar - base.radar) * 0.5) < 1
+      && Math.abs(one.draw - base.draw - 0.6 * (P.partOf('head', 'recon').add.draw)) < 1e-9;
+  })());
+  check('lock-on targets are capped at three, and an empty side head adds nothing', head({ headL: 'recon', headR: 'jammer' }).lock === 3 && head({ headL: 'none' }).lock === 1 && JSON.stringify(head({ headL: 'none' }).counts) === JSON.stringify(def.counts));
+  check('side heads can wear any helmet, and the counts show them', P.PARTS.head2.length === P.PARTS.head.length + 1 && head({ headL: 'hawk', headR: 'twin' }).counts.heads === 3);
+
+  check('tails and pods: a boom resists staggers, a lash blade adds melee, a boost tail adds fuel; pods are per side', rig({ tail: 'stabilizer' }).staggerAt > def.staggerAt + 80 && rig({ tail: 'lash' }).melee > def.melee * 1.1 && rig({ tail: 'booster' }).en > def.en + 20
+    && rig({ podL: 'thruster' }).en < rig({ podL: 'thruster', podR: 'thruster' }).en && rig({ podL: 'missile', podR: 'missile' }).missileCharges === 4 && rig({ podL: 'plate', podR: 'plate' }).hp > def.hp + 250);
+
+  const prop = (p) => rig({ prop: { ...P.DEFAULT_BUILD.prop, ...p } });
+  check('proportions are trades: size, leg length, arm length, torso width and head size', (() => {
+    const big = prop({ size: 1.3 }), small = prop({ size: 0.85 });
+    return big.hp > def.hp * 1.4 && big.speed < def.speed && big.weight > def.weight * 1.4 && small.hp < def.hp && small.speed > def.speed
+      && prop({ legs: 1.4 }).speed > def.speed * 1.1 && prop({ legs: 1.4 }).staggerAt < def.staggerAt && prop({ legs: 0.7 }).speed < def.speed
+      && prop({ arms: 1.4 }).reach > def.reach * 1.35 && prop({ arms: 1.4 }).melee > def.melee && prop({ torso: 1.4 }).hp > def.hp * 1.15 && prop({ torso: 1.4 }).supply > def.supply && prop({ torso: 1.4 }).dashSpeed < def.dashSpeed
+      && prop({ head: 1.5 }).radar > def.radar * 1.2 && prop({ head: 0.7 }).radar < def.radar;
+  })());
+  check('leg length means nothing without legs, and every proportion is clamped to its limits in whole steps', (() => {
+    const c = P.cleanProp({ size: 99, legs: -4, arms: 1.1234, torso: 'x', head: 1.07 });
+    return rig({ layout: 'tread', prop: { ...P.DEFAULT_BUILD.prop, legs: 1.4 } }).speed === rig({ layout: 'tread' }).speed && c.size === 1.3 && c.legs === 0.7 && c.arms === 1.1 && c.torso === 1 && c.head === 1.05 && P.cleanProp(undefined).size === 1;
+  })());
+  check('the spec for the model carries the layout, the extra sockets and the proportions, and size scales the machine', (() => {
+    const d = P.deriveMech({ ...P.DEFAULT_BUILD, layout: 'hexa', armLowerL: 'gun', headR: 'hawk', tail: 'lash', podL: 'missile', prop: { size: 1.2, legs: 1.1, arms: 1, torso: 1.2, head: 1 } });
+    return d.spec.layout === 'hexa' && d.spec.armLowerL === 'gun' && d.spec.armLowerR === 'none' && d.spec.headR === 'hawk' && d.spec.headL === 'none' && d.spec.tail === 'lash' && d.spec.podL === 'missile' && d.spec.scale === 1.2 && d.spec.prop.legs === 1.1 && Math.abs(d.spec.bulk - 1.2) < 1e-9;
+  })());
+  check('the symmetry switch mirrors every pair: arms, side heads and pods as well as shoulders', ['armLowerL', 'armUpperL', 'headL', 'podL'].every((slot) => {
+    const out = P.withPart(P.DEFAULT_BUILD, slot, P.partsFor(slot)[1].id, true);
+    return out[P.MIRROR[slot]] === P.partsFor(slot)[1].id && P.withPart(P.DEFAULT_BUILD, slot, P.partsFor(slot)[1].id, false)[P.MIRROR[slot]] === 'none';
+  }));
+  check('an older save without any of the rig fields loads as a stock biped, and a bad layout falls back', (() => {
+    const old = P.sanitizeBuild({ name: 'OLD ONE', weapon: 'mg', layout: 'spaceship', armLowerL: 'banana', prop: { size: 'big' } });
+    return old.layout === 'biped' && old.armLowerL === 'none' && old.headL === 'none' && old.tail === 'none' && old.podR === 'none' && old.prop.size === 1 && old.weapon === 'mg';
+  })());
+  check('random builds are always valid, some are strange, and sanitising one changes nothing', (() => {
+    let strange = 0, ok = true;
+    for (let i = 0; i < 400; i++) {
+      const b = P.randomBuild();
+      if (JSON.stringify(P.sanitizeBuild(b)) !== JSON.stringify(b)) ok = false;
+      const s = P.deriveStats(b);
+      if (![s.hp, s.speed, s.weight, s.powerFactor, s.dps].every(Number.isFinite) || s.hp <= 0 || s.speed <= 0) ok = false;
+      if (b.layout !== 'biped' || s.limbs.length || s.lock > 1) strange++;
+    }
+    return ok && strange > 60 && strange < 380;
+  })());
   const t0 = Date.now();
   const sampled = P.statRanges();
   check('stat ranges are quick to compute and cover load and power', Date.now() - t0 < 2000 && sampled.load.max > sampled.load.min && sampled.draw.max > sampled.supply.min, `${Date.now() - t0} ms`);
@@ -256,14 +334,14 @@ try {
   // ------------------------------------------------------------ garage UI (real clicks)
   // hardpoint tab -> the slots behind it (and how many parts each lists)
   const counts = {
-    head: { head: 10, crest: 7 }, chest: { torso: 8, pilot: 9 }, arms: { arms: 6 }, legs: { legs: 6 },
+    head: { head: 10, crest: 7 }, chest: { torso: 8, pilot: 9 }, arms: { arms: 6 }, legs: { layout: 5, legs: 6 },
     shoulderL: { shoulderL: 8, mountL: 4 }, shoulderR: { shoulderR: 8, mountR: 4 },
     back: { backpack: 6 }, waist: { core: 7, skirt: 6 }, handR: { weapon: 9 }, handL: { offhand: 4 }, hips: { sub: 7 },
   };
   await page.click('#btn-garage');
   const opened = await page.evaluate(() => ({ state: window.__game.state, shown: !document.getElementById('screen-garage').classList.contains('hidden'), titleHidden: document.getElementById('screen-title').classList.contains('hidden') }));
   check('GARAGE button opens the garage', opened.state === 'garage' && opened.shown && opened.titleHidden);
-  check('garage has a tab for each of the 11 hardpoints, tuning and paint', (await page.$$('.g-tab')).length === 13);
+  check('garage has a tab for each of the 11 body hardpoints, the rig, size, tuning and paint', (await page.$$('.g-tab')).length === 15);
 
   const optionCounts = {};
   for (const [hp, slots] of Object.entries(counts)) {
@@ -279,7 +357,7 @@ try {
   // the markers on the 3D mech: one per hardpoint, on screen, and clicking one opens that hardpoint and swings the camera
   await page.evaluate(() => { window.__game.garageFocus('all'); window.__game.garageCam.goal = null; window.__game.render(); });
   const markers = await page.evaluate(() => [...document.querySelectorAll('.g-marker')].map((m) => ({ id: m.dataset.hp, off: m.classList.contains('off'), at: m.style.transform })));
-  check('the garage floats a clickable marker over each of the 11 hardpoints', markers.length === 11 && markers.every((m) => !m.off && /translate/.test(m.at)), JSON.stringify(markers.filter((m) => m.off).map((m) => m.id)));
+  check('the garage floats a clickable marker over each of the 20 hardpoints (11 body parts and 9 sockets)', markers.length === 20 && markers.every((m) => !m.off && /translate/.test(m.at)), JSON.stringify(markers.filter((m) => m.off).map((m) => m.id)));
   const spread = await page.evaluate(() => {
     const pts = [...document.querySelectorAll('.g-marker')].map((m) => { const r = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(m.style.transform); return [Number(r[1]), Number(r[2])]; });
     const ys = pts.map((p) => p[1]);
@@ -299,6 +377,82 @@ try {
   check('dragging the mech hands the camera back to you', (await page.evaluate(() => window.__game.garageCam.goal)) === null);
   await page.click('.g-tab[data-tab="paint"]');
   check('the paint and tuning tabs show the whole mech again', await page.evaluate(() => window.__game.garageCam.goal?.y === 10 && window.__game.garageCam.spin === true));
+
+  // the rig: sockets for more parts (glowing + markers on the mech and cards on the RIG tab), layouts, proportions
+  const sockets = await page.evaluate(() => {
+    window.__welds = [];
+    const g = window.__game, orig = g.garageWeld.bind(g);
+    g.garageWeld = (id) => { window.__welds.push(id); orig(id); };
+    const marks = [...document.querySelectorAll('.g-marker.socket')];
+    return { n: marks.length, empty: marks.filter((m) => m.classList.contains('empty')).length, bodyEmpty: document.querySelectorAll('.g-marker:not(.socket).empty').length };
+  });
+  check('nine sockets glow on the machine, all empty on the stock build (the body markers never glow)', sockets.n === 9 && sockets.empty === 9 && sockets.bodyEmpty === 0, JSON.stringify(sockets));
+  await page.click('.g-tab[data-tab="rig"]');
+  const rigTab = await page.evaluate(() => ({
+    counts: [...document.querySelectorAll('.rig-count b')].map((b) => b.textContent).join('/'),
+    cards: [...document.querySelectorAll('.socket-btn')].map((b) => b.dataset.hp).join(','),
+    allEmpty: [...document.querySelectorAll('.socket-btn')].every((b) => !b.classList.contains('filled')),
+  }));
+  check('the RIG tab counts the arms, legs and heads and lists all nine sockets', rigTab.counts === '2/2/1' && rigTab.cards === 'armLowerL,armLowerR,armUpperL,armUpperR,headL,headR,tail,podL,podR' && rigTab.allEmpty, JSON.stringify(rigTab));
+  await page.click('.socket-btn[data-hp="armUpperL"]');
+  const upper = await page.evaluate(() => ({
+    tab: window.__garage.tab, lit: document.querySelector('.g-tab.active')?.dataset.tab, opts: [...document.querySelectorAll('.opt')].map((o) => o.dataset.id).join(','),
+    marker: document.querySelector('.g-marker.active')?.dataset.hp, goal: window.__game.garageCam.goal?.yaw ?? null, sym: !!document.getElementById('g-sym'),
+  }));
+  check('a socket card opens that socket (the RIG tab stays lit, the marker and camera follow)', upper.tab === 'armUpperL' && upper.lit === 'rig' && upper.marker === 'armUpperL' && upper.goal !== null && upper.sym
+    && upper.opts === 'none,gun,cannon,blade,shield,launcher,repair', JSON.stringify(upper));
+  await page.click('.opt[data-id="cannon"]');
+  const welded = await page.evaluate(() => {
+    const g = window.__game, b = g.player.build, m = g.player.mech;
+    return { L: b.armUpperL, R: b.armUpperR, limbs: m.model.rig.limbs.map((l) => `${l.slot}:${l.kind}`).join(','), welds: window.__welds.join(','), lEmpty: document.querySelector('.g-marker[data-hp="armUpperL"]').classList.contains('empty'),
+      rEmpty: document.querySelector('.g-marker[data-hp="armUpperR"]').classList.contains('empty'), arms: g.player.stats.counts.arms, shown: document.querySelector('#g-summary')?.textContent.includes('4 arms') };
+  });
+  check('bolting a part on fills both sockets while SYMMETRY is on, with a weld flash at each new arm', welded.L === 'cannon' && welded.R === 'cannon' && welded.limbs === 'armUpperL:cannon,armUpperR:cannon' && welded.welds === 'armUpperL,armUpperR' && !welded.lEmpty && !welded.rEmpty && welded.arms === 4 && welded.shown, JSON.stringify(welded));
+  const pop = await page.evaluate(() => { const g = window.__game; const during = g._pops.map((p) => p.node.scale.x); g.step(40); return { during, after: g._pops.length, back: g.player.mech.model.rig.limbs.map((l) => l.base.scale.x) }; });
+  check('a part bolted on grows into place and settles at full size', pop.during.length === 2 && pop.during.every((x) => x < 1) && pop.after === 0 && pop.back.every((x) => x === 1), JSON.stringify(pop));
+  await page.click('#g-sym');
+  await page.click('.opt[data-id="gun"]');
+  const asym = await page.evaluate(() => ({ L: window.__game.player.build.armUpperL, R: window.__game.player.build.armUpperR, sym: window.__game.player.build.sym }));
+  check('with SYMMETRY off one side takes a different part', asym.L === 'gun' && asym.R === 'cannon' && !asym.sym, JSON.stringify(asym));
+  await page.click('#g-sym');
+  await page.click('.g-tab[data-tab="rig"]');
+  const filled = await page.evaluate(() => ({ cards: [...document.querySelectorAll('.socket-btn.filled')].map((b) => b.dataset.hp).join(','), counts: [...document.querySelectorAll('.rig-count b')].map((b) => b.textContent).join('/') }));
+  check('the rig tab shows the fitted sockets and the new arm count', filled.cards === 'armUpperL,armUpperR' && filled.counts === '4/2/1', JSON.stringify(filled));
+
+  // leg layouts live under LEGS: treads and hover have no leg style to pick
+  await page.click('.g-tab[data-tab="legs"]');
+  const legTabs = async () => page.evaluate(() => ({ slots: [...document.querySelectorAll('.g-slot')].map((b) => b.dataset.slot).join(','), opts: [...document.querySelectorAll('.opt')].map((o) => o.dataset.id).join(',') }));
+  const legsStock = await legTabs();
+  check('LEGS offers the layout first (biped, quad, spider, treads, hover), then the leg style', legsStock.slots === 'layout,legs' && legsStock.opts === 'biped,quad,hexa,tread,hover', JSON.stringify(legsStock));
+  await page.click('.opt[data-id="tread"]');
+  const legsTread = await legTabs();
+  const treadState = await page.evaluate(() => { const g = window.__game; return { layout: g.player.build.layout, legs: g.player.mech.model.rig.legs.length, treads: g.player.mech.model.rig.treads?.length ?? 0, tabHidden: document.getElementById('g-slots').classList.contains('hidden') }; });
+  check('on treads the leg style slot is gone and the tracks are on the model', legsTread.slots === '' && treadState.layout === 'tread' && treadState.treads === 2 && treadState.legs === 0, JSON.stringify([legsTread, treadState]));
+  await page.click('.opt[data-id="hexa"]');
+  const legsHexa = await legTabs();
+  check('a spider has six legs and brings the leg style back', legsHexa.slots === 'layout,legs' && await page.evaluate(() => window.__game.player.mech.model.rig.legs.length) === 6, JSON.stringify(legsHexa));
+  await page.click('.opt[data-id="biped"]');
+
+  // proportions: sliders that stretch the machine
+  await page.click('.g-tab[data-tab="size"]');
+  const sliders = await page.evaluate(() => [...document.querySelectorAll('.g-options input[type=range]')].map((i) => `${i.dataset.prop}:${i.min}-${i.max}`).join(' '));
+  check('the SIZE tab has a slider for each of the five proportions', sliders === 'size:0.85-1.3 legs:0.7-1.4 arms:0.7-1.4 torso:0.8-1.4 head:0.7-1.5', sliders);
+  await page.evaluate(() => {
+    for (const [id, v] of [['size', 1.2], ['legs', 1.3]]) {
+      const i = document.querySelector(`input[data-prop="${id}"]`);
+      i.value = String(v);
+      i.dispatchEvent(new Event('input'));
+    }
+  });
+  await page.waitForFunction(() => window.__game.player.build.prop.legs === 1.3, null, { timeout: 8000 }); // the slider applies on the next animation frame
+  const stretched = await page.evaluate(() => { const g = window.__game, m = g.player.mech; return { prop: g.player.build.prop, scale: m.spec.scale, hipY: m.model.sk.hipY, height: m.height, shown: [...document.querySelectorAll('.size-val')].map((e) => e.textContent).join(' ') }; });
+  check('dragging a slider rebuilds the machine taller and larger', stretched.prop.size === 1.2 && stretched.prop.legs === 1.3 && stretched.scale === 1.2 && stretched.hipY > 13.5 && stretched.height > 24 && /×1.20/.test(stretched.shown), JSON.stringify(stretched));
+  await page.click('.size-reset');
+  const unstretched = await page.evaluate(() => ({ prop: window.__game.player.build.prop, scale: window.__game.player.mech.spec.scale }));
+  check('RESET puts the proportions back', Object.values(unstretched.prop).every((v) => v === 1) && unstretched.scale === 1, JSON.stringify(unstretched));
+  await page.click('#g-reset');
+  const rigReset = await page.evaluate(() => ({ b: window.__game.player.build, limbs: window.__game.player.mech.model.rig.limbs.length }));
+  check('RESET in the garage clears every socket and the layout', rigReset.b.armUpperL === 'none' && rigReset.b.armUpperR === 'none' && rigReset.b.layout === 'biped' && rigReset.limbs === 0, JSON.stringify([rigReset.b.armUpperL, rigReset.b.layout, rigReset.limbs]));
 
   // equip a part by clicking it: the build, stats and live model all change
   await page.click('.g-tab[data-tab="chest"]');
@@ -1551,7 +1705,7 @@ try {
           out.meshCounts[key] = n;
           seen.set(key, sig.sort().join('|'));
           box.setFromObject(model.root);
-          if (![box.min.x, box.max.x, box.min.y, box.max.y].every(Number.isFinite) || box.max.y < 12 || box.max.y > 40) out.failures.push(`${key} height ${box.max.y.toFixed(1)}`);
+          if (![box.min.x, box.max.x, box.min.y, box.max.y].every(Number.isFinite) || box.max.y < 10 || box.max.y > 40) out.failures.push(`${key} height ${box.max.y.toFixed(1)}`);
           if (box.min.y < -0.5) out.failures.push(`${key} below ground ${box.min.y.toFixed(2)}`);
         } catch (err) {
           out.failures.push(`${slot}:${part.id} ${err.message}`);
@@ -1591,11 +1745,284 @@ try {
   });
   dump('models', models);
   check('every part in every slot builds a model without errors, standing on the ground', models.failures.length === 0 && models.built >= 100, `${models.built} models${models.failures.length ? ': ' + models.failures.slice(0, 3).join(' | ') : ''}`);
-  check('the model locates all 11 hardpoints, head highest and the legs lowest', Object.keys(models.anchors).length === 11 && models.anchors.head[1] > models.anchors.chest[1] && models.anchors.chest[1] > models.anchors.waist[1] && models.anchors.waist[1] > models.anchors.legs[1] && models.anchors.legs[1] > 0, JSON.stringify(models.anchors));
+  check('the model locates all 20 hardpoints, head highest and the legs lowest', Object.keys(models.anchors).length === 20 && models.anchors.head[1] > models.anchors.chest[1] && models.anchors.chest[1] > models.anchors.waist[1] && models.anchors.waist[1] > models.anchors.legs[1] && models.anchors.legs[1] > 0, JSON.stringify(models.anchors));
   check('the left and right shoulder anchors are on opposite sides', models.anchors.shoulderL[0] * models.anchors.shoulderR[0] < 0 && Math.abs(models.anchors.shoulderL[0] + models.anchors.shoulderR[0]) < 1.5);
   check('each shoulder mount fires from its own shoulder (L is the mech\'s left, R its right), well clear of the hand gun', models.muzzles.L[0] < -2 && models.muzzles.R[0] > 2 && models.muzzles.L[1] > 14 && models.muzzles.R[1] > 14 && models.fallback < 1e-6, JSON.stringify(models.muzzles));
   check('every option in every pool is its own silhouette (no part reuses another\'s model)', models.sameLook.length === 0, models.sameLook.join(' | '));
   check('the redesigned mech is slim and tall: taller than it is wide', models.size.h > 17 && models.size.w < models.size.h * 1.0, JSON.stringify(models.size));
+
+  // ------------------------------------------------------------ 5k. the modular rig: layouts, proportions, extra arms, heads, a tail, pods
+  const rigm = await page.evaluate(async () => {
+    const P = await import('/src/parts.js');
+    const { buildMech, ANCHORS } = await import('/src/mechModel.js');
+    const THREE = await import('three');
+    const idle = { speed: 0, localFwd: 0, localRight: 0, grounded: true, boost: 0, pitch: 0, stagger: 0, charge: 0 };
+    const mk = (patch) => buildMech(P.deriveMech({ ...P.DEFAULT_BUILD, ...patch }).spec);
+    const settle = (m, n = 40, s = idle) => { for (let i = 0; i < n; i++) m.update(1 / 60, s); m.root.updateWorldMatrix(true, true); };
+    const box = (m) => new THREE.Box3().setFromObject(m.root);
+    const out = { layouts: {}, errors: [] };
+
+    // every layout: how many legs, how big, standing on the ground
+    for (const id of ['biped', 'quad', 'hexa', 'tread', 'hover']) {
+      try {
+        const m = mk({ layout: id });
+        settle(m);
+        const b = box(m);
+        out.layouts[id] = { legs: m.rig.legs.length, kind: m.sk.kind, hipY: Number(m.sk.hipY.toFixed(2)), top: Number(b.max.y.toFixed(1)), minY: Number(b.min.y.toFixed(2)), w: Number((b.max.x - b.min.x).toFixed(1)),
+          height: Number(m.height.toFixed(1)), radius: m.radius, treads: m.rig.treads?.length ?? 0, pods: m.rig.pods?.length ?? 0, calf: m.rig.calfFlames };
+      } catch (err) { out.errors.push(`${id}: ${err.message}`); }
+    }
+
+    // walking: every foot of a quad or a spider plants and lifts, none sinks, and a planted foot does not slide
+    const walk = (patch) => {
+      const m = mk(patch), feet = m.rig.legs.map((l) => l.foot), pos = new THREE.Vector3(), speed = 36;
+      settle(m, 20);
+      const prev = feet.map(() => null), travel = [];
+      let minY = 99, maxY = -99, planted = 0, finite = true;
+      for (let i = 0; i < 160; i++) {
+        m.root.position.z -= speed / 60;
+        m.update(1 / 60, { ...idle, speed, localFwd: speed });
+        m.root.updateWorldMatrix(true, true);
+        feet.forEach((f, j) => {
+          f.getWorldPosition(pos);
+          if (!Number.isFinite(pos.y)) finite = false;
+          if (i > 50) { minY = Math.min(minY, pos.y); maxY = Math.max(maxY, pos.y); }
+          if (prev[j] && i > 50 && pos.y < 0.9 && prev[j].y < 0.9) { planted++; travel.push(Math.hypot(pos.x - prev[j].x, pos.z - prev[j].z)); }
+          prev[j] = pos.clone();
+        });
+      }
+      travel.sort((a, b) => a - b);
+      // a planted foot stays where it is on the ground, so the typical (median) low foot barely moves; only the first and last frames of a swing are fast
+      return { minY: Number(minY.toFixed(2)), maxY: Number(maxY.toFixed(2)), slip: Number((travel[Math.floor(travel.length / 2)] ?? 0).toFixed(3)), planted, finite, body: speed / 60 };
+    };
+    out.walk = { quad: walk({ layout: 'quad' }), hexa: walk({ layout: 'hexa' }), biped: walk({}) };
+
+    // treads roll with the ground and against each other when turning on the spot; hover bobs and pulses
+    const t = mk({ layout: 'tread' });
+    settle(t, 20);
+    const off = () => t.rig.treads.map((x) => x.tex.offset.x);
+    const wheel = () => t.rig.treads[0].wheels[0].g.rotation.x;
+    const o0 = off(), w0 = wheel();
+    settle(t, 40, { ...idle, speed: 50, localFwd: 50 });
+    const o1 = off(), w1 = wheel();
+    settle(t, 40, { ...idle, turnRate: 2.5 });
+    const o2 = off();
+    out.tread = { driven: [o1[0] - o0[0], o1[1] - o0[1]], wheel: w1 - w0, spin: [o2[0] - o1[0], o2[1] - o1[1]] };
+    const h = mk({ layout: 'hover' });
+    settle(h, 10);
+    const ys = [];
+    for (let i = 0; i < 90; i++) { h.update(1 / 60, idle); ys.push(h.hips.position.y); }
+    out.hover = { bob: Math.max(...ys) - Math.min(...ys), jets: h.rig.pods.every((p) => p.jetMat.opacity > 0.05), ring: !!h.rig.groundRing };
+
+    // proportions: legs, arms and the head really change the model
+    const stock = mk({}); settle(stock);
+    const longLegs = mk({ prop: { size: 1, legs: 1.4, arms: 1, torso: 1, head: 1 } }); settle(longLegs);
+    const longArms = mk({ prop: { size: 1, legs: 1, arms: 1.4, torso: 1, head: 1 } }); settle(longArms);
+    const bigHead = mk({ prop: { size: 1, legs: 1, arms: 1, torso: 1, head: 1.5 } }); settle(bigHead);
+    const reach = (m) => m.anchorWorld('handR', new THREE.Vector3()).distanceTo(m.anchorWorld('shoulderR', new THREE.Vector3()));
+    const headW = (m) => { const b = new THREE.Box3().setFromObject(m.head); return b.max.x - b.min.x; };
+    out.prop = { stock: { hipY: stock.sk.hipY, top: box(stock).max.y, radius: stock.radius, height: stock.height, limbs: stock.rig.limbs.length, reach: reach(stock) },
+      legs: { hipY: longLegs.sk.hipY, top: box(longLegs).max.y, minY: box(longLegs).min.y }, arms: { reach: reach(longArms), upper: longArms.sk.upper }, head: headW(bigHead) / headW(stock) };
+
+    // extra arms: where they are, what they carry, how they aim
+    const arms = mk({ armLowerL: 'gun', armLowerR: 'cannon', armUpperL: 'blade', armUpperR: 'launcher' });
+    settle(arms);
+    const at = (n, i) => { const v = arms.limbMuzzleWorld(i, new THREE.Vector3()); return n ? [Number(v.x.toFixed(1)), Number(v.y.toFixed(1)), Number(v.z.toFixed(1))] : v; };
+    const main = arms.muzzleWorld(new THREE.Vector3());
+    const handToMuzzle = (i) => { const l = arms.rig.limbs[i]; const a = l.hand.getWorldPosition(new THREE.Vector3()), b = l.muzzle.getWorldPosition(new THREE.Vector3()); return b.sub(a).normalize(); };
+    arms.fireLimb(0, 0.5);
+    settle(arms, 14, { ...idle, pitch: 0 });
+    const aimed = handToMuzzle(0);
+    out.arms = { kinds: arms.rig.limbs.map((l) => `${l.slot}:${l.kind}`), muzzles: arms.rig.limbs.map((l) => !!l.muzzle), gunAt: at(true, 0), cannonAt: at(true, 2 - 1), blade: !!arms.rig.limbs[2].blade, apart: at(false, 0).distanceTo(main),
+      aimed: [aimed.x, aimed.y, aimed.z].map((v) => Number(v.toFixed(2))), lowerY: arms.rig.limbs[0].hand.getWorldPosition(new THREE.Vector3()).y, upperY: arms.rig.limbs[2].hand.getWorldPosition(new THREE.Vector3()).y };
+    arms.setSaber(true);
+    settle(arms, 40);
+    out.arms.bladeOut = arms.rig.limbs[2].blade.scale.y;
+    arms.setSaber(false);
+    settle(arms, 40);
+    out.arms.bladeIn = arms.rig.limbs[2].blade.scale.y;
+    for (const kind of ['gun', 'cannon', 'blade', 'shield', 'launcher', 'repair']) {
+      try { const m = mk({ armLowerL: kind, armUpperR: kind }); settle(m, 20, { ...idle, speed: 40, localFwd: 40 }); m.root.updateWorldMatrix(true, true); } catch (err) { out.errors.push(`arm ${kind}: ${err.message}`); }
+    }
+
+    // side heads, tail, pods
+    const full = mk({ headL: 'ace', headR: 'hawk', tail: 'lash', podL: 'thruster', podR: 'missile' });
+    settle(full);
+    const stockFlames = stock.rig.flames.length;
+    out.parts = { heads: full.rig.sideHeads.length, tail: full.rig.tail?.segs.length, pods: full.rig.pods2.map((p) => p.kind), flames: full.rig.flames.length - stockFlames };
+    const yaw0 = full.rig.sideHeads.map((s) => s.head.rotation.y);
+    settle(full, 90, { ...idle, relaxed: true });
+    out.parts.scan = full.rig.sideHeads.some((s, i) => Math.abs(s.head.rotation.y - yaw0[i]) > 0.02);
+    const seg0 = full.rig.tail.segs.map((s) => s.rotation.x + s.rotation.y);
+    settle(full, 20, { ...idle, speed: 120, localFwd: 120 });
+    settle(full, 1, { ...idle, speed: 0 });
+    out.parts.tailMoved = full.rig.tail.segs.some((s, i) => Math.abs(s.rotation.x + s.rotation.y - seg0[i]) > 0.02);
+    const an = {};
+    for (const a of ANCHORS) { const v = full.anchorWorld(a, new THREE.Vector3()); an[a] = [v.x, v.y, v.z]; }
+    out.anchors = an;
+    for (const id of ['stabilizer', 'lash', 'booster']) { try { const m = mk({ tail: id }); settle(m, 30, { ...idle, speed: 40, localFwd: 40, boost: 1 }); } catch (err) { out.errors.push(`tail ${id}: ${err.message}`); } }
+    for (const id of ['thruster', 'missile', 'plate']) { try { const m = mk({ podL: id, podR: id }); settle(m, 30, { ...idle, boost: 1 }); } catch (err) { out.errors.push(`pod ${id}: ${err.message}`); } }
+
+    // every layout with every extra part at once: builds, runs, falls over and gets up without a non-finite number
+    for (const id of ['biped', 'quad', 'hexa', 'tread', 'hover']) {
+      try {
+        const m = mk({ layout: id, armLowerL: 'gun', armLowerR: 'shield', armUpperL: 'blade', armUpperR: 'repair', headL: 'ace', headR: 'recon', tail: 'booster', podL: 'thruster', podR: 'plate' });
+        const states = [{ ...idle }, { ...idle, speed: 60, localFwd: 60 }, { ...idle, grounded: false, vy: 40, boost: 1 }, { ...idle, grounded: false, vy: -80 }, { ...idle, knock: { phase: 'fall', t: 0.2 } },
+          { ...idle, knock: { phase: 'lie', t: 0.3 } }, { ...idle, knock: { phase: 'rise', t: 0.3 } }, { ...idle, dying: 0.6 }, { ...idle, attack: { kind: 'slash1', t: 0.4 } }, { ...idle, relaxed: true }];
+        for (const s of states) { settle(m, 25, s); }
+        let ok = true;
+        m.root.traverse((o) => { if (!Number.isFinite(o.position.x + o.position.y + o.position.z + o.rotation.x + o.rotation.y + o.rotation.z + o.scale.x + o.scale.y + o.scale.z)) ok = false; });
+        if (!ok) out.errors.push(`${id}: non-finite transform after the poses`);
+      } catch (err) { out.errors.push(`${id} full: ${err.message}`); }
+    }
+    return out;
+  });
+  dump('rig models', rigm);
+  const L = rigm.layouts;
+  check('rig: the layouts have 2, 4, 6, 0 and 0 legs, treads on two tracks and four hover pods', rigm.errors.length === 0 && L.biped.legs === 2 && L.quad.legs === 4 && L.hexa.legs === 6 && L.tread.legs === 0 && L.tread.treads === 2 && L.hover.legs === 0 && L.hover.pods === 4, JSON.stringify(rigm.errors.length ? rigm.errors : L));
+  check('rig: every layout stands on the ground and reports its own size (a spider spreads wide, treads sit low)', Object.values(L).every((l) => l.minY > -0.6 && l.minY < 0.6) && L.hexa.w > L.biped.w * 1.6 && L.tread.height < L.biped.height * 0.7 && L.hover.height < L.biped.height && L.hexa.radius > L.biped.radius && L.biped.height === 19.4 && L.biped.hipY === 11.1, JSON.stringify(L));
+  const W = rigm.walk;
+  check('rig: a quad and a spider walk on planted feet (lifted, never sunk, not sliding)', ['quad', 'hexa'].every((k) => W[k].finite && W[k].minY > 0.1 && W[k].maxY > W[k].minY + 0.25 && W[k].planted > 100 && W[k].slip < W[k].body * 0.15) && W.biped.slip < W.biped.body * 0.15, JSON.stringify(W));
+  check('rig: treads roll with the ground and counter-rotate to turn on the spot; hover bobs and glows', rigm.tread.driven.every((d) => Math.abs(d) > 0.2) && Math.abs(rigm.tread.wheel) > 1 && rigm.tread.spin[0] * rigm.tread.spin[1] < 0 && rigm.hover.bob > 0.2 && rigm.hover.jets && rigm.hover.ring, JSON.stringify([rigm.tread, rigm.hover]));
+  const PR = rigm.prop;
+  check('rig: proportions work: the stock model is unchanged, longer legs lift the pelvis, longer arms reach further, a bigger head is bigger', PR.stock.hipY === 11.1 && PR.stock.height === 19.4 && PR.stock.radius === 5.5 && PR.stock.limbs === 0
+    && PR.legs.hipY > 14.5 && PR.legs.top > 22 && PR.legs.minY > -0.6 && PR.arms.reach > PR.stock.reach * 1.25 && Math.abs(PR.arms.upper - 3.8 * 1.4) < 1e-9 && PR.head > 1.3, JSON.stringify(PR));
+  const A = rigm.arms;
+  check('rig: extra arms hang from the right sockets with their tools (lower arms low, back arms high; each gun has its own muzzle)', A.kinds.join(',') === 'armLowerL:gun,armLowerR:cannon,armUpperL:blade,armUpperR:launcher' && A.muzzles.join() === 'true,true,false,true'
+    && A.gunAt[0] < -1 && A.apart > 2 && A.upperY > A.lowerY + 3 && A.blade, JSON.stringify(A));
+  check('rig: an arm gun that fires points along the aim, and an arm saber lights with the main saber and goes out with it', A.aimed[2] < -0.8 && Math.abs(A.aimed[1]) < 0.35 && A.bladeOut > 0.9 && A.bladeIn < 0.1, JSON.stringify([A.aimed, A.bladeOut, A.bladeIn]));
+  const PA = rigm.parts;
+  check('rig: side heads scan on their own, the tail has five segments and swings, two pods and a thruster flame fit on the back', PA.heads === 2 && PA.scan && PA.tail === 5 && PA.tailMoved && PA.pods.join() === 'thruster,missile' && PA.flames >= 1, JSON.stringify(PA));
+  const an = rigm.anchors;
+  check('rig: the sockets are where their names say (left and right, back arms above lower arms, tail behind, side heads at head height)', an.armLowerL[0] < 0 && an.armLowerR[0] > 0 && an.armUpperL[0] < 0 && an.armUpperR[0] > 0 && an.armUpperL[1] > an.armLowerL[1] + 2 && an.headL[0] < 0 && an.headR[0] > 0
+    && Math.abs(an.headL[1] - an.head[1]) < 3 && an.podL[0] < 0 && an.podR[0] > 0 && an.tail[2] > an.waist[2] + 1, JSON.stringify(an));
+  check('rig: every layout with every extra part builds and survives running, flying, falling, a knockdown, a breakdown, a saber stroke', rigm.errors.length === 0, rigm.errors.slice(0, 4).join(' | '));
+
+  // gameplay: arm guns fire with the gun button, a saber build uses H, power limits them, heads share out missiles, a nano arm mends, a shield guards
+  const rigPlay = await page.evaluate(async () => {
+    const g = window.__game, T = window.__t;
+    const P = await import('/src/parts.js');
+    const { createEnemy } = await import('/src/ai.js');
+    const out = {};
+    const clear = () => { for (const e of g.enemies) e.mech.destroy(); g.enemies.length = 0; g.projectiles.clear(); };
+    const dummy = (x, z) => {
+      const e = createEnemy(g, 'bulwark', 1);
+      e.mech.place(x, z, 0, 0);
+      e.update = () => {};
+      e.mech.hp = e.mech.maxHp = 100000;
+      g.enemies.push(e);
+      return e;
+    };
+    const fit = (patch) => { g.setBuild({ ...P.DEFAULT_BUILD, ...patch }); clear(); g.player.mech.place(0, 0, 0, 0); g.rig.yaw = 0; g.cheat.invincible = true; g.player.lockEnabled = false; g.player.lock = null; g.step(5); };
+    const tally = () => {
+      const seen = {};
+      const orig = g.projectiles.spawn.bind(g.projectiles);
+      g.projectiles.spawn = (o) => { if (o.team === 'player') { const k = Math.round(o.damage); seen[k] = (seen[k] || 0) + 1; } return orig(o); };
+      return { seen, stop: () => { g.projectiles.spawn = orig; } };
+    };
+    const burst = (keys, frames) => {
+      const t = tally();
+      T.keys(keys);
+      for (let i = 0; i < frames; i++) { g.step(1); g.player.ammo = g.player.magSize; }
+      T.keys([], keys);
+      t.stop();
+      return t.seen;
+    };
+
+    // 1. arm guns fire with the gun button, alongside the rifle
+    fit({ armLowerL: 'gun', armLowerR: 'cannon' });
+    out.limbGuns = g.player.limbGuns.map((l) => `${l.def.kind}@${l.idx}`).join(',');
+    dummy(0, -120);
+    out.fire = burst(['Mouse0'], 90);
+    // 2. nothing fires without the button
+    out.idleShots = burst([], 60);
+    // 3. a saber build: the button swings the blade, H fires the arm guns
+    fit({ weapon: 'greatsword', armLowerL: 'gun' });
+    out.meleeOnly = g.player.meleeOnly;
+    dummy(0, -120);
+    out.withH = burst(['KeyH'], 60);
+    out.withoutH = burst([], 60);
+    // 4. power: four arm guns overdraw the reactor and each one slows down
+    fit({ armLowerL: 'gun' });
+    dummy(0, -120);
+    const one = burst(['Mouse0'], 240)[17] ?? 0;
+    const pf1 = g.player.stats.powerFactor;
+    fit({ armLowerL: 'gun', armLowerR: 'gun', armUpperL: 'gun', armUpperR: 'gun' });
+    dummy(0, -120);
+    const four = burst(['Mouse0'], 240)[17] ?? 0;
+    out.power = { pf1, pf4: g.player.stats.powerFactor, one, perGun: four / 4 };
+    // 5. heads share the missiles out among the locked targets; launcher arms make the salvo bigger
+    fit({ headL: 'ace', headR: 'ace', armUpperL: 'launcher' });
+    const a = dummy(-30, -110), b = dummy(0, -120), c = dummy(30, -110);
+    g.player.lockEnabled = true;
+    g.player.lock = a.mech;
+    let sub = 0;
+    const hud = g.hud, orig = hud._subReticle.bind(hud);
+    hud._subReticle = (...args) => { sub++; return orig(...args); };
+    g.step(3);
+    sub = 0;
+    g.step(1); // the HUD draws its markers during the step
+    hud._subReticle = orig;
+    out.subReticles = sub;
+    out.locks = { extra: g.player.extraLocks.length, salvo: g.player.stats.salvo, lockMax: g.player.stats.lock };
+    g.player.missiles = g.player.stats.missileCharges;
+    g.player.missileQueue.length = 0;
+    g.player._fireMissiles();
+    out.shared = { queued: g.player.missileQueue.length, targets: new Set(g.player.missileQueue.map((q) => q.target)).size };
+    void b; void c;
+    fit({});
+    dummy(0, -120);
+    g.player.lockEnabled = true;
+    g.step(3);
+    out.stockLocks = { extra: g.player.extraLocks.length, salvo: g.player.stats.salvo };
+    // 6. a nano arm mends armor once left alone; a shield arm soaks fire
+    fit({ armLowerL: 'repair' });
+    const m = g.player.mech;
+    m.hp = m.maxHp - 800;
+    m.lastHitAt = -99;
+    g.player.lastHitAt = -99;
+    const hp0 = m.hp;
+    g.step(60 * 4);
+    out.repair = { regen: g.player.stats.regen, gained: m.hp - hp0 };
+    fit({});
+    const guardStock = g.player.mech.def.guard;
+    fit({ armLowerL: 'shield', armLowerR: 'shield' });
+    out.guard = { stock: guardStock, shielded: g.player.mech.def.guard, stagger: g.player.mech.def.staggerAt };
+    // 7. proportions reach the sortie: a bigger machine is a bigger target
+    fit({ prop: { size: 1.3, legs: 1, arms: 1, torso: 1, head: 1 } });
+    out.big = { scale: g.player.mech.spec.scale, height: g.player.mech.height, radius: g.player.mech.radius, hp: g.player.mech.maxHp };
+    // 8. every layout moves around the city for a few seconds without leaving the world, sinking into a building or going non-finite
+    out.layouts = {};
+    for (const layout of ['quad', 'hexa', 'tread', 'hover']) {
+      fit({ layout });
+      const mm = g.player.mech;
+      let bad = 0, inside = 0, minY = 99;
+      for (let i = 0; i < 360; i++) {
+        T.keys(i % 120 < 80 ? ['KeyW'] : ['KeyD'], i % 120 < 80 ? ['KeyD'] : ['KeyW']);
+        if (i % 90 === 40) g.input.keyDown('Space'); else if (i % 90 === 70) g.input.keyUp('Space');
+        g.step(1);
+        if (!T.allFinite()) bad++;
+        if (T.insideBuilding()) inside++;
+        minY = Math.min(minY, mm.pos.y);
+      }
+      T.keys([], ['KeyW', 'KeyD', 'Space']);
+      out.layouts[layout] = { bad, inside, minY: Number(minY.toFixed(2)), radius: mm.radius, speed: g.player.stats.speed };
+    }
+    fit({});
+    clear();
+    return out;
+  });
+  dump('rig play', rigPlay);
+  check('rig: the arm guns are found on the model by their socket', rigPlay.limbGuns === 'gun@0,cannon@1', rigPlay.limbGuns);
+  check('rig: holding the gun button fires the rifle and both arm guns, each on its own timing', (rigPlay.fire[210] ?? 0) >= 1 && (rigPlay.fire[17] ?? 0) >= 6 && (rigPlay.fire[240] ?? 0) >= 1 && (rigPlay.fire[240] ?? 0) <= 2, JSON.stringify(rigPlay.fire));
+  check('rig: nothing fires without the button', Object.keys(rigPlay.idleShots).length === 0, JSON.stringify(rigPlay.idleShots));
+  check('rig: a saber build fires its arm guns with H (and not on their own)', rigPlay.meleeOnly && (rigPlay.withH[17] ?? 0) >= 4 && Object.keys(rigPlay.withoutH).length === 0, JSON.stringify([rigPlay.withH, rigPlay.withoutH]));
+  check('rig: four arm guns overdraw the reactor and each fires slower than a lone one', rigPlay.power.pf1 === 1 && rigPlay.power.pf4 < 0.95 && rigPlay.power.perGun < rigPlay.power.one * 0.97 && rigPlay.power.one >= 17, JSON.stringify(rigPlay.power));
+  check('rig: two side heads hold three locks and a launcher arm makes the salvo six; every locked target gets missiles', rigPlay.locks.extra === 2 && rigPlay.locks.lockMax === 3 && rigPlay.locks.salvo === 6 && rigPlay.shared.queued === 6 && rigPlay.shared.targets === 3, JSON.stringify([rigPlay.locks, rigPlay.shared]));
+  check('rig: the HUD draws a bracket on each secondary lock, and a stock machine has none', rigPlay.subReticles === 2 && rigPlay.stockLocks.extra === 0 && rigPlay.stockLocks.salvo === 4, JSON.stringify([rigPlay.subReticles, rigPlay.stockLocks]));
+  check('rig: a nano arm mends armor when left alone; shield arms add guard and stagger resistance', rigPlay.repair.regen === 6 && rigPlay.repair.gained > 12 && rigPlay.guard.shielded > rigPlay.guard.stock + 0.1 && rigPlay.guard.stagger > 0, JSON.stringify([rigPlay.repair, rigPlay.guard]));
+  check('rig: overall size scales the machine in the sortie (height, hit radius, armor)', rigPlay.big.scale === 1.3 && Math.abs(rigPlay.big.height - 19.4 * 1.3) < 0.01 && Math.abs(rigPlay.big.radius - 5.5 * 1.3) < 0.01 && rigPlay.big.hp > 3500, JSON.stringify(rigPlay.big));
+  check('rig: quad, spider, treads and hover all run, jump and boost through the city without a bad number or sinking into a building', Object.values(rigPlay.layouts).every((l) => l.bad === 0 && l.inside === 0 && l.minY > -1), JSON.stringify(rigPlay.layouts));
 
   // ------------------------------------------------------------ 5f. animation
   const anim = await page.evaluate(async () => {

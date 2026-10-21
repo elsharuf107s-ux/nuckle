@@ -9,7 +9,6 @@ import { DEFAULT_BUILD, deriveMech } from './parts.js';
 import { clamp, rand, yawToward } from './util.js';
 
 const MISSILE_RECHARGE = 7;
-const MISSILES_PER_SALVO = 4;
 // the saber combo: forehand, backhand, a thrust, and an overhead chop that knocks the target down
 const MELEE = [
   { kind: 'slash1', dur: 0.46, damage: 240, stagger: false },
@@ -42,6 +41,9 @@ export class Player {
     this.missiles = 0;
     this.missileT = 0;
     this.missileQueue = []; // seconds until each queued missile launches
+    this.limbGuns = [];     // the guns on extra arms: { def, cd, idx } (see applyBuild); they fire with the gun button
+    this.extraLocks = [];   // the other targets a many-headed machine has locked: missiles are shared out among them
+    this._limbShots = 0;
     this.mounts = [];       // fitted shoulder mounts: { def, cd, key } (see applyBuild)
     this.subHeat = 0;       // head vulcans: 0..1, locked out when it reaches 1 until it has cooled
     this.subLocked = false;
@@ -88,6 +90,12 @@ export class Player {
     this.energy = d.energy;
     this.mech = new Mech(this.game, 'custom', 'player', d.def);
     this.mech.place(keep.x, keep.z, 0, keep.yaw);
+    // extra arms that carry a gun: each has its own cooldown and finds its muzzle on the model
+    const limbs = this.mech.model.rig.limbs;
+    this.limbGuns = d.stats.limbs
+      .filter((l) => l.kind === 'gun' || l.kind === 'cannon')
+      .map((def) => ({ def, cd: 0, idx: limbs.findIndex((l) => l.slot === def.slot) }));
+    this.extraLocks = [];
     this.lock = null;
     this._resetLoadout();
   }
@@ -183,17 +191,32 @@ export class Player {
 
   /** Enemy closest to the screen centre (within a generous cone), else the nearest. */
   _bestTarget(list) {
-    const rig = this.game.rig;
-    const cam = this.game.camera.position;
     let best = null, bestScore = Infinity;
     for (const m of list) {
-      const v = m.center(this._v).sub(cam);
-      const dist = v.length();
-      const ang = Math.acos(clamp(v.normalize().dot(rig.forward), -1, 1));
-      const score = ang * 400 + dist * 0.3 - (ang < 0.7 ? 1000 : 0);
+      const score = this._lockScore(m);
       if (score < bestScore) { bestScore = score; best = m; }
     }
     return best;
+  }
+
+  /** How good a lock-on target is: lower is better (near the screen centre, then close). */
+  _lockScore(m) {
+    const v = m.center(this._v).sub(this.game.camera.position);
+    const dist = v.length();
+    const ang = Math.acos(clamp(v.normalize().dot(this.game.rig.forward), -1, 1));
+    return ang * 400 + dist * 0.3 - (ang < 0.7 ? 1000 : 0);
+  }
+
+  /** A machine with more heads holds more locks: the best of the others, for missiles to be shared out among. */
+  _updateExtraLocks(list) {
+    const n = this.stats.lock - 1;
+    const before = this.extraLocks.length ? this.extraLocks.slice() : [];
+    this.extraLocks.length = 0;
+    if (n > 0 && this.lock) {
+      const others = list.filter((m) => m !== this.lock).sort((a, b) => this._lockScore(a) - this._lockScore(b));
+      for (let i = 0; i < n && i < others.length; i++) this.extraLocks.push(others[i]);
+    }
+    if (this.extraLocks.some((m) => !before.includes(m))) this.game.audio.lockOn();
   }
 
   _updateLock(input) {
@@ -221,6 +244,7 @@ export class Player {
       this.lock = this._bestTarget(list);
       if (this.lock) this.game.audio.lockOn();
     }
+    this._updateExtraLocks(list);
   }
 
   /** Lock onto the enemy drawn nearest a screen point (a tap). Returns whether one was close enough. */
@@ -391,6 +415,9 @@ export class Player {
       if (this.ammo > 0) this._fireWeapon();
       else this._startReload();
     }
+    // ---- extra arms: their guns fire with the gun button (the H key on a melee build, where the button swings the blade)
+    const limbTrigger = this.meleeOnly ? input.down('KeyH') : input.down('Mouse0');
+    this._updateLimbs(dt, limbTrigger && !this.melee);
     if (this.lock && !this.melee) {
       const c = this.lock.center(this._w);
       const m = mech.center(this._v);
@@ -496,6 +523,37 @@ export class Player {
     this.fireCd = w.cooldown * (this.burstT > 0 ? 0.6 : 1);
     this.lastFired = game.time;
     if (this.ammo <= 0) this._startReload();
+  }
+
+  // ------------------------------------------------------------------ extra arms
+
+  _updateLimbs(dt, firing) {
+    for (const L of this.limbGuns) {
+      L.cd = Math.max(0, L.cd - dt * this.stats.powerFactor); // a machine that draws too much power fires slower
+      if (firing && L.cd <= 0 && !this.mech.dead) this._fireLimb(L);
+    }
+  }
+
+  /** One extra arm fires: a beam gun's rapid bolt or an arm cannon's shell, from its own muzzle toward the aim. */
+  _fireLimb(L) {
+    const game = this.game, mech = this.mech, def = L.def;
+    const cannon = def.kind === 'cannon';
+    mech.model.limbMuzzleWorld(L.idx, this._muzzle);
+    const aim = this._aimDir(this._muzzle, def.speed, this._w);
+    if (aim.dot(mech.forward()) < -0.2) aim.copy(mech.forward());
+    const color = cannon ? 0xffa040 : this.energy.beam;
+    game.projectiles.spawn({
+      type: cannon ? 'cannon' : 'beam', team: 'player', source: mech, pos: this._muzzle, dir: aim,
+      damage: def.damage * this.dmgMul, color, speed: def.speed, knock: cannon ? 20 : 0,
+      target: this.lock, turn: this.lock && !cannon ? 0.9 : 0,
+      splash: def.splash ? { radius: def.splash.radius, damage: def.splash.damage * this.dmgMul } : null,
+    });
+    mech.model.fireLimb(L.idx, cannon ? 0.9 : 0.3);
+    const m = this._muzzle;
+    game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.08, cannon ? 9 : 5, 3, [1, 1, 1], rgb(color), 0.9);
+    if (cannon) { game.audio.cannon(m); game.shake(0.25); } else if (this._limbShots++ % 3 === 0) game.audio.beam(m);
+    L.cd = def.interval * (this.burstT > 0 ? 0.6 : 1);
+    this.lastFired = game.time;
   }
 
   // ------------------------------------------------------------------ sub-weapon (V) and passives
@@ -710,9 +768,10 @@ export class Player {
   _fireMissiles() {
     this.missiles--;
     if (this.missiles === this.stats.missileCharges - 1) this.missileT = 0;
-    const target = this._missileTarget();
-    for (let i = 0; i < MISSILES_PER_SALVO; i++) {
-      this.missileQueue.push({ t: i * 0.09, side: i % 2 ? 1 : -1, target });
+    // the salvo (bigger with launcher arms) is shared out among every locked target
+    const targets = [this._missileTarget(), ...this.extraLocks].filter(Boolean);
+    for (let i = 0; i < this.stats.salvo; i++) {
+      this.missileQueue.push({ t: i * 0.09, side: i % 2 ? 1 : -1, target: targets.length ? targets[i % targets.length] : null });
     }
     this.game.audio.missile(this.mech.pos);
   }
