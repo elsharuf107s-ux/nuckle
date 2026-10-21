@@ -9,50 +9,79 @@ const PI = Math.PI;
 
 export function buildPelvis(rig) {
   const { k, hips, spec } = rig;
-  const { add, M, box, cyl, sph, glow, cyanGlow, greenGlow, energyGlow } = k;
+  const { add, group, M, box, cyl, sph, glow, cyanGlow, greenGlow, energyGlow } = k;
 
   add(hips, box(3.4, 1.5, 2.6), M.dark, 0, 0, 0, { edge: true });
   add(hips, cyl(1.9, 1.9, 0.3, 14), M.metal, 0, 0.7, 0);
 
-  // ---- skirt: the front plates, the side skirts and the rear plate
+  // ---- skirt: the front plates, the side skirts and the rear plate. Each plate hangs from a hinge at its top
+  // edge (a group at the hinge), so the animation can swing it clear of the thigh and let it sway.
   const skirt = spec.skirt ?? 'std';
+  const sk = { front: {}, side: {}, rear: null };
+  rig.skirt = sk;
+  /** A hinged plate: `put` adds a mesh at hips coordinates, but inside the hinge group. */
+  const hinge = (px, py, pz) => {
+    const g = group(hips, px, py, pz);
+    return { g, put: (geo, mat, x, y, z, o) => add(g, geo, mat, x - px, y - py, z - pz, o) };
+  };
   const front = (w, h, y, rx = 0.12) => {
-    add(hips, box(w, h, 0.5), M.accent, 0, y, -1.55, { rx, edge: true });
-    for (const s of [-1, 1]) add(hips, box(w * 0.42, h * 0.9, 0.45), M.main, s * (w * 0.7), y + 0.1, -1.45, { rx, rz: s * -0.1, edge: true });
+    const c = hinge(0, y + h / 2, -1.55);
+    c.put(box(w, h, 0.5), M.accent, 0, y, -1.55, { rx, edge: true });
+    sk.front.C = c.g;
+    for (const s of [-1, 1]) {
+      const half = hinge(s * (w * 0.7), y + 0.1 + h * 0.45, -1.45);
+      half.put(box(w * 0.42, h * 0.9, 0.45), M.main, s * (w * 0.7), y + 0.1, -1.45, { rx, rz: s * -0.1, edge: true });
+      sk.front[s < 0 ? 'L' : 'R'] = half.g;
+    }
+  };
+  const side = (s, top = 0) => {
+    const h = hinge(s * 2.2, top, 0);
+    sk.side[s < 0 ? 'L' : 'R'] = h.g;
+    return h.put;
+  };
+  const rear = (top) => {
+    const h = hinge(0, top, 1.55);
+    sk.rear = h.g;
+    return h.put;
   };
   if (skirt === 'std') {
     front(1.8, 2.3, -1.35);
-    for (const s of [-1, 1]) add(hips, box(0.7, 2.2, 2.4), M.accent, s * 2.2, -1.1, 0, { rz: s * 0.1, edge: true });
-    add(hips, box(2.6, 1.9, 0.5), M.sub, 0, -1.0, 1.55, { rx: -0.1, edge: true });
+    for (const s of [-1, 1]) side(s)(box(0.7, 2.2, 2.4), M.accent, s * 2.2, -1.1, 0, { rz: s * 0.1, edge: true });
+    rear(-0.05)(box(2.6, 1.9, 0.5), M.sub, 0, -1.0, 1.55, { rx: -0.1, edge: true });
   } else if (skirt === 'long') {
     front(1.9, 3.4, -1.9, 0.08);
-    for (const s of [-1, 1]) add(hips, box(0.6, 2.4, 2.2), M.accent, s * 2.2, -1.2, 0, { rz: s * 0.08, edge: true });
-    add(hips, box(2.8, 3.2, 0.5), M.sub, 0, -1.6, 1.55, { rx: -0.06, edge: true });
-    add(hips, box(0.5, 2.6, 0.4), M.trim, 0, -1.5, 1.85);
+    for (const s of [-1, 1]) side(s)(box(0.6, 2.4, 2.2), M.accent, s * 2.2, -1.2, 0, { rz: s * 0.08, edge: true });
+    const r = rear(0);
+    r(box(2.8, 3.2, 0.5), M.sub, 0, -1.6, 1.55, { rx: -0.06, edge: true });
+    r(box(0.5, 2.6, 0.4), M.trim, 0, -1.5, 1.85);
   } else if (skirt === 'heavy') {
     front(2.4, 2.8, -1.6);
     for (const s of [-1, 1]) {
-      add(hips, box(1.1, 2.8, 2.9), M.accent, s * 2.4, -1.4, 0, { rz: s * 0.1, edge: true });
-      add(hips, box(1.2, 0.5, 3.0), M.trim, s * 2.4, 0.05, 0);
+      const put = side(s, 0.05);
+      put(box(1.1, 2.8, 2.9), M.accent, s * 2.4, -1.4, 0, { rz: s * 0.1, edge: true });
+      put(box(1.2, 0.5, 3.0), M.trim, s * 2.4, 0.05, 0);
     }
-    add(hips, box(3.4, 2.4, 0.6), M.sub, 0, -1.3, 1.6, { rx: -0.1, edge: true });
+    rear(-0.1)(box(3.4, 2.4, 0.6), M.sub, 0, -1.3, 1.6, { rx: -0.1, edge: true });
   } else if (skirt === 'flare') {
     front(1.8, 2.0, -1.25, 0.2);
     for (const s of [-1, 1]) {
-      add(hips, box(0.5, 2.6, 2.8), M.accent, s * 2.6, -1.1, 0, { rz: s * 0.55, edge: true });
-      add(hips, box(0.4, 1.4, 1.2), M.trim, s * 3.4, -2.2, 0.8, { rz: s * 0.55 });
+      const put = side(s);
+      put(box(0.5, 2.6, 2.8), M.accent, s * 2.6, -1.1, 0, { rz: s * 0.55, edge: true });
+      put(box(0.4, 1.4, 1.2), M.trim, s * 3.4, -2.2, 0.8, { rz: s * 0.55 });
     }
-    add(hips, box(2.6, 1.6, 0.5), M.sub, 0, -0.9, 1.55, { rx: -0.2, edge: true });
+    rear(-0.1)(box(2.6, 1.6, 0.5), M.sub, 0, -0.9, 1.55, { rx: -0.2, edge: true });
   } else if (skirt === 'thruster') {
     front(1.8, 2.0, -1.25);
     for (const s of [-1, 1]) {
-      add(hips, box(0.7, 2.0, 2.2), M.accent, s * 2.2, -1.0, 0, { rz: s * 0.1, edge: true });
+      side(s)(box(0.7, 2.0, 2.2), M.accent, s * 2.2, -1.0, 0, { rz: s * 0.1, edge: true });
       add(hips, cyl(0.7, 0.55, 1.2, 10), M.metal, s * 1.3, -0.4, 2.1, { rx: PI / 2 + 0.2 });
       add(hips, cyl(0.45, 0.45, 0.2, 10), cyanGlow, s * 1.3, -0.15, 2.7, { rx: PI / 2 + 0.2, shadow: false });
     }
-    add(hips, box(2.0, 1.6, 0.5), M.sub, 0, -1.0, 1.55, { rx: -0.1, edge: true });
+    rear(-0.2)(box(2.0, 1.6, 0.5), M.sub, 0, -1.0, 1.55, { rx: -0.1, edge: true });
   } else if (skirt === 'none') {
-    add(hips, box(1.6, 0.8, 0.5), M.accent, 0, -0.8, -1.45, { rx: 0.1, edge: true });
+    const c = hinge(0, -0.4, -1.45);
+    c.put(box(1.6, 0.8, 0.5), M.accent, 0, -0.8, -1.45, { rx: 0.1, edge: true });
+    sk.front.C = c.g;
   }
 
   // ---- core module: small, but visible at the waist and rear skirt
@@ -191,8 +220,11 @@ export function buildTorso(rig) {
     add(torso, box(2.4, 1.1, 0.5), glow, 0, 3.3, zf - 0.1, { shadow: false });
     add(torso, box(2.8, 0.3, 0.6), M.trim, 0, 3.95, zf - 0.1);
     for (const s of [-1, 1]) add(torso, box(0.3, 2.4, 1.8), M.accent, s * 2.8 * bulk, 2.4, -0.2, { edge: true });
-    add(torso, cyl(0.07, 0.07, 3.2, 6), M.metal, 2.0 * bulk, 6.3, 1.0);
-    add(torso, cyl(0.75, 0.2, 0.3, 12), M.metal, 2.0 * bulk, 7.9, 1.0, { rz: 0.5, edge: true });
+    // the sensor mast is a whip: it sways from its base
+    const mast = group(torso, 2.0 * bulk, 4.7, 1.0);
+    add(mast, cyl(0.07, 0.07, 3.2, 6), M.metal, 0, 1.6, 0);
+    add(mast, cyl(0.75, 0.2, 0.3, 12), M.metal, 0, 3.2, 0, { rz: 0.5, edge: true });
+    rig.whips.push({ g: mast, len: 3.2 });
   } else if (style === 'wedge') {
     // an angular prow: a sloped plate down the centre of the chest and chamfered shoulders
     add(torso, wedge(2.4, 2.8, 0.9, 0.35), M.accent, 0, 2.7, zf - 0.35, { edge: true });

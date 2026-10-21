@@ -96,6 +96,15 @@ kbd {
 #damage-vignette, #burst-vignette { position: fixed; inset: 0; pointer-events: none; opacity: 0; }
 #damage-vignette { background: radial-gradient(ellipse at center, transparent 45%, rgba(255, 30, 60, 0.75) 100%); }
 #burst-vignette { background: radial-gradient(ellipse at center, transparent 55%, rgba(82, 190, 255, 0.5) 100%); transition: opacity 0.4s; }
+/* anime speed lines on steps, lunges and the catapult run: thin radial streaks, clear in the middle of the screen */
+#speedlines {
+  position: fixed; inset: -15%; pointer-events: none; opacity: 0;
+  background:
+    repeating-conic-gradient(from 0deg, rgba(255, 255, 255, 0) 0deg 2.3deg, rgba(225, 242, 255, 0.5) 2.4deg 2.75deg, rgba(255, 255, 255, 0) 2.85deg 5.2deg),
+    repeating-conic-gradient(from 1.3deg, rgba(255, 255, 255, 0) 0deg 3.9deg, rgba(200, 230, 255, 0.35) 4deg 4.25deg, rgba(255, 255, 255, 0) 4.35deg 7.1deg);
+  -webkit-mask-image: radial-gradient(ellipse at center, transparent 36%, #000 72%);
+  mask-image: radial-gradient(ellipse at center, transparent 36%, #000 72%);
+}
 
 /* ---------- screens ---------- */
 .screen {

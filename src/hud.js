@@ -25,11 +25,12 @@ export class Hud {
       subRow: $('sub-row'), subName: $('sub-name'), subFill: $('sub-fill'), subState: $('sub-state'), subBar: $('sub-fill').parentElement,
       boss: $('boss-bar'), bossFill: $('boss-fill'), bossName: $('boss-name'),
       banner: $('banner'), aMissile: $('alert-missile'), aArea: $('alert-area'), aArmor: $('alert-armor'),
-      dmg: $('damage-vignette'), burstV: $('burst-vignette'),
+      dmg: $('damage-vignette'), burstV: $('burst-vignette'), speed: $('speedlines'),
     };
     this.numbers = [];
     this.hitMarker = 0;
     this.dmgFlash = 0;
+    this.speedK = 0; // speed-line strength
     this._v = new THREE.Vector3();
     this._w = new THREE.Vector3();
     this._c = new THREE.Vector3();
@@ -81,7 +82,7 @@ export class Hud {
     if (saberOnly) {
       const sub = document.createElement('div');
       sub.className = 'wsub';
-      sub.textContent = '3-hit combo · tap again to chain';
+      sub.textContent = 'lunge in · 4-hit combo · tap again to chain';
       e.gunRow.append(sub);
     }
     this._lastAmmo = -1;
@@ -89,9 +90,15 @@ export class Hud {
   }
 
   show(on) {
+    if (!on) {
+      // Wipe the canvas before hiding it. Re-setting the width drops the whole bitmap, which a clearRect on a canvas that
+      // is about to be hidden did not always do in headless Chromium (the last frame's radar survived into the pit stop).
+      this.canvas.width = this.canvas.width;
+      this.speedK = 0;
+      this.el.speed.style.opacity = '0';
+    }
     this.el.root.classList.toggle('hidden', !on);
     this.canvas.style.visibility = on ? '' : 'hidden'; // belt and braces: nothing can show through even if a frame is stale
-    if (!on) this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   reset() {
@@ -203,6 +210,13 @@ export class Hud {
     this.dmgFlash = Math.max(0, this.dmgFlash - dt * 2.2);
     e.dmg.style.opacity = String(this.dmgFlash + (hpK < 0.2 && !mech.dead ? 0.25 + 0.15 * Math.sin(g.time * 8) : 0));
     e.burstV.style.opacity = player.burstActive ? '1' : '0';
+    // speed lines: a step, a lunge, the catapult run, or simply going very fast
+    const fast = Math.hypot(mech.vel.x, mech.vel.z);
+    const launchRun = g.launch && !g.launch.released && g.launch.t > 1.05;
+    const speedWant = mech.dead ? 0 : Math.max(mech.dashT > 0 ? 0.85 : 0, player.melee?.stage === -1 ? 0.8 : 0, launchRun ? 1 : 0, clamp((fast - 130) / 160, 0, 0.6));
+    this.speedK += (speedWant - this.speedK) * (1 - Math.exp(-(speedWant > this.speedK ? 30 : 6) * dt));
+    e.speed.style.opacity = this.speedK > 0.01 ? this.speedK.toFixed(3) : '0';
+    if (this.speedK > 0.01) e.speed.style.transform = `rotate(${(Math.random() * 5).toFixed(2)}deg)`; // the streaks flicker
 
     // ---- banner queue
     this._bannerT -= dt;

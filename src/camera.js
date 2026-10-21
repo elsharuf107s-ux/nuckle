@@ -1,6 +1,7 @@
 // Third-person chase camera. Free-look follows the mouse; with a lock-on it swings to keep the
 // target framed. It pulls back and widens its field of view when the mech boosts, backs away from
-// buildings, and shakes with a trauma model (shake strength = trauma squared).
+// buildings, shakes with a trauma model (shake strength = trauma squared), punches in on kills,
+// and can blend into a scripted shot (the catapult launch).
 
 import * as THREE from 'three';
 import { clamp, damp, dampAngle } from './util.js';
@@ -18,8 +19,11 @@ export class CameraRig {
     this.dist = 46;
     this.fov = BASE_FOV;
     this.orbit = 0;
+    this.kick = 0;   // a camera punch (see punch): zooms in sharply, then eases back
+    this.cine = null; // a scripted shot { pos, look, w } blended over the chase view by weight w (the catapult launch)
 
     this._focus = new THREE.Vector3();
+    this._look = new THREE.Vector3();
     this._want = new THREE.Vector3();
     this._dir = new THREE.Vector3();
     this._t = new THREE.Vector3();
@@ -41,6 +45,11 @@ export class CameraRig {
 
   addTrauma(a) {
     this.trauma = Math.min(1, this.trauma + a);
+  }
+
+  /** A camera punch for a kill or a finisher: `k` (0..1) is how hard. */
+  punch(k) {
+    this.kick = Math.min(1, Math.max(this.kick, k));
   }
 
   update(dt, player, world) {
@@ -72,8 +81,11 @@ export class CameraRig {
     const boostK = clamp(speed / 200, 0, 1);
     this.dist = damp(this.dist, 44 + boostK * 10, 5, dt);
     this.fov = damp(this.fov, BASE_FOV + boostK * 16 + (mech.dashT > 0 ? 6 : 0), 6, dt);
-    if (Math.abs(this.camera.fov - this.fov) > 0.01) {
-      this.camera.fov = this.fov;
+    this.kick = Math.max(0, this.kick - dt * 2.2);
+    const kick = this.kick * this.kick * (3 - 2 * this.kick);
+    const fov = this.fov - kick * 12;
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
 
@@ -109,11 +121,18 @@ export class CameraRig {
     cam.position.y += Math.sin(t * 1.9 + 1) * sh * 1.6;
     cam.position.z += Math.sin(t * 1.1 + 2) * sh * 2.2;
 
-    cam.lookAt(
+    const look = this._look.set(
       cam.position.x + this.forward.x * 100,
       cam.position.y + this.forward.y * 100,
       cam.position.z + this.forward.z * 100,
     );
+    const c = this.cine;
+    if (c && c.w > 0) {
+      // a scripted shot over the chase view
+      cam.position.lerp(c.pos, c.w);
+      look.lerp(c.look, c.w);
+    }
+    cam.lookAt(look);
     cam.rotateZ(Math.sin(t * 0.9) * sh * 0.05);
     cam.updateMatrixWorld(true);
   }

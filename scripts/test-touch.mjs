@@ -75,6 +75,7 @@ async function openPage(opts = {}, url = URL) {
   await page.addInitScript(lockStub);
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__game);
+  await page.evaluate(() => { window.__game.launchIntro = false; }); // the catapult launch is covered by test.mjs
   await page.waitForTimeout(800);
   return { context, page };
 }

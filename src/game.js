@@ -11,10 +11,18 @@ import { Missions } from './missions.js';
 import { Player } from './player.js';
 import { Projectiles } from './weapons.js';
 import { World } from './world.js';
-import { clamp, damp, dampAngle, fmtTime } from './util.js';
+import { clamp, damp, dampAngle, fmtTime, lerp, rand } from './util.js';
 
 const STEP = 1 / 60;
+const ease = (t) => t * t * (3 - 2 * t);
 const ZERO = new THREE.Vector3();
+// the catapult launch that opens a sortie: crouched on the shuttle, thrown down the deck, airborne
+const LAUNCH_STANDBY = 1.05; // the lights count down
+const LAUNCH_RUN = 0.5;      // the shuttle runs the length of the deck
+const LAUNCH_BLEND = 0.7;    // the camera hands back to the chase view
+// a destroyed machine sparks and convulses this long before it blows
+const WRECK_TIME = 1.15;
+const WRECK_TIME_BOSS = 2.3;
 // Where the garage camera goes when a hardpoint is picked: the height it looks at, its distance, and the
 // side it looks from (yaw PI is straight in front of the mech; a larger yaw is the mech's left).
 const GARAGE_FOCUS = {
@@ -33,7 +41,7 @@ const GARAGE_FOCUS = {
 };
 
 // the garage's saber preview: the player's combo (see player.js) and a pause in guard
-const GARAGE_COMBO = [['slash1', 0.5], ['slash2', 0.5], ['slash3', 0.72], [null, 1.1]];
+const GARAGE_COMBO = [['slash1', 0.46], ['slash2', 0.46], ['thrust', 0.48], ['slash3', 0.72], [null, 1.1]];
 const GARAGE_COMBO_LENGTH = GARAGE_COMBO.reduce((n, [, d]) => n + d, 0);
 
 export class Game {
@@ -70,6 +78,9 @@ export class Game {
     this.onIntermission = null; // set by main.js: (info) => void, called when the pit stop begins
     this.pit = null;           // where the mech was standing when it went into the pit
     this._endShown = false;
+    this.wrecks = [];          // destroyed machines breaking down before they explode: { mech, t, dur, spark }
+    this.launchIntro = true;   // open each sortie with the catapult launch (the tests turn it off)
+    this.launch = null;        // the launch in progress: { t, released }
 
     this.input = new Input();
     this.input.attach();
@@ -119,6 +130,7 @@ export class Game {
   startMission() {
     for (const e of this.enemies) e.mech.destroy();
     this.enemies.length = 0;
+    this._clearWrecks();
     this.projectiles.clear();
     this.fx.clear();
     this.hud.reset();
@@ -138,13 +150,21 @@ export class Game {
     this.audio.init();
     this.audio.startMusic();
     this.audio.setMusicLevel(0.2);
-    this.missions.start();
+    this.launch = null;
+    this.rig.cine = null;
+    this.world.showCatapult(false);
+    if (this.launchIntro) this._beginLaunch();
+    this.missions.start(this.launch ? 0.9 : 0);
   }
 
   /** Abandon the sortie and return to the title flyaround. */
   toTitle() {
     for (const e of this.enemies) e.mech.destroy();
     this.enemies.length = 0;
+    this._clearWrecks();
+    this.launch = null;
+    this.rig.cine = null;
+    this.world.showCatapult(false);
     this.projectiles.clear();
     this.fx.clear();
     this.hud.reset();
@@ -281,8 +301,12 @@ export class Game {
       this.stats.time += dt;
       if (this.input.pressed('KeyM')) this.audio.setMuted(!this.audio.muted);
       const look = this.input.consumeLook();
-      if (!player.lock) this.rig.look(look.dx, look.dy);
-      player.update(dt, this.input);
+      if (this.launch && !this.launch.released) this._updateLaunch(dt); // the pilot takes over once the shuttle lets go
+      else {
+        if (!player.lock) this.rig.look(look.dx, look.dy);
+        player.update(dt, this.input);
+        if (this.launch) this._updateLaunch(dt);
+      }
     } else if (this.state === 'ended') {
       this.endTimer -= dt;
       if (this.endTimer <= 0 && !this._endShown) {
@@ -293,6 +317,7 @@ export class Game {
     }
 
     for (const e of this.enemies) e.update(dt);
+    this._updateWrecks(dt);
     this._separate();
     this.projectiles.update(dt);
     if (this.state === 'playing') this.missions.update(dt);
@@ -350,6 +375,7 @@ export class Game {
     this.pit = { x: m.pos.x, z: m.pos.z, yaw: m.yaw };
     for (const e of this.enemies) e.mech.destroy();
     this.enemies.length = 0;
+    this._clearWrecks();
     this.projectiles.clear();
     this.fx.clear();
     this.state = 'intermission';
@@ -477,7 +503,7 @@ export class Game {
   _garagePose(dt) {
     const m = this.player.mech;
     if (this.garagePose === 'saber') {
-      // the real three-hit combo at its real speed, arcs and all, then a moment in guard before it repeats
+      // the real four-hit combo at its real speed, arcs and all, then a moment in guard before it repeats
       if (!m.saberOut) m.setSaber(true);
       m.pos.y = 0;
       let t = this.time % GARAGE_COMBO_LENGTH;
@@ -550,6 +576,143 @@ export class Game {
     this.hitstopT = Math.max(this.hitstopT, seconds);
   }
 
+  /**
+   * A beat of slow motion and a camera punch: 'kill' (any kill), 'lastKill' (the wave's last enemy) or
+   * 'finisher' (a saber combo's last blow landing).
+   */
+  cinematic(kind) {
+    if (kind === 'lastKill') { this.slowmoT = Math.max(this.slowmoT, 0.85); this.rig.punch(1); }
+    else if (kind === 'finisher') { this.slowmoT = Math.max(this.slowmoT, 0.22); this.rig.punch(0.8); }
+    else { this.slowmoT = Math.max(this.slowmoT, 0.16); this.rig.punch(0.45); }
+  }
+
+  // ------------------------------------------------------------------ the catapult launch
+
+  /** Put the mech on the catapult's shuttle, crouched, with the camera on it. */
+  _beginLaunch() {
+    const c = this.world.catapult;
+    const m = this.player.mech;
+    this.world.showCatapult(true);
+    m.place(0, c.start, 0, 0);
+    this.rig.reset(0);
+    this.launch = { t: 0, released: false };
+    this.hud.message('LAUNCH', 'good', `${this.player.build.name}, LAUNCHING!`);
+    this.audio.ui('wave');
+  }
+
+  /** One step of the launch: the countdown, the run down the deck, the release, then the camera handing back. */
+  _updateLaunch(dt) {
+    const L = this.launch, c = this.world.catapult, m = this.player.mech, rig = this.rig;
+    L.t += dt;
+    const run = L.t - LAUNCH_STANDBY;
+    if (!L.released) {
+      const len = c.start - c.end;
+      if (run < 0) {
+        // standby: crouched on the shuttle, the thrusters building up while the lights count down
+        m.pos.set(0, 0, c.start);
+        m.update(dt, { velocity: ZERO, launch: 1, boost: 0.2 + 0.7 * (L.t / LAUNCH_STANDBY), faceYaw: 0 });
+        this.audio.setBoost(0.3 + 0.5 * (L.t / LAUNCH_STANDBY));
+        c.setLights(L.t / LAUNCH_STANDBY);
+        c.setShuttle(c.start);
+      } else {
+        // the run: the shuttle accelerates down the deck with the mech on it
+        const u = Math.min(1, run / LAUNCH_RUN);
+        const speed = (2 * len * u) / LAUNCH_RUN;
+        m.update(dt, { velocity: new THREE.Vector3(0, 0, -speed), launch: 1, boost: 1, faceYaw: 0 });
+        this.audio.setBoost(1);
+        c.setShuttle(m.pos.z);
+        c.setLights(1, u);
+        if (Math.random() < 0.8) this.fx.sparks(new THREE.Vector3(rand(-3, 3), 0.4, m.pos.z + 3), new THREE.Vector3(0, 0.4, 1), 3, [1, 0.8, 0.4]);
+        if (u >= 1) {
+          // the shuttle lets go at the end of the deck: the mech is thrown into the air
+          L.released = true;
+          L.releasedAt = L.t;
+          m.vel.set(0, 50, -speed * 0.92);
+          m.pos.y = 0.6;
+          m.grounded = false;
+          m.model.flare(1);
+          this.fx.dust(m.pos, 16, 30);
+          this.shake(0.5);
+          this.audio.dash(m.pos);
+          this.input.clear();
+        }
+      }
+    } else {
+      c.setShuttle(lerp(c.end, c.start, clamp((L.t - L.releasedAt - 0.6) / 1.5, 0, 1)));
+      c.setLights(1, 1);
+      if (L.t - L.releasedAt > 2.6) { this.world.showCatapult(false); this.launch = null; rig.cine = null; return; }
+    }
+
+    // the camera: low beside the deck during the countdown, then watching the run go past, then back behind the pilot
+    const k = L.released ? 1 - ease(clamp((L.t - L.releasedAt) / LAUNCH_BLEND, 0, 1)) : 1;
+    const cine = rig.cine ?? (rig.cine = { pos: new THREE.Vector3(), look: new THREE.Vector3(), w: 1 });
+    if (run < 0) {
+      const a = L.t / LAUNCH_STANDBY;
+      cine.pos.set(21 - a * 5, 5 + a * 2.5, c.start - 30 + a * 5);
+      cine.look.set(-2, 8.5, c.start + 2);
+    } else {
+      cine.pos.set(17, 7, c.end - 26);
+      cine.look.set(0, 9 + Math.max(0, m.pos.y * 0.6), m.pos.z);
+    }
+    cine.w = k;
+  }
+
+  // ------------------------------------------------------------------ wrecks
+
+  /** A machine was destroyed: it breaks down for a moment (sparking, sinking to its knees) before it explodes. */
+  _addWreck(mech) {
+    const boss = !!mech.def.boss;
+    const c = mech.center();
+    this.fx.sparks(c, null, 30, [1, 0.8, 0.45]);
+    this.fx.explosion(c, 7 * mech.spec.scale, { shake: 0.4 });
+    mech.setSaber(false);
+    mech.tintColor = null;
+    this.wrecks.push({ mech, t: 0, dur: boss ? WRECK_TIME_BOSS : WRECK_TIME, spark: 0 });
+  }
+
+  _updateWrecks(dt) {
+    for (let i = this.wrecks.length - 1; i >= 0; i--) {
+      const w = this.wrecks[i], m = w.mech;
+      w.t += dt;
+      const k = Math.min(1, w.t / w.dur);
+      m.updateWreck(dt, k);
+      // sparks from the joints, small blasts, smoke
+      w.spark -= dt;
+      if (w.spark <= 0) {
+        w.spark = rand(0.04, 0.1);
+        const s = m.spec.scale;
+        const p = new THREE.Vector3(m.pos.x + rand(-4, 4) * s, m.pos.y + rand(3, 16) * s, m.pos.z + rand(-4, 4) * s);
+        this.fx.sparks(p, null, 8, [1, 0.85, 0.5]);
+        if (Math.random() < 0.18) this.fx.explosion(p, rand(3, 6) * s, { shake: 0.15, sound: Math.random() < 0.5 });
+        this.fx.smokePuff(p, 2 * s, 1.6);
+      }
+      if (k >= 1) {
+        this.wrecks.splice(i, 1);
+        this._explodeWreck(m);
+      }
+    }
+  }
+
+  _explodeWreck(mech) {
+    const center = mech.center();
+    const boss = !!mech.def.boss;
+    const player = mech === this.player.mech;
+    const r = player ? 40 : (boss ? 62 : 32) * mech.spec.scale;
+    this.fx.explosion(center, r, { shake: boss ? 1.4 : player ? 1.2 : 1 });
+    this.fx.debrisBurst(center, mech.spec.palette, mech.spec.scale);
+    if (boss) this.fx.explosion(center.clone().add(new THREE.Vector3(8, 6, -4)), r * 0.7, { sound: false });
+    mech.destroy();
+  }
+
+  /** Drop any wrecks still breaking down (a new sortie, the pit, the title), without the fireworks. */
+  _clearWrecks() {
+    for (const w of this.wrecks) {
+      if (w.mech === this.player.mech) this.scene.remove(w.mech.root); // the pilot's machine is reset, not thrown away
+      else w.mech.destroy();
+    }
+    this.wrecks.length = 0;
+  }
+
   // ------------------------------------------------------------------ rules
 
   onDamaged(mech, amount, info) {
@@ -575,13 +738,11 @@ export class Game {
   }
 
   onDestroyed(mech) {
-    const center = mech.center();
     if (mech.team === 'enemy') {
       const boss = !!mech.def.boss;
       const i = this.enemies.indexOf(mech.enemy);
       if (i >= 0) this.enemies.splice(i, 1);
-      mech.setSaber(false);
-      mech.destroy();
+      this._addWreck(mech);
 
       this.combo.count++;
       this.combo.t = 5;
@@ -591,21 +752,17 @@ export class Game {
       const p = this.player;
       if (!p.burstActive) p.burst = Math.min(100, p.burst + 8);
 
-      const r = (boss ? 62 : 32) * mech.spec.scale;
-      this.fx.explosion(center, r, { shake: boss ? 1.4 : 1 });
-      this.fx.debrisBurst(center, mech.spec.palette, mech.spec.scale);
       if (boss) {
-        this.fx.explosion(center.clone().add(new THREE.Vector3(8, 6, -4)), r * 0.7, { sound: false });
         this.slowmoT = 1.6;
         this.hitstopT = 0.15;
+        this.rig.punch(1);
         this.hud.message('BARON DESTROYED', 'good');
+      } else {
+        this.cinematic(this.enemies.length === 0 && this.missions.state === 'combat' ? 'lastKill' : 'kill');
       }
       if (mech.def.boss && this.missions.index === 4) this.audio.setMusicLevel(0.3);
     } else {
-      this.fx.explosion(center, 40, { shake: 1.2 });
-      this.fx.debrisBurst(center, mech.spec.palette, mech.spec.scale);
-      mech.setSaber(false);
-      mech.destroy();
+      this._addWreck(mech);
       this.slowmoT = 1.2;
       this.endMission(false);
     }

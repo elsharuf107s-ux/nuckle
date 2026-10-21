@@ -25,6 +25,7 @@ export class World {
     this._buildCity();
     this._buildFarCity();
     this._buildGarage();
+    this._buildCatapult();
   }
 
   // ------------------------------------------------------------------ sky
@@ -377,6 +378,100 @@ export class World {
 
   setGarage(on) {
     this.garage.visible = on;
+  }
+
+  // ------------------------------------------------------------------ the launch catapult
+
+  /**
+   * The catapult that opens each sortie: a deck sunk flush into the street north of the plaza, with guide rails,
+   * a blast deflector, a shuttle the mech rides and a signal post. It has no collision and is hidden outside the
+   * launch. The mech faces -z down the deck, from `start` to `end`.
+   */
+  _buildCatapult() {
+    const start = 255, end = 175, len = start - end, mid = (start + end) / 2;
+    const g = new THREE.Group();
+    const metal = new THREE.MeshStandardMaterial({ color: 0x2a303b, metalness: 0.7, roughness: 0.45 });
+    const darkMetal = new THREE.MeshStandardMaterial({ color: 0x161a21, metalness: 0.6, roughness: 0.6 });
+    const yellow = new THREE.MeshStandardMaterial({ color: 0xf5c518, roughness: 0.6 });
+    const box = (w, h, d, mat, x, y, z, rx = 0) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      m.position.set(x, y, z);
+      m.rotation.x = rx;
+      m.castShadow = true;
+      m.receiveShadow = true;
+      g.add(m);
+      return m;
+    };
+    box(15, 0.4, len + 24, metal, 0, -0.18, mid + 4);              // the deck, its top flush with the street
+    box(1.6, 0.42, len + 20, darkMetal, 0, -0.17, mid + 4);         // the shuttle's slot
+    for (const s of [-1, 1]) {
+      box(0.8, 1.1, len + 20, metal, s * 6.9, 0.55, mid + 4);       // guide rails
+      for (let i = 0; i < 12; i++) box(0.9, 0.12, 2.2, i % 2 ? darkMetal : yellow, s * 7.7, 0.04, start + 10 - i * 4); // hazard edge at the start
+    }
+    // rail lights that race ahead of the shuttle during the run
+    const lampOff = new THREE.MeshBasicMaterial({ color: 0x23323d, fog: false });
+    const lampOn = new THREE.MeshBasicMaterial({ color: 0x6fe6ff, fog: false });
+    const strip = [];
+    for (let i = 0; i < 14; i++) {
+      const z = start - (i / 13) * len;
+      for (const s of [-1, 1]) {
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 2.4), lampOff);
+        lamp.position.set(s * 6.9, 1.15, z);
+        g.add(lamp);
+        strip.push({ lamp, u: i / 13 });
+      }
+    }
+    // the blast deflector, raised behind the mech
+    box(17, 0.8, 11, darkMetal, 0, 4.2, start + 11, -1.05);
+    box(17, 0.3, 1.2, yellow, 0, 9.1, start + 13.4, -1.05);
+    // the shuttle: a block in the slot and a tow bar ahead of the toes
+    const shuttle = new THREE.Group();
+    const sb = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.9, 5), darkMetal);
+    sb.position.set(0, 0.3, 0);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(9, 0.7, 1.1), yellow);
+    bar.position.set(0, 0.35, -4.4);
+    shuttle.add(sb, bar);
+    g.add(shuttle);
+    // the signal post: two reds, then green for go
+    const post = new THREE.Group();
+    post.position.set(-11, 0, start - 8); // on the far side from the launch camera, so it frames the shot instead of blocking it
+    const pole = new THREE.Mesh(new THREE.BoxGeometry(0.6, 12, 0.6), darkMetal);
+    pole.position.y = 6;
+    post.add(pole);
+    const off = new THREE.MeshBasicMaterial({ color: 0x2a2224, fog: false });
+    const red = new THREE.MeshBasicMaterial({ color: 0xff3040, fog: false });
+    const green = new THREE.MeshBasicMaterial({ color: 0x40ff80, fog: false });
+    const lamps = [0, 1, 2].map((i) => {
+      const l = new THREE.Mesh(new THREE.SphereGeometry(0.75, 12, 8), off);
+      l.position.set(0.6, 11 - i * 1.8, 0);
+      post.add(l);
+      return l;
+    });
+    g.add(post);
+    g.visible = false;
+    this.scene.add(g);
+
+    this.catapult = {
+      group: g, start, end,
+      /** Move the shuttle to `z`. */
+      setShuttle(z) { shuttle.position.z = z; },
+      /** The countdown (`a` 0..1: red, red, then green) and the rail lights racing ahead as the run (`run` 0..1) goes on. */
+      setLights(a, run = 0) {
+        const goLit = a >= 0.999;
+        lamps[0].material = goLit ? green : a > 0.05 ? red : off;
+        lamps[1].material = goLit ? green : a > 0.45 ? red : off;
+        lamps[2].material = goLit ? green : off;
+        const lead = run > 0 ? Math.min(1, run * 1.6 + 0.15) : (a > 0.66 ? 0.12 : 0);
+        for (const s of strip) s.lamp.material = s.u <= lead ? lampOn : lampOff;
+      },
+    };
+    this.catapult.setShuttle(start);
+    this.catapult.setLights(0);
+  }
+
+  showCatapult(on) {
+    this.catapult.group.visible = on;
+    if (on) { this.catapult.setShuttle(this.catapult.start); this.catapult.setLights(0); }
   }
 
   // ------------------------------------------------------------------ per-frame

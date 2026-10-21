@@ -248,6 +248,7 @@ try {
   // ------------------------------------------------------------ 1. boot
   await page.goto(`http://localhost:${port}/`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__game);
+  await page.evaluate(() => { window.__game.launchIntro = false; }); // the catapult launch has its own section (5h)
   await page.waitForTimeout(1500);
   check('page boots without console errors', problems.length === 0, problems.slice(0, 3).join(' | '));
   check('title screen is visible', await page.isVisible('#screen-title'));
@@ -461,6 +462,7 @@ try {
   await page.keyboard.press('Enter');
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.__game && window.__garage);
+  await page.evaluate(() => { window.__game.launchIntro = false; }); // a fresh page launches from the catapult again
   const persisted = await page.evaluate(() => ({ weapon: window.__game.player.build.weapon, name: window.__game.player.build.name, title: document.getElementById('title-build').textContent,
     hudName: window.__game.player.weapon.name }));
   check('the saved build is restored after a reload', persisted.weapon === 'sniper' && persisted.name === 'LONGSHOT' && /LONGSHOT/.test(persisted.title) && persisted.hudName === 'BEAM SNIPER', JSON.stringify(persisted));
@@ -701,14 +703,14 @@ try {
     g.step(2);
     const shp = s.mech.hp;
     let stages = [];
-    for (let i = 0; i < 3; i++) {
+    // keep pressing through the combo: the lunge in, then forehand, backhand, thrust and the finisher
+    for (let i = 0; i < 16; i++) {
       T.tap('Mouse2');
-      for (let k = 0; k < 20; k++) { g.step(1); if (p.melee) stages.push(p.melee.stage); }
-      g.step(10);
+      for (let k = 0; k < 10; k++) { g.step(1); if (p.melee) stages.push(p.melee.stage); }
     }
     g.step(60);
     out.sabreDamage = shp - s.mech.hp;
-    out.comboStages = [...new Set(stages)];
+    out.comboStages = [...new Set(stages)].filter((st) => st >= 0);
     clearEnemies();
 
     // --- missiles
@@ -731,7 +733,7 @@ try {
   check('lock-on acquires the nearest hostile', weapons.locked);
   check('beam rifle damages and kills a drone', weapons.rifleDamage >= 400 && weapons.killedByRifle, `${weapons.rifleDamage} dmg, ${weapons.ammoUsed} rounds`);
   check('empty magazine reloads', weapons.reloading && weapons.reloaded);
-  check('sabre combo chains three stages', weapons.comboStages.length === 3, `stages ${weapons.comboStages}`);
+  check('sabre combo chains four stages', weapons.comboStages.length === 4, `stages ${weapons.comboStages}`);
   check('sabre deals melee damage', weapons.sabreDamage >= 700, `${weapons.sabreDamage} dmg`);
   check('missile salvo launches and hits', weapons.missilesInFlight === 4 && weapons.missileDamage >= 300 && weapons.chargeSpent === 1, `${weapons.missileDamage} dmg`);
 
@@ -806,10 +808,10 @@ try {
     const s = dummy(0, -26);
     g.step(3);
     let swung = false, stages = new Set();
-    // tap, then tap again during each swing so the combo chains: stage 0 -> 1 -> 2
-    for (const wait of [15, 30, 45]) {
+    // keep tapping so the combo chains all the way: stage 0 -> 1 -> 2 -> 3
+    for (let k = 0; k < 16; k++) {
       T.tap('Mouse0');
-      for (let i = 0; i < wait; i++) { g.step(1); if (g.player.melee) { swung = true; stages.add(g.player.melee.stage); } }
+      for (let i = 0; i < 10; i++) { g.step(1); if (g.player.melee) { swung = true; if (g.player.melee.stage >= 0) stages.add(g.player.melee.stage); } }
     }
     g.step(60);
     out.sabers = {
@@ -898,7 +900,7 @@ try {
   check('sniper fires very fast heavy beams', G.sniper.kinds.includes('beam') && G.sniper.speeds.some((v) => v >= 1300) && G.sniper.dealt > 400, `${G.sniper.dealt} dmg`);
   check('bazooka splash hurts bystanders', loadouts.splash.target > 500 && loadouts.splash.bystander > 150, `target ${Math.round(loadouts.splash.target)}, bystander ${Math.round(loadouts.splash.bystander)}`);
   check('rapid gun reloads its big magazine', loadouts.mgMag === 30 && loadouts.mgReload.reloading && loadouts.mgReloaded === 30);
-  check('twin sabers: LMB swings a 3-stage combo and there is no gun', loadouts.sabers.swung && loadouts.sabers.stages.length === 3 && loadouts.sabers.dealt > 500 && loadouts.sabers.noProjectiles && loadouts.sabers.meleeOnly, JSON.stringify(loadouts.sabers.stages));
+  check('twin sabers: LMB swings the 4-stage combo and there is no gun', loadouts.sabers.swung && loadouts.sabers.stages.length === 4 && loadouts.sabers.dealt > 500 && loadouts.sabers.noProjectiles && loadouts.sabers.meleeOnly, JSON.stringify(loadouts.sabers.stages));
   check('twin sabers HUD hides the ammo row and shows LMB / RMB', !loadouts.sabers.gunRowShown && loadouts.sabers.key === 'LMB / RMB' && loadouts.sabers.saberRowHidden);
   check('twin sabers hit harder than the stock saber', loadouts.meleeBonus.sabers > loadouts.meleeBonus.stock * 1.2, `${Math.round(loadouts.meleeBonus.sabers)} vs ${Math.round(loadouts.meleeBonus.stock)}`);
   check('shoulder cannon: F fires one shell then cools down', loadouts.cannonRowShown && loadouts.cannon.shells === 1 && loadouts.cannon.cd > 6 && loadouts.cannonSecond === 1 && loadouts.cannonDealt > 300 && loadouts.noCannonRow, JSON.stringify(loadouts.cannon));
@@ -1682,13 +1684,13 @@ try {
     for (let i = 0; i < 40; i++) step(m, { relaxed: true });
     out.relaxedArm = m.model.armR.arm.rotation.x;
 
-    // a shot kicks the gun arm up, and it settles again
+    // a shot snaps the gun arm up into the firing pose; it holds for a beat, then settles back to the ready
     for (let i = 0; i < 20; i++) step(m, {});
     const rest = m.model.armR.arm.rotation.x;
     m.model.recoil(1);
     step(m, {});
     const kicked = m.model.armR.arm.rotation.x;
-    for (let i = 0; i < 30; i++) step(m, {});
+    for (let i = 0; i < 90; i++) step(m, {});
     out.recoil = { rest, kicked, settled: m.model.armR.arm.rotation.x };
 
     // the saber: each slash sweeps the way it should, the chest turns with the arm, and the blade stays out of the ground
@@ -1715,11 +1717,11 @@ try {
     out.lowestTip = lowest;
     m.setSaber(false);
 
-    // the garage preview plays the combo at its real speed: three arcs per 2.8-second loop
+    // the garage preview plays the combo at its real speed: four strikes (three arcs and a thrust streak) per 3.22-second loop
     const arcsBefore = g.fx.timed.length;
     g.state = 'garage';
     g.garagePose = 'saber';
-    g.time = Math.ceil(g.time / 2.82) * 2.82 + 0.01;
+    g.time = Math.ceil(g.time / 3.22) * 3.22 + 0.01;
     for (let i = 0; i < Math.round(60 * 2.4); i++) { g._garagePose(1 / 60); g.time += 1 / 60; g.fx.update(0); }
     out.garageArcs = g.fx.timed.length - arcsBefore;
     g.garagePose = 'idle';
@@ -1742,13 +1744,285 @@ try {
   check('a dash glides with both feet down instead of sprinting', anim.dashLift < 0.3, `highest foot ${anim.dashLift.toFixed(2)}`);
   check('a hard landing crouches (the pelvis drops over a unit) and then stands back up', anim.landing.minHip < anim.landing.standing - 1.0 && anim.landing.settled > anim.landing.standing - 0.4, JSON.stringify(anim.landing));
   check('an idle mech breathes; at ease (garage, title) it lowers the rifle', anim.breath > 0.03 && anim.relaxedArm < 0.6 && anim.readyArm > 0.9, `breath ${anim.breath.toFixed(3)}, arm ${anim.readyArm.toFixed(2)} -> ${anim.relaxedArm.toFixed(2)}`);
-  check('a shot kicks the gun arm up and it settles again', anim.recoil.kicked > anim.recoil.rest + 0.15 && Math.abs(anim.recoil.settled - anim.recoil.rest) < 0.02, JSON.stringify(anim.recoil));
+  check('a shot kicks the gun arm up and it settles again after the held pose', anim.recoil.kicked > anim.recoil.rest + 0.15 && Math.abs(anim.recoil.settled - anim.recoil.rest) < 0.02, JSON.stringify(anim.recoil));
   const S = anim.slashes;
   check('slash 1 swings right to left and slash 2 left to right, the chest turning with the blade', S.slash1.windup.x > 5 && S.slash1.strike.x < -5 && S.slash1.strike.twist > S.slash1.windup.twist + 0.5
     && S.slash2.windup.x < -5 && S.slash2.strike.x > 5 && S.slash2.strike.twist < S.slash2.windup.twist - 0.5, JSON.stringify([S.slash1, S.slash2].map((x) => [x.windup.x.toFixed(1), x.strike.x.toFixed(1)])));
   check('slash 3 chops from overhead down to the front', S.slash3.windup.y > 15 && S.slash3.strike.y < S.slash3.windup.y - 8 && S.slash3.strike.z < -10, JSON.stringify([S.slash3.windup.y.toFixed(1), S.slash3.strike.y.toFixed(1), S.slash3.strike.z.toFixed(1)]));
   check('the saber never cuts into the ground', anim.lowestTip > 0.5, `lowest tip ${anim.lowestTip.toFixed(2)}`);
-  check('the garage saber preview plays the combo at full speed, with its arcs', anim.garageArcs === 3, `${anim.garageArcs} arcs in one loop`);
+  check('the garage saber preview plays the combo at full speed, with its arcs', anim.garageArcs === 4, `${anim.garageArcs} arcs in one loop`);
+
+  // ------------------------------------------------------------ 5h. the Gundam-style moves
+  const moves = await page.evaluate(async () => {
+    const g = window.__game, T = window.__t;
+    const THREE = await import('three');
+    const P = await import('/src/parts.js');
+    const { createEnemy } = await import('/src/ai.js');
+    const keep = { state: g.state, manual: g.manual };
+    g.manual = true;
+    g.state = 'ended'; // nothing else moves the mech while the poses are measured
+    const V = THREE.Vector3;
+    const out = {};
+    const build = (patch = {}) => { g.setBuild({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning }, ...patch }); return g.player.mech; };
+    const reset = (m, x = 0, z = 0, y = 0, yaw = 0) => { m.dead = false; m.knock = null; m.stagger = 0; m.dashT = 0; m.dashCd = 0; m.skidT = 0; m.jumpT = 0; m.en = m.maxEn; m.overheat = false; m.invuln = 0; m.vel.set(0, 0, 0); m.place(x, z, y, yaw); };
+    const step = (m, it = {}) => { m.update(1 / 60, it); g.time += 1 / 60; m.root.updateWorldMatrix(true, true); };
+    const world = (o, x = 0, y = 0, z = 0) => { o.updateWorldMatrix(true, false); return o.localToWorld(new V(x, y, z)); };
+    const dirOf = (o) => { const q = new THREE.Quaternion(); o.updateWorldMatrix(true, false); o.getWorldQuaternion(q); return new V(0, -1, 0).applyQuaternion(q); };
+
+    // ---- firing: the arm snaps straight down the line of fire (level, elbow straight) and holds there for a beat
+    let m = build();
+    const rig = () => g.player.mech.model.rig;
+    reset(m);
+    for (let i = 0; i < 30; i++) step(m, { faceYaw: 0 });
+    m.model.recoil(0.42);
+    for (let i = 0; i < 14; i++) step(m, { faceYaw: 0 });
+    const gun = dirOf(rig().rifle);
+    out.shot = { fwd: -gun.z, y: gun.y, elbow: m.model.armR.elbow.rotation.x, twist: m.model.torso.rotation.y };
+    for (let i = 0; i < 12; i++) step(m, { faceYaw: 0 });
+    out.shotHeld = -dirOf(rig().rifle).z;
+
+    // ---- a heavy gun takes both hands: the left hand sits on the bazooka's foregrip
+    m = build({ weapon: 'bazooka' });
+    reset(m);
+    for (let i = 0; i < 40; i++) step(m, { faceYaw: 0 });
+    const r = rig();
+    out.grip = world(r.armL.hand).distanceTo(world(r.rifle, 0, r.foregrip, 0.2));
+    m.model.recoil(1);
+    for (let i = 0; i < 20; i++) step(m, { faceYaw: 0 });
+    out.gripFiring = world(r.armL.hand).distanceTo(world(r.rifle, 0, r.foregrip, 0.2));
+    out.bazookaLevel = dirOf(r.rifle).y;
+
+    // ---- the saber: drawn from the backpack (the gun goes to the rear skirt), racked again afterwards
+    m = build();
+    reset(m);
+    for (let i = 0; i < 20; i++) step(m, {});
+    const R = rig();
+    const hilt = () => world(R.torso, R.drawPoint.x, R.drawPoint.y, R.drawPoint.z);
+    m.setSaber(true);
+    let closest = Infinity;
+    for (let i = 0; i < 24; i++) { step(m, {}); closest = Math.min(closest, world(R.armR.hand).distanceTo(hilt())); }
+    out.draw = { closest, saber: R.saber.visible, gunInHand: R.rifle.visible, holstered: !!R.holster?.visible, hiltRacked: R.hilts.R.visible, blade: R.blade.scale.y };
+    m.setSaber(false);
+    let back = Infinity;
+    for (let i = 0; i < 40; i++) { step(m, {}); back = Math.min(back, world(R.armR.hand).distanceTo(hilt())); }
+    out.sheath = { back, saber: R.saber.visible, gunInHand: R.rifle.visible, holstered: !!R.holster?.visible, hiltRacked: R.hilts.R.visible };
+
+    // ---- a jump crouches, then pushes off
+    m = build();
+    reset(m);
+    for (let i = 0; i < 40; i++) step(m, {});
+    const standHip = m.model.hips.position.y;
+    let lowHip = Infinity, firstUp = -1;
+    for (let i = 0; i < 20; i++) {
+      step(m, { ascend: true });
+      if (m.pos.y < 0.01) lowHip = Math.min(lowHip, m.model.hips.position.y);
+      else if (firstUp < 0) firstUp = i;
+    }
+    out.jump = { standHip, lowHip, firstUp };
+
+    // ---- a step leans hard into its direction and ends in a skid
+    reset(m);
+    for (let i = 0; i < 30; i++) step(m, { faceYaw: 0 });
+    let roll = 0, skid = 0;
+    for (let i = 0; i < 30; i++) {
+      step(m, i === 0 ? { dash: new V(1, 0, 0), faceYaw: 0 } : { faceYaw: 0 });
+      roll = Math.min(roll, m.model.hips.rotation.z + m.model.torso.rotation.z);
+      skid = Math.max(skid, m.skidT);
+    }
+    out.step = { roll, skid };
+
+    // ---- boosting forward through the air: the body tips forward into a flight pose
+    reset(m, 0, 0, 40, Math.PI / 2);
+    m.vel.set(-150, 0, 0);
+    for (let i = 0; i < 40; i++) step(m, { ascend: true, moveX: -1, faceYaw: Math.PI / 2, speedMul: 2.5 });
+    out.flight = m.model.hips.rotation.x;
+
+    // ---- landings: an ordinary one crouches, a really hard one drops to one knee
+    const landing = (vy) => {
+      reset(m, 0, 0, 1, 0); // dropped from just above the ground, so the landing speed is the one given
+      m.vel.y = vy;
+      let low = Infinity, landedAt = -1;
+      for (let i = 0; i < 120; i++) { step(m, {}); if (m.grounded && landedAt < 0) landedAt = i; if (landedAt >= 0 && i - landedAt < 40) low = Math.min(low, m.model.hips.position.y); }
+      return low;
+    };
+    out.landNormal = landing(-60);
+    out.landHard = landing(-125);
+
+    // ---- secondary motion: the skirt swings with the thighs, a whip antenna sways, wings spread under thrust
+    m = build({ crest: 'antenna' });
+    reset(m, 0, 0, 0, Math.PI / 2);
+    const sk = rig().skirt;
+    let front = 0, rear = 0;
+    for (let i = 0; i < 150; i++) {
+      step(m, { moveX: -1, faceYaw: Math.PI / 2, speedMul: 1.5 });
+      front = Math.max(front, sk.front.L.rotation.x, sk.front.R.rotation.x);
+      rear = Math.min(rear, sk.rear.rotation.x);
+    }
+    let sway = 0;
+    for (let i = 0; i < 40; i++) { step(m, { faceYaw: Math.PI / 2 }); sway = Math.max(sway, Math.abs(rig().whips[0].g.rotation.x)); }
+    for (let i = 0; i < 240; i++) step(m, { faceYaw: Math.PI / 2 });
+    out.secondary = { front, rear, sway, settled: Math.abs(rig().whips[0].g.rotation.x) };
+    m = build({ backpack: 'wing' });
+    reset(m);
+    for (let i = 0; i < 40; i++) step(m, {});
+    const folded = Math.abs(rig().wings[0].g.rotation.z);
+    for (let i = 0; i < 40; i++) step(m, { ascend: true });
+    out.wings = { folded, spread: Math.abs(rig().wings[0].g.rotation.z) };
+
+    // ---- shoulder mounts follow the aim and kick back when they fire
+    m = build({ mountL: 'cannon' });
+    reset(m);
+    for (let i = 0; i < 40; i++) step(m, { pitch: 0.4, faceYaw: 0 });
+    const mount = rig().mounts.L;
+    out.mount = { pitch: mount.g.rotation.x };
+    m.model.recoil(0.8, 'L');
+    step(m, { pitch: 0.4, faceYaw: 0 });
+    out.mount.kick = mount.g.position.z - mount.z;
+
+    // ---- a hit from the front snaps the chest back
+    g.cheat.invincible = false;
+    m = build();
+    reset(m);
+    for (let i = 0; i < 40; i++) step(m, { faceYaw: 0 });
+    const chest0 = m.model.torso.rotation.x;
+    m.takeDamage(160, { knock: new V(0, 0, 30), kind: 'beam' });
+    let chest = chest0;
+    for (let i = 0; i < 12; i++) { step(m, { faceYaw: 0 }); chest = Math.max(chest, m.model.torso.rotation.x); }
+    out.flinch = chest - chest0;
+    g.cheat.invincible = true;
+
+    // ---- a knockdown: thrown down, a moment on the ground (the pilot cannot be hit there), then up again
+    g.cheat.invincible = false;
+    reset(m);
+    for (let i = 0; i < 20; i++) step(m, {});
+    m.takeDamage(300, { knock: new V(0, 40, 90), kind: 'saber', stagger: true, down: true });
+    const phases = [];
+    let lieHip = Infinity, hurtOnGround = 0;
+    for (let i = 0; i < 60 * 4; i++) {
+      step(m, { moveX: 1 });
+      const ph = m.knock?.phase ?? 'up';
+      if (phases[phases.length - 1] !== ph) phases.push(ph);
+      if (ph === 'lie') { lieHip = Math.min(lieHip, m.model.hips.position.y); hurtOnGround += m.takeDamage(50, { kind: 'beam' }); }
+    }
+    out.knock = { phases, lieHip, hurtOnGround, standsAgain: !m.knock && m.model.hips.position.y > 9 };
+    g.cheat.invincible = true;
+
+    // ---- a destroyed machine breaks down (sinking to its knees) before it explodes
+    g.state = 'playing';
+    g.missions.state = 'idle';
+    for (const e of g.enemies) e.mech.destroy();
+    g.enemies.length = 0;
+    const e = createEnemy(g, 'drone', 1);
+    e.mech.place(0, -60, 0, 0);
+    e.think = () => ({ faceYaw: 0 });
+    g.enemies.push(e);
+    g.step(10);
+    const standing = e.mech.model.hips.position.y;
+    g.slowmoT = 0; g.rig.kick = 0;
+    e.mech.takeDamage(99999, { kind: 'beam' });
+    out.wreck = { removed: !g.enemies.includes(e), wrecks: g.wrecks.length, slowmo: g.slowmoT, kick: g.rig.kick };
+    let sunk = standing;
+    for (let i = 0; i < 50; i++) { g.step(1); sunk = Math.min(sunk, e.mech.model.hips.position.y); }
+    out.wreck.inScene = !!e.mech.root.parent;
+    out.wreck.sunk = standing - sunk;
+    g.step(40);
+    out.wreck.gone = !e.mech.root.parent && g.wrecks.length === 0;
+
+    // ---- the boost lunge: a melee press at a target out of reach boosts in (afterimages, speed lines), then swings
+    const p = g.player;
+    m = build();
+    reset(m);
+    g.rig.reset(0);
+    const t = createEnemy(g, 'bulwark', 1);
+    t.mech.place(0, -90, 0, 0);
+    t.think = () => ({ faceYaw: 0 });
+    t.def_dodge = 0;
+    t.mech.hp = t.mech.maxHp = 100000;
+    g.enemies.push(t);
+    g.step(3);
+    p.lock = t.mech;
+    T.tap('Mouse2');
+    const seq = [];
+    let lungeSpeed = 0, ghosts = 0, lines = 0, gapAtSwing = null;
+    for (let i = 0; i < 40; i++) {
+      g.step(1);
+      const st = p.melee?.stage ?? null;
+      if (seq[seq.length - 1] !== st) seq.push(st);
+      if (st === -1) {
+        lungeSpeed = Math.max(lungeSpeed, Math.hypot(m.vel.x, m.vel.z));
+        ghosts = Math.max(ghosts, g.fx._ghostsLive.size);
+        lines = Math.max(lines, Number(document.getElementById('speedlines').style.opacity));
+      }
+      if (st === 0 && gapAtSwing === null) gapAtSwing = Math.hypot(t.mech.pos.x - m.pos.x, t.mech.pos.z - m.pos.z);
+    }
+    // keep pressing: the combo runs to its finisher, which knocks the target down with a camera punch
+    let finisherKnock = false, finisherKick = 0;
+    for (let k = 0; k < 20; k++) {
+      T.tap('Mouse2');
+      for (let i = 0; i < 8; i++) {
+        g.step(1);
+        if (p.melee) seq.includes(p.melee.stage) || seq.push(p.melee.stage);
+        if (t.mech.knock) finisherKnock = true;
+        finisherKick = Math.max(finisherKick, g.rig.kick);
+      }
+    }
+    out.lunge = { seq, lungeSpeed, ghosts, lines, gapAtSwing, finisherKnock, finisherKick };
+    for (const en of g.enemies) en.mech.destroy();
+    g.enemies.length = 0;
+    g.fx.clear();
+
+    g.state = keep.state;
+    g.manual = keep.manual;
+    build();
+    reset(g.player.mech);
+    return out;
+  });
+  dump('moves', moves);
+  check('a shot snaps the gun arm straight at the target and holds it there', moves.shot.fwd > 0.97 && Math.abs(moves.shot.y) < 0.12 && moves.shot.elbow < 0.25 && moves.shot.twist > 0.15 && moves.shotHeld > 0.95, JSON.stringify(moves.shot));
+  check('a heavy gun is held in both hands, level, even while it fires', moves.grip < 1.6 && moves.gripFiring < 1.8 && Math.abs(moves.bazookaLevel) < 0.15, `grip ${moves.grip.toFixed(2)} / ${moves.gripFiring.toFixed(2)}, level ${moves.bazookaLevel.toFixed(2)}`);
+  check('drawing the saber reaches back for the hilt; the gun rides the rear skirt while it is out', moves.draw.closest < 2.6 && moves.draw.saber && !moves.draw.gunInHand && moves.draw.holstered && !moves.draw.hiltRacked && moves.draw.blade > 0.9, JSON.stringify(moves.draw));
+  check('putting the saber away racks the hilt and takes the gun back', moves.sheath.back < 2.6 && !moves.sheath.saber && moves.sheath.gunInHand && !moves.sheath.holstered && moves.sheath.hiltRacked, JSON.stringify(moves.sheath));
+  check('a jump crouches before it pushes off', moves.jump.lowHip < moves.jump.standHip - 0.6 && moves.jump.firstUp >= 4 && moves.jump.firstUp <= 8, JSON.stringify(moves.jump));
+  check('a step leans hard into its direction and ends in a skid', moves.step.roll < -0.15 && moves.step.skid > 0.2, JSON.stringify(moves.step));
+  check('boosting forward through the air tips the body into a flight pose', moves.flight < -0.45, `hips pitch ${moves.flight.toFixed(2)}`);
+  check('a really hard landing drops to one knee, lower than an ordinary landing', moves.landHard < moves.landNormal - 1.2, `${moves.landHard.toFixed(2)} vs ${moves.landNormal.toFixed(2)}`);
+  check('the skirt plates swing with the thighs; a whip antenna sways and settles', moves.secondary.front > 0.12 && moves.secondary.rear < -0.05 && moves.secondary.sway > 0.03 && moves.secondary.settled < 0.01, JSON.stringify(moves.secondary));
+  check('wing binders fold at rest and spread under thrust', moves.wings.spread > moves.wings.folded + 0.25, JSON.stringify(moves.wings));
+  check('a shoulder cannon follows the aim and kicks back when it fires', moves.mount.pitch > 0.25 && moves.mount.kick > 0.4, JSON.stringify(moves.mount));
+  check('a hit from the front snaps the chest back', moves.flinch > 0.1, `+${moves.flinch.toFixed(2)} rad`);
+  check('a knockdown throws the mech down, protects it on the ground, and it gets back up', moves.knock.phases.join() === 'fall,lie,rise,up' && moves.knock.lieHip < 5 && moves.knock.hurtOnGround === 0 && moves.knock.standsAgain, JSON.stringify(moves.knock));
+  check('a destroyed machine sparks and sinks to its knees before it explodes', moves.wreck.removed && moves.wreck.wrecks === 1 && moves.wreck.inScene && moves.wreck.sunk > 2.5 && moves.wreck.gone, JSON.stringify(moves.wreck));
+  check('a kill gets a beat of slow motion and a camera punch', moves.wreck.slowmo > 0.1 && moves.wreck.kick > 0.3, JSON.stringify(moves.wreck));
+  check('a melee press at a distant target boosts in first (afterimages, speed lines), then swings', moves.lunge.seq[0] === -1 && moves.lunge.seq.includes(0) && moves.lunge.lungeSpeed > 200 && moves.lunge.ghosts >= 2 && moves.lunge.lines > 0.4 && moves.lunge.gapAtSwing < 30, JSON.stringify(moves.lunge));
+  check('the combo runs forehand, backhand, thrust and a finisher that knocks the target down', [0, 1, 2, 3].every((st) => moves.lunge.seq.includes(st)) && moves.lunge.finisherKnock && moves.lunge.finisherKick > 0.5, JSON.stringify(moves.lunge.seq));
+
+  // ------------------------------------------------------------ 5i. the catapult launch that opens a sortie
+  const launch = await page.evaluate(() => {
+    const g = window.__game, T = window.__t, m = () => g.player.mech;
+    const c = g.world.catapult;
+    g.launchIntro = true;
+    g.startMission();
+    g.manual = true;
+    const out = { start: { z: m().pos.z, deck: c.start, shown: c.group.visible, launching: !!g.launch } };
+    T.keys(['KeyW']); // the pilot has no control on the shuttle
+    g.step(45);
+    out.standby = { z: m().pos.z, crouch: m().model.hips.position.y };
+    T.keys([], ['KeyW']);
+    g.step(36); // well into the run
+    out.run = { speed: -m().vel.z, z: m().pos.z };
+    g.step(20);
+    out.release = { released: !!g.launch?.released, vy: m().vel.y, airborne: !m().grounded, lines: Number(document.getElementById('speedlines').style.opacity) };
+    let landedAt = null;
+    for (let i = 0; i < 180; i++) { g.step(1); if (m().grounded && landedAt === null) landedAt = { z: m().pos.z, t: g.stats.time, enemies: g.enemies.length }; }
+    out.landed = landedAt;
+    out.after = { launch: !!g.launch, shown: c.group.visible, cine: !!g.rig.cine, enemies: g.enemies.length };
+    g.launchIntro = false;
+    return out;
+  });
+  dump('launch', launch);
+  check('a sortie opens on the catapult: the mech crouched on the shuttle, the pilot not yet in control', launch.start.launching && launch.start.shown && Math.abs(launch.start.z - launch.start.deck) < 1 && Math.abs(launch.standby.z - launch.start.deck) < 1 && launch.standby.crouch < 10, JSON.stringify([launch.start, launch.standby]));
+  check('the shuttle throws the mech down the deck and into the air', launch.run.speed > 150 && launch.release.released && launch.release.airborne && launch.release.vy > 20 && launch.release.lines > 0.4, JSON.stringify([launch.run, launch.release]));
+  check('it lands in the plaza before the first wave arrives, and the catapult and the scripted camera clear away', !!launch.landed && launch.landed.z < 120 && launch.landed.z > -80 && launch.landed.enemies === 0 && !launch.after.launch && !launch.after.shown && !launch.after.cine && launch.after.enemies > 0, JSON.stringify([launch.landed, launch.after]));
 
   // ------------------------------------------------------------ 6. enemies fight back
   const enemies = await page.evaluate(async () => {

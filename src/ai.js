@@ -133,7 +133,7 @@ class Enemy {
     this.mech.model.recoil(opts.type === 'cannon' ? 1 : opts.type === 'bullet' ? 0.15 : 0.4);
   }
 
-  /** Resolve a sabre hit on the player: a close, in-front check. Returns true on contact. */
+  /** Resolve a sabre hit on the player: a close, in-front check. Returns true on contact. A staggering blow (a combo's last) knocks down. */
   meleeHit(damage, reach, stagger = false) {
     const m = this.mech;
     const p = this.target;
@@ -142,7 +142,7 @@ class Enemy {
     if (d > reach + p.radius + m.radius * 0.5 || Math.abs(p.pos.y - m.pos.y) > 22) return false;
     if (d > 1e-3 && v.divideScalar(d).dot(m.forward()) < 0.1) return false;
     const knock = v.clone().multiplyScalar(stagger ? 90 : 40);
-    const dealt = p.takeDamage(damage, { source: m, knock, stagger, kind: 'saber', point: p.center(new THREE.Vector3()) });
+    const dealt = p.takeDamage(damage, { source: m, knock, stagger, down: stagger, kind: 'saber', point: p.center(new THREE.Vector3()) });
     if (dealt > 0) {
       this.game.fx.sparks(p.center(new THREE.Vector3()), m.forward(), 20, [1, 0.6, 0.9]);
       this.game.audio.saberHit(p.pos);

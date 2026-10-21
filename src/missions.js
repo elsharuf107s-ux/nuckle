@@ -23,9 +23,11 @@ export class Missions {
   get waveNumber() { return Math.min(WAVES.length, Math.max(1, this.index + 1)); }
   get title() { return WAVES[Math.min(this.index, WAVES.length - 1)]?.title ?? ''; }
 
-  start() {
+  /** Begin the sortie. `extraIntro` holds the first wave back a little longer (the catapult launch is still playing). */
+  start(extraIntro = 0) {
     this.reset();
     this._next();
+    this.timer += extraIntro;
   }
 
   /** The cleared wave and the one that follows it, for the pit-stop screen. */

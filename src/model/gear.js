@@ -15,12 +15,20 @@ export function buildBackpack(rig) {
   const w = { std: 3.6, heavy: 4.6, booster: 4.4, pod: 4.0, wing: 3.6, gen: 4.4, plate: 5.0 }[pack] ?? 3.6;
   const big = pack === 'booster';
   add(torso, box(w, 3.6, 1.5), M.dark, 0, 2.4, zb, { edge: true });
+  // where the right hand reaches to draw (and rack) the saber: the right hilt, or the top of the pack
+  rig.hilts = null;
+  rig.drawPoint = { x: 1.55, y: 4.6, z: zb };
   if (pack === 'std') {
-    // a pair of saber hilts racked at the top corners, pointing up and out
+    // a pair of saber hilts racked at the top corners, pointing up and out; drawing one takes it off the rack
+    rig.hilts = {};
     for (const s of [-1, 1]) {
-      add(torso, cyl(0.24, 0.24, 2.2, 8), M.metal, s * 1.7, 4.7, zb - 0.1, { rz: -s * 0.25 });
-      add(torso, cyl(0.3, 0.3, 0.3, 8), M.trim, s * 1.7 + s * 0.28, 5.7, zb - 0.1, { rz: -s * 0.25 });
+      const h = k.group(torso, s * 1.7, 4.7, zb - 0.1);
+      h.rotation.z = -s * 0.25;
+      add(h, cyl(0.24, 0.24, 2.2, 8), M.metal, 0, 0, 0);
+      add(h, cyl(0.3, 0.3, 0.3, 8), M.trim, 0, 1.03, 0);
+      rig.hilts[s < 0 ? 'L' : 'R'] = h;
     }
+    rig.drawPoint = { x: 1.85, y: 5.3, z: zb - 0.1 };
   } else if (pack === 'heavy') {
     for (const s of [-1, 1]) add(torso, box(1.2, 1.2, 2.6), M.accent, s * 2.7, 4.4, zb, { edge: true });
   } else if (pack === 'booster') {
@@ -35,9 +43,14 @@ export function buildBackpack(rig) {
       for (const ox of [-0.45, 0.45]) for (const oy of [-0.38, 0.38]) add(torso, cyl(0.3, 0.3, 0.3, 8), M.trim, s * 2.6 + ox, 4.9 + oy, zb - 1.35, { rx: PI / 2 });
     }
   } else if (pack === 'wing') {
+    // the wings hinge at their roots: they fold in at rest and spread when the thrusters fire
     for (const s of [-1, 1]) {
-      add(torso, box(0.35, 6.0, 2.4), M.main, s * 3.4, 5.4, zb + 0.2, { rz: -s * 0.55, edge: true });
-      add(torso, box(0.45, 1.4, 2.5), M.accent, s * 4.97, 7.95, zb + 0.2, { rz: -s * 0.55 });
+      const root = k.group(torso, s * 1.84, 2.85, zb + 0.2);
+      const wing = k.group(root, 0, 0, 0);
+      wing.rotation.z = -s * 0.55;
+      add(wing, box(0.35, 6.0, 2.4), M.main, 0, 3.0, 0, { edge: true });
+      add(wing, box(0.45, 1.4, 2.5), M.accent, 0, 6.0, 0);
+      rig.wings.push({ g: root, side: s });
     }
   } else if (pack === 'gen') {
     for (const s of [-1, 1]) {
@@ -132,12 +145,14 @@ function mountOn(rig, style, s, pad) {
     muzzle = node(g, 0, 0.65, -6.0);
   }
   rig.mountMuzzle[side] = muzzle;
+  rig.mounts[side] = { g, z: g.position.z, style };
   return g;
 }
 
 export function buildShoulders(rig) {
   const { spec } = rig;
   rig.mountMuzzle = { L: null, R: null };
+  rig.mounts = { L: null, R: null };
   rig.pads = {};
   for (const s of [-1, 1]) {
     const side = s < 0 ? 'L' : 'R';
@@ -214,9 +229,23 @@ export function buildWeapon(rig) {
     add(rifle, box(0.5, 0.5, 0.5), glow, 0, -6.5, 0, { shadow: false });
     muzzle.position.set(0, -6.8, 0);
   }
+  // while the saber is out, the gun rides on the rear skirt (a copy of it, swapped in when the saber is drawn)
+  rig.holster = null;
+  if (style !== 'saber' && style !== 'greatsword') {
+    const rear = rig.skirt?.rear;
+    const parent = rear ?? rig.hips;
+    const o = rear ? rear.position : { x: 0, y: 0, z: 0 };
+    const holster = group(parent, -2.9 - o.x, -0.95 - o.y, 2.45 - o.z);
+    holster.rotation.set(0, 0, PI / 2 - 0.12);
+    for (const child of rifle.children) holster.add(child.clone());
+    holster.visible = false;
+    rig.holster = holster;
+  }
   rifle.add(muzzle);
   rig.rifle = rifle;
   rig.muzzle = muzzle;
+  // a heavy gun is held in both hands: the left hand takes this foregrip
+  rig.foregrip = { cannon: -2.8, sniper: -3.2, lance: -3.4, scatter: -3.0 }[style] ?? null;
 
   // muzzle charge glow (telegraphs heavy enemy attacks)
   const chargeMat = new THREE.MeshBasicMaterial({

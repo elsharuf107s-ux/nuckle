@@ -24,9 +24,15 @@ const CEILING = 230;
  *   charge        0..1 muzzle glow
  *   velocity      THREE.Vector3 that overrides all movement this update (sabre lunges)
  *   hover         true to cancel gravity gently (floating during a melee swing)
+ *   launch        0..1 the crouched stance on the catapult (see Game.updateLaunch)
  */
 const BARRIER_DELAY = 5;  // seconds without a hit before the barrier recharges
 const BARRIER_RATE = 70;  // barrier points restored per second once it does
+const JUMP_CROUCH = 0.09; // a jump loads the legs this long before it leaves the ground
+const SKID_TIME = 0.32;   // after a step (or a fast landing) the mech slides to a stop on its heels
+// a knockdown: thrown down (until it hits the ground), lying there, then getting up
+const KNOCK_LIE = 0.55;
+const KNOCK_RISE = 0.7;
 
 export class Mech {
   /** `defOverride` lets the garage field a custom build (see parts.js deriveMech) instead of a stock mech. */
@@ -73,6 +79,11 @@ export class Mech {
     this.dead = false;
     this.saberOut = false;
     this.tintColor = null; // [r, g, b] steady glow, e.g. burst aura
+    this.jumpT = 0;        // the crouch before a jump
+    this.skidT = 0;        // sliding to a stop after a step
+    this.knock = null;     // knocked down: { phase: 'fall' | 'lie' | 'rise', t }
+    this.ghostT = 0;       // afterimage timer
+    this.ghosts = team === 'player' || type === 'striker' || type === 'baron'; // the fast machines leave afterimages
 
     this._fwd = new THREE.Vector3();
     this._trail = new THREE.Vector3();
@@ -116,8 +127,10 @@ export class Mech {
     this.flashT = Math.max(0, this.flashT - dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.enDelay = Math.max(0, this.enDelay - dt);
+    this.skidT = Math.max(0, this.skidT - dt);
+    if (this.knock) this._updateKnock(dt);
 
-    const staggered = this.stagger > 0;
+    const staggered = this.stagger > 0 || !!this.knock;
     const speedMul = it.speedMul ?? 1;
     let mx = staggered ? 0 : it.moveX ?? 0;
     let mz = staggered ? 0 : it.moveZ ?? 0;
@@ -138,6 +151,16 @@ export class Mech {
       this.game.fx.dust(this.pos, 6, 10);
     }
 
+    // ---- a jump from the ground: the legs load for a moment, then push off
+    const canJump = it.ascend && this.grounded && !this.overheat && this.en > 0 && !staggered && this.dashT <= 0 && !it.velocity && this.vel.y <= 0;
+    if (this.jumpT <= 0 && canJump) this.jumpT = JUMP_CROUCH;
+    let pushOff = false;
+    if (this.jumpT > 0) {
+      this.jumpT -= dt;
+      if (staggered || this.dashT > 0 || it.velocity) this.jumpT = 0;
+      else if (this.jumpT <= 0) pushOff = true;
+    }
+
     this.thrusting = false;
     if (it.velocity) {
       this.vel.copy(it.velocity);
@@ -151,15 +174,23 @@ export class Mech {
       this.vel.z = this.dashDir.z * speed;
       this.vel.y = this.dashDir.y * speed * 0.7;
       this.thrusting = true;
+      if (this.dashT <= 0 && this.grounded) this.skidT = SKID_TIME; // the step ends in a slide
     } else {
-      // ---- horizontal
+      // ---- horizontal (a skid lets the mech slide on a little)
       const top = (this.grounded ? def.speed : def.airSpeed) * speedMul;
-      const lambda = staggered ? 1.5 : this.grounded ? 11 : mx || mz ? 3.2 : 1.2;
+      const lambda = this.knock ? (this.knock.phase === 'fall' ? 1.5 : 4) : staggered ? 1.5 : this.grounded ? (this.skidT > 0 ? 5 : 11) : mx || mz ? 3.2 : 1.2;
       this.vel.x = damp(this.vel.x, mx * top, lambda, dt);
       this.vel.z = damp(this.vel.z, mz * top, lambda, dt);
 
       // ---- vertical
-      if (it.ascend && !this.overheat && this.en > 0 && !staggered) {
+      if (this.jumpT > 0) {
+        this.vel.y = 0; // still crouching
+      } else if (pushOff) {
+        this.vel.y = def.ascendSpeed * 1.2;
+        this.thrusting = true;
+        this.model.flare(1);
+        this.game.fx.dust(this.pos, 10, 16);
+      } else if (it.ascend && !this.overheat && this.en > 0 && !staggered) {
         this.vel.y = damp(this.vel.y, def.ascendSpeed * (speedMul > 1 ? 1.1 : 1), 6, dt);
         if (!it.freeBoost) this.en -= def.ascendCost * dt;
         this.enDelay = 0.5;
@@ -179,7 +210,32 @@ export class Mech {
     }
     if (this.overheat && this.en >= this.maxEn * 0.3) this.overheat = false;
 
-    // ---- integrate & collide
+    this._integrate(dt);
+
+    // ---- facing
+    let faceYaw = it.faceYaw;
+    if (faceYaw === undefined && (mx || mz) && !this.knock) faceYaw = Math.atan2(-mx, -mz);
+    if (this.knock) faceYaw = undefined;
+    const prevYaw = this.yaw;
+    if (faceYaw !== undefined) this.yaw = dampAngle(this.yaw, faceYaw, def.turn, dt);
+    this.turnRate = dt > 0 ? angleDiff(prevYaw, this.yaw) / dt : 0;
+    this.pitch = damp(this.pitch, it.pitch ?? 0, 10, dt);
+    this.aimYaw = it.faceYaw !== undefined ? angleDiff(this.yaw, it.faceYaw) : 0;
+
+    // ---- afterimages trail a step or a lunge
+    if (this.ghosts && (this.dashT > 0 || (it.velocity && it.attack?.kind === 'lunge'))) {
+      this.ghostT -= dt;
+      if (this.ghostT <= 0) {
+        this.ghostT = 0.045;
+        this.game.fx.afterimage(this);
+      }
+    } else this.ghostT = 0;
+
+    this._syncModel(dt, it);
+  }
+
+  /** Move by the velocity and resolve the ground, rooftops, walls and the arena edge. */
+  _integrate(dt) {
     const prevY = this.pos.y;
     this.pos.addScaledVector(this.vel, dt);
 
@@ -206,22 +262,62 @@ export class Mech {
       }
     }
     this.outOfBounds = Math.abs(this.pos.x) > ARENA - 10 || Math.abs(this.pos.z) > ARENA - 10;
-
-    // ---- facing
-    let faceYaw = it.faceYaw;
-    if (faceYaw === undefined && (mx || mz)) faceYaw = Math.atan2(-mx, -mz);
-    const prevYaw = this.yaw;
-    if (faceYaw !== undefined) this.yaw = dampAngle(this.yaw, faceYaw, def.turn, dt);
-    this.turnRate = dt > 0 ? angleDiff(prevYaw, this.yaw) / dt : 0;
-    this.pitch = damp(this.pitch, it.pitch ?? 0, 10, dt);
-
-    this._syncModel(dt, it);
   }
 
   _landed(speed) {
     this.model.land(clamp((speed - 20) / 120, 0.2, 1));
     this.game.fx.dust(this.pos, Math.min(16, 6 + speed / 10), 18);
     if (speed > 70) this.game.shakeFrom(this.pos, 0.25, 200);
+    if (Math.hypot(this.vel.x, this.vel.z) > 60) this.skidT = SKID_TIME; // a fast landing skids
+  }
+
+  // ------------------------------------------------------------------ knockdown
+
+  /** Thrown to the ground by a finisher. Bosses and machines that cannot be staggered stay on their feet. */
+  knockDown() {
+    if (this.knock || this.dead || this.def.staggerAt === Infinity) return;
+    this.knock = { phase: 'fall', t: 0 };
+    this.dashT = 0;
+    this.jumpT = 0;
+    this.stagger = Math.max(this.stagger, 0.2);
+    if (this.saberOut) this.setSaber(false);
+  }
+
+  _updateKnock(dt) {
+    const k = this.knock;
+    k.t += dt;
+    this.stagger = Math.max(this.stagger, 0.1); // no control while down
+    if (k.phase === 'fall' && ((this.grounded && k.t > 0.3) || k.t > 3)) {
+      k.phase = 'lie';
+      k.t = 0;
+      this.game.fx.dust(this.pos, 14, 22);
+      this.game.shakeFrom(this.pos, 0.35, 220);
+      this.game.audio.hit(this.pos);
+    } else if (k.phase === 'lie' && k.t > KNOCK_LIE) {
+      k.phase = 'rise';
+      k.t = 0;
+      this.model.flare(1); // the thrusters help it up
+      this.game.fx.dust(this.pos, 8, 14);
+    } else if (k.phase === 'rise' && k.t > KNOCK_RISE) {
+      this.knock = null;
+      if (this.team === 'player') this.invuln = Math.max(this.invuln, 0.4);
+      return;
+    }
+    // a pilot on the ground cannot be juggled: invulnerable from the moment it lands until it is back up
+    if (this.team === 'player' && k.phase !== 'fall') this.invuln = Math.max(this.invuln, 0.1);
+  }
+
+  /** A destroyed machine breaking down before it explodes (see Game.updateWrecks): no pilot, only gravity. `k` runs 0..1. */
+  updateWreck(dt, k) {
+    this.knock = null;
+    this.thrusting = false;
+    this.dashT = 0;
+    const lambda = this.grounded ? 5 : 0.8;
+    this.vel.x = damp(this.vel.x, 0, lambda, dt);
+    this.vel.z = damp(this.vel.z, 0, lambda, dt);
+    if (!this.grounded || this.vel.y > 0) this.vel.y = Math.max(this.vel.y - GRAVITY * dt, -MAX_FALL);
+    this._integrate(dt);
+    this._syncModel(dt, { dying: Math.max(0.001, k) });
   }
 
   _syncModel(dt, it) {
@@ -239,12 +335,30 @@ export class Mech {
       dash: this.dashT > 0 ? this.dashT / this.def.dashTime : 0,
       turnRate: this.turnRate,
       relaxed: !!it.relaxed,
-      boost: this.thrusting ? 1 : this.grounded ? 0 : 0.12,
+      boost: it.boost ?? (this.thrusting ? 1 : this.grounded ? 0 : 0.12),
       pitch: this.pitch,
+      aimYaw: this.aimYaw ?? 0,
       attack: it.attack ?? null,
-      stagger: clamp(this.stagger / 0.5, 0, 1),
+      stagger: this.knock ? 0 : clamp(this.stagger / 0.5, 0, 1),
       charge: it.charge ?? 0,
+      jumpCrouch: this.jumpT > 0 ? 1 - this.jumpT / JUMP_CROUCH : 0,
+      skid: this.skidT / SKID_TIME,
+      knock: this.knock,
+      dying: it.dying ?? 0,
+      launch: it.launch ?? 0,
     });
+
+    // a skid scrapes sparks and dust from the heels
+    if (this.skidT > 0 && this.grounded && Math.random() < 0.6) {
+      const sp = Math.hypot(this.vel.x, this.vel.z);
+      if (sp > 40) {
+        const s = this.spec.scale;
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const p = this._trail.set(this.pos.x + cz * side * 2 * s, this.pos.y + 0.4, this.pos.z - sx * side * 2 * s);
+        this.game.fx.sparks(p, null, 2, [1, 0.75, 0.4]);
+        if (Math.random() < 0.5) this.game.fx.dust(p, 2, 6);
+      }
+    }
 
     // hit flash over any steady tint
     const f = this.flashT > 0 ? (this.flashT / 0.12) * 0.7 : 0;
@@ -293,6 +407,8 @@ export class Mech {
       this.stagger = Math.max(this.stagger, info.stagger ? 0.55 : 0.4);
       this.dashT = 0;
     }
+    if (info.down) this.knockDown();
+    this._flinch(amount, info);
     this.game.onDamaged(this, amount, info);
     if (this.hp <= 0) {
       this.hp = 0;
@@ -300,6 +416,18 @@ export class Mech {
       this.game.onDestroyed(this, info);
     }
     return amount;
+  }
+
+  /** The model's hit reaction: which way the blow pushed us (in our own frame) and how hard, against what staggers us. */
+  _flinch(amount, info) {
+    let px = 0, pz = 0;
+    if (info.knock && (info.knock.x || info.knock.z)) { px = info.knock.x; pz = info.knock.z; }
+    else if (info.source) { px = this.pos.x - info.source.pos.x; pz = this.pos.z - info.source.pos.z; }
+    const len = Math.hypot(px, pz);
+    if (len < 1e-6) { px = 0; pz = 1; } else { px /= len; pz /= len; }
+    const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
+    const ref = Number.isFinite(this.def.staggerAt) ? this.def.staggerAt : 600;
+    this.model.hit(px * c - pz * s, px * s + pz * c, clamp(amount / ref, 0.12, 1));
   }
 
   heal(amount) {
@@ -317,6 +445,7 @@ export class Mech {
 
   /** Remove from the scene and free this mech's materials (geometry is shared, so it stays). */
   destroy() {
+    this.game.fx.dropGhosts(this);
     this.game.scene.remove(this.root);
     this.root.traverse((o) => o.material?.dispose?.());
   }

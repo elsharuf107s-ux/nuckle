@@ -2,8 +2,10 @@
 
 A 3D third-person mobile-suit combat game that runs in the browser, on desktop and on phones. **Build your own mech piece by piece** in the
 garage (eleven hardpoints you click on the mech, 97 parts, tuning points and paint, balanced by a load limit and a power budget), then take it through a dusk-lit colony city:
-boost over rooftops, lock on, burn enemies down with your weapon, homing missiles and a three-hit beam-saber combo,
-and survive five waves ending in a fight with the **Crimson Baron**. Between waves you drop into a **pit-stop garage**
+boost over rooftops, lock on, burn enemies down with your weapon, homing missiles and a boost lunge into a four-hit
+beam-saber combo, and survive five waves ending in a fight with the **Crimson Baron**. Every sortie opens with a catapult
+launch, and the machines move like the mobile suits in the versus games: snap shots, saber draws, hard-leaning steps
+with afterimages, knockdowns and sparking wrecks. Between waves you drop into a **pit-stop garage**
 to re-fit your mech for what comes next.
 
 Everything is generated in code. There are no model, texture or audio files: mechs are built from primitives,
@@ -30,7 +32,7 @@ described below. There is no gamepad support.
 | `Space` (hold) | Boost upward |
 | `Shift` | Quick-boost dash, with brief invulnerability. Aimed along your input, or at your target |
 | Left mouse | Your gun (auto-reloads). With **Twin Sabers** equipped it swings the saber instead |
-| Right mouse | Beam saber. Lunges at the target; press again mid-swing to chain a 3-hit combo |
+| Right mouse | Beam saber. Boosts in at a target that is out of reach, then swings; press again mid-swing to chain forehand, backhand, thrust and an overhead finisher that knocks the target down |
 | `E` | Missile salvo (4 homing missiles; charges recharge) |
 | `F` / `G` | Your shoulder mounts, if you fitted them: the first mount fires on `F`, the second on `G` (shoulder cannon: a heavy splash shell; micro-missile pod: six small homing missiles; rail lance: a piercing slug) |
 | `V` | Your sub-weapon, if you fitted one (vulcans, flares, repair kit, EN injector, shock pulse or aegis field) |
@@ -42,6 +44,30 @@ described below. There is no gamepad support.
 
 Dash to dodge, use the saber to close gaps and break enemy guard, and keep an eye on the **EN** bar: boosting
 to zero overheats the thrusters until they recover. The burst gauge fills as you deal damage and score kills.
+
+### How the machines move
+
+The animation is modelled on the mobile-suit versus games: fast, readable, with a strong pose held at every key moment.
+
+- **Shooting.** The gun arm snaps straight down the line of fire, the chest turns side-on, and the pose holds for half
+  a second before it eases back to the ready. Heavy guns (bazooka, sniper, shotgun, lance) are held in both hands.
+  Shoulder cannons track your aim and slide back when they fire, and heavy shots brace the legs.
+- **The saber.** Drawing it clips the gun to the rear skirt, reaches over the shoulder for the hilt on the backpack and
+  ignites the blade; putting it away racks the hilt and takes the gun back. A press at a target out of reach boosts in
+  first, chest down and blade trailing, then the combo runs forehand, backhand, a thrust, and an overhead finisher.
+- **Knockdowns.** A combo's finisher throws the target onto its back, whether the combo is yours, a Striker's or the
+  Baron's. It lies there a moment, then thrusts itself back up. While you are down you cannot be hit. The Baron never
+  goes down.
+- **Movement.** Jumps crouch before they push off. Steps lean hard into their direction, leave afterimages and speed
+  lines, and end in a skid. Boosting forward through the air tips the body into a flight pose. A really hard landing
+  drops to one knee.
+- **Taking hits.** Every hit snaps the chest and head back from where it came from and lets them settle on springs.
+- **Destroyed machines** spark, convulse and sink to their knees for a moment before they explode. Every kill gets a beat
+  of slow motion and a camera punch, a longer one for the last enemy of a wave.
+- **Secondary motion.** Skirt plates are pushed out by the thighs and swing on their hinges, shoulder pads ride the arms,
+  wing binders spread under thrust, whip antennas sway, and crests rattle on impact.
+- **The catapult.** A sortie opens on a launch deck north of the plaza: the lights count down while the mech crouches on
+  the shuttle, the shuttle throws it down the deck, and the chase camera takes over once it is airborne.
 
 ### The sortie
 
@@ -191,17 +217,20 @@ the results screen, or meet it again in the pit stop between waves.
 index.html, style.css     page shell, HUD markup and menus
 src/main.js               entry point: screens, pause, pointer lock, saved options
 src/game.js               renderer, fixed-timestep loop, damage/kill/score rules, win and lose
-src/world.js              procedural city, sky shader, lighting, collision queries
-src/mechModel.js          assembles a mech from a spec and animates it: planted-foot gait with two-bone IK, skating dashes,
-                          air poses, landing crouch, keyframed saber swings; locates the garage's hardpoint anchors
-src/model/                the geometry: kit.js (shared geometry and materials), skeleton.js (proportions), body.js (pelvis, legs, torso,
-                          arms), head.js (helmets and crests), gear.js (backpacks, shoulders and mounts, weapons, off-hands, sub-weapons, markings)
-src/mech.js               mech physics: walk, boost, dash, collision, damage
-src/player.js             input to intent, lock-on, rifle, missiles, saber combo, burst
+src/world.js              procedural city, sky shader, lighting, the launch catapult, collision queries
+src/mechModel.js          assembles a mech from a spec and hands it to the motion layer; locates the garage's hardpoint anchors
+src/model/                the geometry: kit.js (shared geometry and materials), skeleton.js (proportions), body.js (pelvis and hinged skirt,
+                          legs, torso, arms), head.js (helmets, crests, whip antennas), gear.js (backpacks, shoulders and mounts, weapons and
+                          the rear-skirt holster, off-hands, sub-weapons, markings)
+src/model/motion.js       the animation: planted-foot gait with two-bone leg IK, jump crouch, steps, flight, skids and kneeling landings;
+                          firing poses, two-handed grips and the saber draw (two-bone arm IK); swings, lunges, knockdowns, the breakdown
+                          of a wreck; hit reactions and the secondary motion on springs
+src/mech.js               mech physics: walk, jump, boost, dash, skids, knockdowns, collision, damage
+src/player.js             input to intent, lock-on, rifle, missiles, saber lunge and combo, burst
 src/ai.js                 Drone / Striker / Bulwark / Baron behaviours
 src/weapons.js            projectiles with swept collision and homing
-src/fx.js                 particles, explosions, debris, saber arcs
-src/camera.js             chase camera with lock-on framing and trauma shake
+src/fx.js                 particles, explosions, debris, saber arcs and thrust streaks, afterimages
+src/camera.js             chase camera with lock-on framing, trauma shake, kill punches and scripted shots (the launch)
 src/input.js              keyboard, mouse and touch state in one key set (plus the analog stick axis)
 src/touch.js              on-screen touch controls: floating stick, look drag, tap-to-target, action buttons
 src/hud.js                DOM bars plus canvas reticle, radar and damage numbers
@@ -237,7 +266,12 @@ setting to turn it off, no pit after the boss), 25 random builds through a short
 boss, a full scripted playthrough to victory through four pit stops, a defeat and retry, the pause/options UI, and the
 animation (planted feet do not slide or sink when walking, strafing, backing up or for enemies of any size; strafes
 turn the hips; dashes glide; landings crouch; the saber slashes sweep the right way and never cut the ground; the
-garage previews the combo at full speed). It fails on any console error.
+garage previews the combo at full speed), and every versus-style move: the firing pose snapping level onto the target and
+holding, the two-handed grip, the saber draw and sheath (hand at the hilt, gun on the rear skirt), the jump crouch, the
+step lean and skid, the flight pose, the kneeling landing, the skirt, antenna and wing motion, the shoulder mount aim and
+kick, the hit flinch, a knockdown with no damage taken on the ground, a wreck sinking before it explodes, the kill slow
+motion, the boost lunge with afterimages and speed lines into the four-hit combo and its knockdown finisher, and the
+catapult launch from the deck to the plaza. It fails on any console error.
 
 `scripts/test-touch.mjs` does the same for phones: an emulated touch device with real multi-touch (both thumbs at once),
 the title, garage, HUD, pause and end screens at 844x390 and 667x375, every on-screen control, the analog stick, tap to

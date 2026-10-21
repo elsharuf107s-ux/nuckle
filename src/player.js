@@ -1,5 +1,5 @@
 // The pilot: turns keyboard/mouse input into mech intent, and owns the player's weapons —
-// the equipped gun, homing missiles, a three-hit beam-sabre combo, an optional shoulder cannon,
+// the equipped gun, homing missiles, a boost lunge into a four-hit beam-sabre combo, the shoulder mounts,
 // lock-on and the BURST mode. Everything about the mech itself comes from the garage build
 // (see parts.js), so applyBuild() swaps the whole machine and its loadout.
 
@@ -10,11 +10,17 @@ import { clamp, rand, yawToward } from './util.js';
 
 const MISSILE_RECHARGE = 7;
 const MISSILES_PER_SALVO = 4;
+// the saber combo: forehand, backhand, a thrust, and an overhead chop that knocks the target down
 const MELEE = [
-  { kind: 'slash1', dur: 0.5, damage: 280, stagger: false },
-  { kind: 'slash2', dur: 0.5, damage: 280, stagger: false },
-  { kind: 'slash3', dur: 0.72, damage: 470, stagger: true },
+  { kind: 'slash1', dur: 0.46, damage: 240, stagger: false },
+  { kind: 'slash2', dur: 0.46, damage: 240, stagger: false },
+  { kind: 'thrust', dur: 0.48, damage: 280, stagger: false },
+  { kind: 'slash3', dur: 0.72, damage: 470, stagger: true, finisher: true },
 ];
+// a melee press with a target out of reach (but this close) first boosts in at it, blade trailing
+const LUNGE_RANGE = 135;
+const LUNGE_SPEED = 300;
+const LUNGE_TIME = 0.5; // the longest a lunge chases before it swings anyway
 const LOCK_RANGE = 800;
 const MOUNT_KEYS = ['KeyF', 'KeyG']; // the first shoulder mount fitted fires on F, the second on G
 // Touch aim assist: with no lock-on, shots bend toward the enemy nearest the crosshair
@@ -127,7 +133,8 @@ export class Player {
     m.barrier = m.barrierMax;
     m.dead = false;
     m.overheat = false;
-    m.stagger = m.invuln = m.dashT = m.flashT = 0;
+    m.stagger = m.invuln = m.dashT = m.flashT = m.skidT = m.jumpT = 0;
+    m.knock = null;
     m.setSaber(false);
     m.tintColor = null;
     this._resetLoadout();
@@ -356,6 +363,15 @@ export class Player {
         this._launchMissile(this.missileQueue[i]);
         this.missileQueue.splice(i, 1);
       }
+    }
+
+    // ---- knocked down: nothing to do but get up again
+    if (mech.knock) {
+      if (this.melee) this._endMelee();
+      this.missileQueue.length = 0;
+      mech.update(dt, { pitch: 0 });
+      game.audio.setBoost(0);
+      return;
     }
 
     this._updateSub(dt, input);
@@ -643,7 +659,7 @@ export class Player {
     game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.12, 14, 4, [1, 1, 1], [1, 0.55, 0.2], 0.9);
     game.audio.cannon();
     game.shake(0.4);
-    mech.model.recoil(0.6);
+    mech.model.recoil(0.8, a.side);
     mount.cd = a.cooldown;
     this.lastFired = game.time;
   }
@@ -664,7 +680,7 @@ export class Player {
     game.fx.glow.spawn(p.x, p.y, p.z, 0, 0, 0, 0.12, 14, 4, [1, 1, 1], [0.6, 0.85, 1], 0.9);
     game.audio.beam();
     game.shake(0.35);
-    mech.model.recoil(0.7);
+    mech.model.recoil(0.7, a.side);
     m.cd = a.cooldown;
     this.lastFired = game.time;
   }
@@ -718,6 +734,7 @@ export class Player {
         damage: a.damage * this.dmgMul, speed: 130, maxSpeed: 290, delay: 0.18, turn: 6.2 + this.stats.missileTurn, target: q.target,
         splash: { radius: a.splash.radius, damage: a.splash.damage * this.dmgMul }, knock: 8, life: 4.5, radius: 1.5,
       });
+      mech.model.recoil(0.25, a.side);
       game.audio.missile(this._muzzle);
       return;
     }
@@ -740,10 +757,29 @@ export class Player {
 
   _pressMelee() {
     if (!this.melee) {
+      const target = this._meleeTarget();
+      const mech = this.mech;
+      if (target && mech.en >= mech.def.dashCost * 0.5) {
+        const dist = target.center(this._v).distanceTo(mech.center(this._w));
+        if (dist > target.radius + mech.radius + 14 && dist < LUNGE_RANGE) { this._startLunge(target); return; }
+      }
       this._startMelee(0);
-    } else if (this.melee.stage < MELEE.length - 1 && this.melee.t > this.melee.dur * 0.25) {
+    } else if (this.melee.stage >= 0 && this.melee.stage < MELEE.length - 1 && this.melee.t > this.melee.dur * 0.25) {
       this.melee.queued = true;
     }
+  }
+
+  /** Boost in at the target with the saber drawn and trailing, then open the combo on contact. */
+  _startLunge(target) {
+    const mech = this.mech;
+    this.melee = { stage: -1, kind: 'lunge', dur: LUNGE_TIME, t: 0, hitDone: true, arcDone: true, queued: false, target };
+    if (!this.burstActive) mech.en -= mech.def.dashCost * 0.5;
+    mech.enDelay = 0.9;
+    this.saberHold = 0.5;
+    mech.setSaber(true);
+    mech.model.flare(1);
+    this.game.audio.setSaber(true);
+    this.game.audio.dash(mech.pos);
   }
 
   _meleeTarget() {
@@ -762,9 +798,9 @@ export class Player {
     return best;
   }
 
-  _startMelee(stage) {
+  _startMelee(stage, target = this._meleeTarget()) {
     const def = MELEE[stage];
-    this.melee = { stage, kind: def.kind, dur: def.dur, t: 0, hitDone: false, arcDone: false, queued: false, target: this._meleeTarget() };
+    this.melee = { stage, kind: def.kind, dur: def.dur, t: 0, hitDone: false, arcDone: false, queued: false, target };
     this.saberHold = 0.5;
     this.mech.setSaber(true);
     this.game.audio.setSaber(true);
@@ -785,6 +821,7 @@ export class Player {
     const game = this.game;
     melee.t += dt;
     const p = melee.t / melee.dur;
+    if (melee.stage < 0) return this._updateLunge(melee, p);
     const def = MELEE[melee.stage];
 
     const it = { attack: { kind: def.kind, t: Math.min(1, p) }, hover: true, moveX: 0, moveZ: 0 };
@@ -827,6 +864,29 @@ export class Player {
     return it;
   }
 
+  /** The lunge: home in on the target at full boost; on contact (or when it runs out) the first swing starts. */
+  _updateLunge(melee, p) {
+    const mech = this.mech;
+    const tgt = melee.target && !melee.target.dead ? melee.target : null;
+    const lunge = this._lunge;
+    let contact = !tgt || p >= 1;
+    if (tgt) {
+      lunge.copy(tgt.center(this._v)).sub(mech.center(this._w));
+      const dist = lunge.length();
+      const reach = tgt.radius + mech.radius + 8;
+      if (dist <= reach) contact = true;
+      else lunge.normalize().multiplyScalar(Math.min(LUNGE_SPEED, (dist - reach + 2) / Math.max(1 / 60, 0.001)));
+    }
+    if (contact) {
+      this._startMelee(0, tgt);
+      return this._updateMelee(0);
+    }
+    return {
+      attack: { kind: 'lunge', t: Math.min(1, p) }, hover: true, moveX: 0, moveZ: 0, velocity: lunge,
+      faceYaw: yawToward(mech.pos.x, mech.pos.z, tgt.pos.x, tgt.pos.z),
+    };
+  }
+
   _meleeHit(def) {
     const mech = this.mech;
     const game = this.game;
@@ -842,14 +902,15 @@ export class Player {
       if (v.lengthSq() > 1e-4 && v.normalize().dot(fwd) < 0.2) continue;
       const knock = fwd.clone().multiplyScalar(def.stagger ? 130 : 45);
       knock.y = def.stagger ? 40 : 0;
-      m.takeDamage(def.damage * this.stats.melee * this.dmgMul, { source: mech, knock, kind: 'saber', stagger: def.stagger, point: m.center(new THREE.Vector3()) });
-      game.fx.sparks(m.center(new THREE.Vector3()), fwd, 22, [1, 0.6, 0.95]);
+      m.takeDamage(def.damage * this.stats.melee * this.dmgMul, { source: mech, knock, kind: 'saber', stagger: def.stagger, down: !!def.finisher, point: m.center(new THREE.Vector3()) });
+      game.fx.sparks(m.center(new THREE.Vector3()), fwd, def.finisher ? 40 : 22, [1, 0.6, 0.95]);
       landed = true;
     }
     if (landed) {
       game.audio.saberHit(mech.pos);
       game.shake(def.stagger ? 0.9 : 0.5);
       game.hitstop(def.stagger ? 0.11 : 0.07);
+      if (def.finisher) game.cinematic('finisher');
     }
   }
 }

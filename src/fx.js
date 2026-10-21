@@ -1,5 +1,5 @@
 // Visual effects: a pooled point-sprite particle system (fire/sparks additive, smoke alpha-blended),
-// explosions, shockwaves, mech debris, beam-sabre slash arcs.
+// explosions, shockwaves, mech debris, beam-sabre slash arcs and thrust streaks, and afterimages.
 
 import * as THREE from 'three';
 import { rand } from './util.js';
@@ -110,9 +110,15 @@ const YELLOW = [1, 0.85, 0.35];
 const SMOKE_A = [0.28, 0.27, 0.3];
 const SMOKE_B = [0.1, 0.1, 0.12];
 
+const GHOST_POOL = 6;     // afterimages per mech
+const GHOST_LIFE = 0.26;  // seconds an afterimage takes to fade
+const GHOST_ALPHA = 0.16; // its starting opacity (additive, and the meshes overlap, so it stays low)
+
 const flashGeo = new THREE.SphereGeometry(1, 16, 12);
 const ringGeo = new THREE.RingGeometry(0.82, 1, 48);
 const debrisGeo = new THREE.BoxGeometry(1, 1, 1);
+const thrustGlowGeo = new THREE.ConeGeometry(2.2, 28, 12, 1, true);
+const thrustCoreGeo = new THREE.ConeGeometry(0.7, 26, 12, 1, true);
 
 // ------------------------------------------------------------------ manager
 
@@ -124,6 +130,8 @@ export class Fx {
     this.smoke = new Particles(this.scene, 1400, false);
     this.timed = []; // { obj, age, life, update(t, obj) , dispose() }
     this.debris = [];
+    this._ghostPools = new Map(); // mech -> { list: [{ group, meshes, mat, age }], next }
+    this._ghostsLive = new Set();
     this._debrisMats = new Map();
     this._tmp = new THREE.Vector3();
   }
@@ -148,6 +156,13 @@ export class Fx {
         e.geo?.dispose();
         this.timed.splice(i, 1);
       } else e.update(t, e.obj);
+    }
+
+    for (const gh of this._ghostsLive) {
+      gh.age += dt;
+      const t = gh.age / GHOST_LIFE;
+      if (t >= 1) { gh.group.visible = false; this._ghostsLive.delete(gh); continue; }
+      gh.mat.opacity = GHOST_ALPHA * (1 - t) * (1 - t);
     }
 
     for (let i = this.debris.length - 1; i >= 0; i--) {
@@ -284,7 +299,74 @@ export class Fx {
     }
   }
 
-  /** Crescent beam-sabre trail. kind: slash1 (right to left), slash2 (left to right), slash3 (overhead chop). */
+  /**
+   * A ghost of the mech frozen in its current pose, fading out: steps and lunges leave a trail of them.
+   * Each mech gets a small pool of ghosts built once from its own meshes (minus the tiny details and the
+   * flames); spawning one copies the live pose's world matrices into it.
+   */
+  afterimage(mech) {
+    let pool = this._ghostPools.get(mech);
+    if (!pool) this._ghostPools.set(mech, (pool = this._makeGhosts(mech)));
+    const gh = pool.list[pool.next];
+    pool.next = (pool.next + 1) % pool.list.length;
+    mech.root.updateWorldMatrix(true, true);
+    for (const m of gh.meshes) m.visible = false;
+    mech.root.traverseVisible((o) => {
+      const i = o.userData.ghost;
+      if (i === undefined) return;
+      const gm = gh.meshes[i];
+      gm.visible = true;
+      gm.matrix.copy(o.matrixWorld);
+    });
+    gh.age = 0;
+    gh.mat.opacity = GHOST_ALPHA;
+    gh.group.visible = true;
+    this._ghostsLive.add(gh);
+  }
+
+  _makeGhosts(mech) {
+    const sources = [];
+    const v = new THREE.Vector3();
+    mech.root.traverse((o) => {
+      if (!o.isMesh || o.material.blending === THREE.AdditiveBlending) return;
+      if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+      o.getWorldScale(v);
+      if (o.geometry.boundingSphere.radius * Math.max(v.x, v.y, v.z) < 0.45 * mech.spec.scale) return; // skip the small details
+      o.userData.ghost = sources.length;
+      sources.push(o);
+    });
+    const color = mech.spec.palette.flame ?? 0x6fd0ff;
+    const list = [];
+    for (let i = 0; i < GHOST_POOL; i++) {
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+      const group = new THREE.Group();
+      group.matrixAutoUpdate = false;
+      const meshes = sources.map((src) => {
+        const m = new THREE.Mesh(src.geometry, mat);
+        m.matrixAutoUpdate = false;
+        m.frustumCulled = false;
+        group.add(m);
+        return m;
+      });
+      group.visible = false;
+      this.scene.add(group);
+      list.push({ group, meshes, mat, age: 0 });
+    }
+    return { list, next: 0 };
+  }
+
+  /** A mech left the field: free its ghosts. */
+  dropGhosts(mech) {
+    const pool = this._ghostPools.get(mech);
+    if (!pool) return;
+    for (const gh of pool.list) {
+      this.scene.remove(gh.group);
+      gh.mat.dispose();
+      this._ghostsLive.delete(gh);
+    }
+    this._ghostPools.delete(mech);
+  }
+
   /**
    * The crescent a saber leaves. Its shape follows the blade's real path (see the swing poses in mechModel.js):
    * the two horizontal slashes sweep the front half at waist-to-chest height, from one side round to the other;
@@ -292,6 +374,7 @@ export class Fx {
    * The crescent sweeps about as fast as the blade does, then fades.
    */
   slashArc(mech, kind, color) {
+    if (kind === 'thrust') { this._thrustStreak(mech, color); return; }
     const vertical = kind === 'slash3';
     const thetaStart = vertical ? -0.55 : -0.05;
     const thetaLen = vertical ? 3.35 : Math.PI + 0.1;
@@ -334,6 +417,36 @@ export class Fx {
     }, geo);
   }
 
+  /** The thrust's trail: a spear of light shooting straight out ahead of the mech at chest height, then fading. */
+  _thrustStreak(mech, color) {
+    const holder = new THREE.Group();
+    const mk = (geo, len, c, op) => {
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: c, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+      }));
+      m.rotation.x = -Math.PI / 2; // the cone's tip points ahead (-z)
+      m.position.set(1.2, 0, -(6 + len / 2));
+      holder.add(m);
+      return m;
+    };
+    const glow = mk(thrustGlowGeo, 28, color, 0.8);
+    const core = mk(thrustCoreGeo, 26, 0xffffff, 0.9);
+    holder.position.set(mech.pos.x, mech.pos.y + 11.5 * mech.spec.scale, mech.pos.z);
+    holder.rotation.y = mech.yaw;
+    holder.scale.setScalar(mech.spec.scale);
+    this._addTimed(holder, 0.3, (t) => {
+      const grow = Math.min(1, t * 6);
+      holder.scale.set(mech.spec.scale * (1 - t * 0.5), mech.spec.scale * (1 - t * 0.5), mech.spec.scale * (0.2 + 0.8 * grow));
+      glow.material.opacity = 0.8 * (1 - t);
+      core.material.opacity = 0.9 * (1 - t) * (1 - t);
+    });
+    // a burst of light where the point ends up
+    const f = mech.forward(this._tmp);
+    const tip = { x: mech.pos.x + f.x * 30 * mech.spec.scale, y: mech.pos.y + 11.5 * mech.spec.scale, z: mech.pos.z + f.z * 30 * mech.spec.scale };
+    const c = new THREE.Color(color);
+    this.glow.spawn(tip.x, tip.y, tip.z, 0, 0, 0, 0.18, 4, 12, [1, 1, 1], [c.r, c.g, c.b], 0.9);
+  }
+
   _randDir() {
     const v = this._tmp;
     const u = Math.random() * 2 - 1;
@@ -345,6 +458,8 @@ export class Fx {
   clear() {
     for (const e of this.timed) this.scene.remove(e.obj);
     this.timed.length = 0;
+    for (const gh of this._ghostsLive) gh.group.visible = false;
+    this._ghostsLive.clear();
     for (const d of this.debris) this.scene.remove(d.mesh);
     this.debris.length = 0;
     for (const p of [this.glow, this.smoke]) {

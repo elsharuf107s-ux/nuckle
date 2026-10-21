@@ -6,6 +6,19 @@ import { NECK_Y } from './skeleton.js';
 
 const PI = Math.PI;
 
+/**
+ * A whip antenna: a thin rod in its own group, hinged at its base so the animation can let it sway.
+ * (x, y, z) is the base in head space; the rod rises `len` from there, tilted by `rz`.
+ */
+function whip(kit, rig, head, x, y, z, len, mat, r = 0.05, rz = 0) {
+  const k = kit.raw ?? kit; // inside a crest builder the kit's add() is redirected to the crest group; a whip hangs off the head
+  const g = k.group(head, x, y, z);
+  g.rotation.z = rz;
+  k.add(g, k.cyl(r, r, len, 6), mat, 0, len / 2, 0);
+  rig.whips.push({ g, len, rest: rz });
+  return g;
+}
+
 /** The common helmet: a skull, ear pods, a face mask with eye slits, cheek vents and a chin guard. */
 function helmet(k, head, o = {}) {
   const { add, box, cyl, M, glow } = k;
@@ -44,7 +57,7 @@ export const HEADS = {
       add(head, box(1.7, 0.3, 0.25), M.dark, 0, 1.0, -1.15);
       rig.eyeNode = add(head, sph(0.3), glow, 0, 1.0, -1.25, { shadow: false });
       for (const s of [-1, 1]) add(head, cyl(0.2, 0.2, 1.5), M.dark, s * 1.0, 0.7, 0.6, { rx: -0.5 });  // cheek hoses
-      add(head, cyl(0.05, 0.05, 2.2), M.dark, -0.7, 2.3, 0.2);                                       // whip antenna
+      whip(k, rig, head, -0.7, 1.2, 0.2, 2.2, M.dark);                                                // whip antenna
     },
   },
 
@@ -124,8 +137,8 @@ export const HEADS = {
   // a beaked targeting helm with narrow eye slits
   hawk: {
     crest: 'none',
-    build(k, head) {
-      const { add, box, prow, cyl, M, glow } = k;
+    build(k, head, rig) {
+      const { add, box, prow, M, glow } = k;
       add(head, box(1.9, 1.7, 2.1), M.main, 0, 1.0, 0.1, { edge: true });
       add(head, prow(1.1, 0.8, 1.9, 0.12), M.main, 0, 0.55, -1.75, { edge: true });                // the beak
       add(head, box(0.3, 0.3, 0.5), M.trim, 0, 0.45, -2.65);
@@ -133,7 +146,7 @@ export const HEADS = {
         add(head, box(0.45, 0.14, 0.12), glow, s * 0.5, 1.25, -1.1, { rz: -s * 0.2, shadow: false });
         add(head, box(0.14, 1.0, 1.6), M.trim, s * 1.0, 1.5, 0.3, { rx: 0.25, rz: s * 0.1, edge: true });  // swept fins
       }
-      add(head, cyl(0.07, 0.07, 1.6, 6), M.metal, 0.6, 2.5, 0.4, { rz: -0.15 });
+      whip(k, rig, head, 0.48, 1.7, 0.4, 1.6, M.metal, 0.07, -0.15);
     },
   },
 
@@ -156,6 +169,8 @@ export const HEADS = {
 
 // ------------------------------------------------------------------ crests
 
+const CREST_BASE = 2.0; // the crest group's origin: the top of the skull
+
 export const CREST = {
   vfin(k, head) {
     const { add, box, M } = k;
@@ -173,11 +188,10 @@ export const CREST = {
     add(head, box(0.2, 1.4, 2.0), M.trim, 0, 2.7, 0.1, { rx: -0.3, edge: true });
     add(head, box(0.45, 0.4, 1.4), M.main, 0, 2.15, 0.1);
   },
-  antenna(k, head) {
-    const { add, cyl, sph, M, glow } = k;
+  antenna(k, head, rig) {
     for (const s of [-1, 1]) {
-      add(head, cyl(0.05, 0.05, 2.2, 6), M.metal, s * 0.7, 3.1, 0.2, { rz: -s * 0.12 });
-      add(head, sph(0.12), glow, s * 0.7 + s * 0.26, 4.15, 0.2, { shadow: false });
+      const w = whip(k, rig, head, s * 0.57, 2.0, 0.2, 2.2, k.M.metal, 0.05, -s * 0.12);
+      k.raw.add(w, k.sph(0.12), k.glow, 0, 2.2, 0, { shadow: false });
     }
   },
   crown(k, head) {
@@ -200,5 +214,9 @@ export function buildHead(rig) {
   const def = HEADS[spec.head] ?? HEADS.v;
   def.build(k, head, rig);
   const crest = spec.crest && spec.crest !== 'auto' ? spec.crest : def.crest;
-  (CREST[crest] ?? CREST.none)(k, head);
+  // the crest sits in its own group at the top of the skull, so an impact can rattle it
+  const crestNode = k.group(head, 0, CREST_BASE, 0);
+  rig.crest = crestNode;
+  const ck = { ...k, raw: k, add: (parent, geo, mat, x, y, z, o) => k.add(crestNode, geo, mat, x, y - CREST_BASE, z, o) };
+  (CREST[crest] ?? CREST.none)(ck, head, rig);
 }
