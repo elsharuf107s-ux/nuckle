@@ -8,12 +8,14 @@
 // legs' limit) and POWER (draw vs the torso's output).
 
 import {
-  DEFAULT_BUILD, ENERGY, HARDPOINTS, MARKS, MIRROR, PAINTS, PROPORTIONS, PROP_STEP, SLOT_LABELS, THRUSTERS, TUNING, TUNING_MAX, TUNING_POOL,
-  cleanName, deriveStats, hardpointSlots, partOf, partsFor, poolOf, randomBuild, sanitizeBuild, statRanges, tuningSpent, withPart,
+  DEFAULT_BUILD, ENERGY, HARDPOINTS, MARKS, MIRROR, PAINTS, PROPORTIONS, PROP_STEP, SETS, SLOT_LABELS, THRUSTERS, TUNING, TUNING_MAX, TUNING_POOL,
+  UPGRADE_MAX, UPGRADE_POOL, UPGRADE_STEP, ZONES,
+  cleanName, deriveStats, hardpointSlots, partOf, partsFor, poolOf, randomBuild, sanitizeBuild, statRanges, tuningSpent, upgradable, upgradeSpent, withPart,
 } from './parts.js';
 import {
-  HANGAR_SIZE, activeBuild, clearSlot, copyActive, filledCount, loadHangar, saveHangar, selectSlot, stockBuild, updateActive,
+  HANGAR_SIZE, activeBuild, clearSlot, copyActive, filledCount, loadHangar, placeBuild, saveHangar, selectSlot, stockBuild, updateActive,
 } from './hangar.js';
+import { decodeBuild, encodeBuild } from './share.js';
 
 /** localStorage can be missing or full (private windows): every access is guarded. */
 const store = {
@@ -65,7 +67,7 @@ const el = (tag, cls = '', text = '') => {
 /** [label, +1 if a bigger number is good / -1 if bad, formatter] */
 const ADD_LABELS = {
   hp: ['ARMOR', 1], en: ['BOOST FUEL', 1], enGround: ['EN REGEN', 1], enAir: ['AIR EN REGEN', 1],
-  ascendSpeed: ['CLIMB', 1], dashSpeed: ['DASH SPEED', 1], dashCost: ['DASH COST', -1], turn: ['TURNING', 1],
+  ascendSpeed: ['CLIMB', 1], airSpeed: ['AIR SPEED', 1], dashSpeed: ['DASH SPEED', 1], dashCost: ['DASH COST', -1], turn: ['TURNING', 1],
   staggerAt: ['STAGGER RESIST', 1], missileCharges: ['MISSILES', 1], missileTurn: ['HOMING', 1],
   salvoBonus: ['MISSILES / SALVO', 1], supply: ['POWER OUTPUT', 1], load: ['LOAD LIMIT', 1], regen: ['REPAIR /s', 1], burstTime: ['BURST TIME', 1, (v) => `+${v}s`],
   dashInvuln: ['DASH INVULN', 1, (v) => `+${v}s`], radar: ['RADAR', 1], resupplyHeal: ['WAVE REPAIR', 1, (v) => `+${Math.round(v * 100)}%`],
@@ -120,16 +122,21 @@ function chipsFor(slot, part) {
     else chips.push([`HEAL ${Math.round(u.heal * 100)}%`, 'up'], [`${u.charges} USE / WAVE`, '']);
   }
   if (pool === 'shoulder') chips.push(['PER SIDE', '']);
-  if (pool === 'layout' && part.id !== 'biped') chips.push([part.legScale > 0 ? `${part.legs} LEGS` : part.id === 'tread' ? 'TREADS' : 'HOVERS', 'up']);
+  if (pool === 'layout' && part.id !== 'biped') chips.push([part.legScale > 0 ? `${part.legs} LEGS` : part.id === 'tread' ? 'TREADS' : part.id === 'wheel' ? 'WHEELS' : 'HOVERS', 'up']);
   if (pool === 'limb' && part.limb) {
     const l = part.limb;
     if (l.kind === 'gun') chips.push([`DMG ${l.damage}`, ''], [`${(1 / l.interval).toFixed(0)}/s`, ''], ['FIRES WITH THE GUN BUTTON', 'up']);
     else if (l.kind === 'cannon') chips.push([`DMG ${l.damage}`, ''], ['BLAST', 'up'], ['FIRES WITH THE GUN BUTTON', 'up']);
-    else if (l.kind === 'blade') chips.push(['STRIKES WITH THE SABER', 'up']);
+    else if (l.kind === 'shotgun') chips.push([`DMG ${l.damage} ×${l.pellets}`, ''], [`${(1 / l.interval).toFixed(1)}/s`, ''], ['SHORT RANGE', 'down'], ['FIRES WITH THE GUN BUTTON', 'up']);
+    else if (l.kind === 'rail') chips.push([`DMG ${l.damage}`, ''], ['PIERCES', 'up'], ['FIRES WITH THE GUN BUTTON', 'up']);
+    else if (l.kind === 'blade' || l.kind === 'drill') chips.push(['STRIKES WITH THE SABER', 'up']);
     else if (l.kind === 'launcher') chips.push(['BIGGER SALVOS', 'up']);
   }
   if (pool === 'head2' && part.id !== 'none') chips.push(['LOCK-ON +1', 'up'], ['HALF STRENGTH', 'down']);
-  if (pool === 'pod' || pool === 'tail') chips.push([pool === 'pod' ? 'PER SIDE' : 'AT THE REAR', '']);
+  if (part.turret) chips.push(['AIMS ITSELF', 'up'], [`DMG ${part.turret.damage}`, ''], [`${(1 / part.turret.interval).toFixed(0)}/s`, ''], ...(part.turret.intercept ? [['SHOOTS DOWN MISSILES', 'up']] : []));
+  if (pool === 'pod' || pool === 'wing' || pool === 'flank') chips.push(['PER SIDE', '']);
+  else if (pool === 'tail') chips.push(['AT THE REAR', '']);
+  else if (pool === 'module') chips.push(['ON THE CHEST', '']);
   return chips;
 }
 
@@ -163,6 +170,8 @@ export class Garage {
     this._paintRaf = 0;
     this._markerRefs = {};
     this._detailPart = null;
+    this.zone = 'body'; // the paint area being edited: the body, or one of ZONES
+    this.layer = 'all'; // which markers show: 'all', 'body', 'sockets' ('auto' on a small screen: see the CSS)
 
     this._buildTabs();
     this._buildMarkers();
@@ -379,6 +388,64 @@ export class Garage {
     for (const btn of this.root.querySelectorAll('.pose')) {
       btn.addEventListener('click', () => this._setPose(btn.dataset.pose));
     }
+
+    // marker layers: a many-socketed machine has nearly thirty markers, so they can be thinned to the body or to the sockets
+    this._setLayer(window.matchMedia?.('(max-height: 520px), (pointer: coarse)').matches ? 'auto' : 'all');
+    for (const btn of this.root.querySelectorAll('.layer')) {
+      btn.addEventListener('click', () => this._setLayer(btn.dataset.layer));
+    }
+    document.getElementById('g-range').addEventListener('click', () => this.hooks.onRange?.());
+    this._wireShare();
+  }
+
+  _setLayer(layer) {
+    this.layer = layer;
+    for (const l of ['all', 'body', 'sockets']) this.root.classList.toggle(`layer-${l}`, layer === l);
+    for (const btn of this.root.querySelectorAll('.layer')) btn.classList.toggle('active', btn.dataset.layer === layer);
+  }
+
+  /** The build-code dialog: copy this machine as text, or paste somebody else's into the hangar. */
+  _wireShare() {
+    const $ = (id) => document.getElementById(id);
+    const box = $('g-share'), out = $('g-code-out'), input = $('g-code-in'), note = $('g-code-note'), error = $('g-code-error');
+    const say = (node, text, kind = '') => { node.textContent = text; node.className = kind; };
+    const close = () => box.classList.add('hidden');
+    $('g-code').addEventListener('click', () => {
+      out.value = encodeBuild(this.build);
+      input.value = '';
+      say(note, '');
+      say(error, '');
+      box.classList.remove('hidden');
+      out.focus();
+      out.select();
+      out.scrollTop = 0;
+    });
+    $('g-code-close').addEventListener('click', close);
+    box.addEventListener('pointerdown', (e) => { if (e.target === box) close(); });
+    box.addEventListener('keydown', (e) => {
+      e.stopPropagation(); // typing must not trigger game keys
+      if (e.key === 'Escape') close();
+    });
+    $('g-code-copy').addEventListener('click', async () => {
+      let ok = false;
+      try { await navigator.clipboard.writeText(out.value); ok = true; } catch { /* no clipboard permission: select the text instead */ }
+      if (!ok) {
+        out.focus();
+        out.select();
+        try { ok = document.execCommand('copy'); } catch { ok = false; }
+      }
+      say(note, ok ? 'COPIED' : 'SELECTED: PRESS CTRL+C', ok ? 'good' : '');
+    });
+    $('g-code-load').addEventListener('click', () => {
+      const result = decodeBuild(input.value);
+      if (!result.ok) { say(error, result.error, 'bad'); return; }
+      const placed = placeBuild(this.hangar, result.build);
+      this.hangar = placed.hangar;
+      this._loadActive();
+      out.value = encodeBuild(this.build);
+      input.value = '';
+      say(error, `LOADED INTO SLOT ${placed.index + 1}${placed.replaced ? ' (the hangar was full, so it replaced the open slot)' : ''}`, 'good');
+    });
   }
 
   _setPose(pose) {
@@ -544,11 +611,52 @@ export class Garage {
     const box = this.detailEl;
     box.textContent = '';
     const head = el('div', 'd-name', shown.name);
-    if (shown.id === this.build[this.slot]) head.append(el('i', '', 'EQUIPPED'));
+    if (shown.id === this.build[this.slot]) head.append(el('i', '', `EQUIPPED${this.build.up[this.slot] ? `  ·  LV ${this.build.up[this.slot]}` : ''}`));
     box.append(head, el('div', 'd-desc', shown.desc));
     const chips = el('div', 'o-chips');
     for (const [text, kind] of chipsFor(this.slot, shown)) chips.append(el('span', `chip ${kind}`, text));
     box.append(chips);
+    const equipped = partOf(this.slot, this.build[this.slot]);
+    if (upgradable(this.slot, equipped.id)) box.append(this._upgradeRow(equipped, shown.id !== equipped.id));
+  }
+
+  /** The upgrade dial of the equipped part: each level makes its good numbers better, at the cost of weight and power. */
+  _upgradeRow(equipped, named) {
+    const slot = this.slot;
+    const level = this.build.up[slot] ?? 0;
+    const left = UPGRADE_POOL - upgradeSpent(this.build.up);
+    const row = el('div', 'upgrade');
+    const info = el('div', 'up-info');
+    info.append(el('b', '', `${named ? `UPGRADE ${equipped.name}` : 'UPGRADE'}${level ? `  ·  LV ${level}` : ''}`),
+      el('span', '', `+${Math.round(UPGRADE_STEP * 100)}% per level, but heavier and hungrier  ·  ${left} OF ${UPGRADE_POOL} POINTS LEFT`));
+    const controls = el('div', 'tune-controls');
+    const minus = el('button', 'tune-btn', '−');
+    const plus = el('button', 'tune-btn', '+');
+    minus.type = plus.type = 'button';
+    minus.dataset.up = '-1';
+    plus.dataset.up = '1';
+    minus.disabled = level <= 0;
+    plus.disabled = level >= UPGRADE_MAX || left <= 0;
+    const pips = el('div', 'tune-pips');
+    for (let i = 0; i < UPGRADE_MAX; i++) pips.append(el('i', i < level ? 'on' : ''));
+    minus.addEventListener('click', () => this._upgrade(-1));
+    plus.addEventListener('click', () => this._upgrade(1));
+    controls.append(minus, pips, plus);
+    row.append(info, controls);
+    return row;
+  }
+
+  /** Raise or lower the equipped part's upgrade (and its twin's, while the symmetry switch is on and the twin is the same part). */
+  _upgrade(dir) {
+    const slot = this.slot;
+    const twin = this._mirrors(slot) && this.build[MIRROR[slot]] === this.build[slot] ? MIRROR[slot] : null;
+    for (const slots of twin ? [[slot, twin], [slot]] : [[slot]]) {
+      const up = { ...this.build.up };
+      for (const s of slots) up[s] = Math.min(UPGRADE_MAX, Math.max(0, (up[s] ?? 0) + dir));
+      if (upgradeSpent(up) > UPGRADE_POOL) continue; // not enough points for both sides: try this one alone
+      this.commit({ ...this.build, up });
+      return;
+    }
   }
 
   _refreshSelection() {
@@ -562,8 +670,9 @@ export class Garage {
     }
     for (const card of this.optionsEl.querySelectorAll('.opt')) {
       const on = card.dataset.id === this.build[this.slot];
+      const level = on ? this.build.up[this.slot] ?? 0 : 0;
       card.classList.toggle('selected', on);
-      card.querySelector('.o-tag').textContent = on ? 'EQUIPPED' : '';
+      card.querySelector('.o-tag').textContent = on ? `EQUIPPED${level ? `  ·  LV ${level}` : ''}` : '';
     }
     this._syncSym();
     this._syncMarkers();
@@ -618,12 +727,14 @@ export class Garage {
     const asm = el('div', 'paint-section');
     asm.append(el('h4', '', 'ASSEMBLY'));
     const counts = el('div', 'rig-counts');
-    for (const [n, label] of [[stats.counts.arms, 'ARMS'], [stats.counts.legs, 'LEGS'], [stats.counts.heads, 'HEADS']]) {
+    for (const [n, label] of [[stats.counts.arms, 'ARMS'], [stats.counts.legs, 'LEGS'], [stats.counts.heads, 'HEADS'], [stats.turrets.length, 'TURRETS']]) {
       const c = el('div', 'rig-count');
       c.append(el('b', '', String(n)), el('span', '', label));
       counts.append(c);
     }
-    asm.append(counts, el('div', 'o-desc', 'Click a glowing socket on the machine, or pick one below, to bolt something on. Every part adds weight and draws power: watch the LOAD and POWER bars. Leg layouts are under LEGS.'));
+    asm.append(counts, el('div', 'o-desc', 'Click a glowing socket on the machine, or pick one below, to bolt something on. Every part adds weight and draws power: watch the LOAD and POWER bars. Leg layouts are under LEGS.'),
+      el('div', 'o-desc', 'Every bolted-on part has armor of its own. In battle a shot-off arm, head, wing or leg flies away and stops working until the next pit stop.'),
+      el('div', 'o-desc up-total', `UPGRADES  ${upgradeSpent(this.build.up)} OF ${UPGRADE_POOL} POINTS SPENT`));
     const sockets = el('div', 'paint-section');
     sockets.append(el('h4', '', 'SOCKETS'));
     const grid = el('div', 'sockets');
@@ -633,12 +744,23 @@ export class Garage {
       b.type = 'button';
       b.dataset.hp = hp.id;
       b.classList.toggle('filled', part.id !== 'none');
-      b.append(el('span', 'sb-name', hp.name), el('span', 'sb-part', part.id === 'none' ? 'EMPTY  +' : part.name));
+      const level = this.build.up[hp.slots[0]] ?? 0;
+      b.append(el('span', 'sb-name', hp.name), el('span', 'sb-part', part.id === 'none' ? 'EMPTY  +' : `${part.name}${level ? `  ·  LV ${level}` : ''}`));
       b.addEventListener('click', () => this.selectHardpoint(hp.id));
       grid.append(b);
     }
     sockets.append(grid);
-    wrap.append(asm, sockets);
+    const sets = el('div', 'paint-section');
+    sets.append(el('h4', '', 'SET BONUSES'));
+    const live = new Set(stats.sets.map((s) => s.id));
+    for (const set of SETS) {
+      const row = el('div', 'set-row');
+      row.dataset.set = set.id;
+      row.classList.toggle('on', live.has(set.id));
+      row.append(el('b', '', set.name), el('span', 'set-need', live.has(set.id) ? 'ACTIVE' : set.need), el('span', 'set-desc', set.desc));
+      sets.append(row);
+    }
+    wrap.append(asm, sockets, sets);
   }
 
   _renderSize() {
@@ -749,8 +871,46 @@ export class Garage {
 
   // ------------------------------------------------------------------ paint tab
 
+  /** The four colours the paint tab is editing: the body's, or those of the chosen area. */
+  _paintTarget() {
+    return this.zone === 'body' ? this.build.paint : this.build.zones[this.zone] ?? this.build.paint;
+  }
+
+  /** Change some of the colours of the area being edited. */
+  _paintWith(patch) {
+    if (this.zone === 'body') {
+      this.commit({ ...this.build, paint: { ...this.build.paint, ...patch } });
+    } else {
+      this.commit({ ...this.build, zones: { ...this.build.zones, [this.zone]: { ...this._paintTarget(), ...patch } } });
+    }
+  }
+
   _renderPaint() {
     const wrap = this.optionsEl;
+
+    const areas = el('div', 'paint-section');
+    areas.append(el('h4', '', 'PAINT AREA'));
+    const aRow = el('div', 'marks areas');
+    this._zoneBtns = {};
+    for (const [id, name] of [['body', 'WHOLE BODY'], ...ZONES.map((z) => [z.id, z.name])]) {
+      const b = el('button', 'mark', name);
+      b.type = 'button';
+      b.dataset.zone = id;
+      b.addEventListener('click', () => { this.zone = id; this._syncPaint(); });
+      this._zoneBtns[id] = b;
+      aRow.append(b);
+    }
+    this._zoneReset = el('button', 'tune-btn size-reset', '');
+    this._zoneReset.type = 'button';
+    this._zoneReset.addEventListener('click', () => {
+      if (this.zone === 'body') this.commit({ ...this.build, zones: {} });
+      else {
+        const zones = { ...this.build.zones };
+        delete zones[this.zone];
+        this.commit({ ...this.build, zones });
+      }
+    });
+    areas.append(aRow, this._zoneReset, el('div', 'o-desc', 'Paint the whole body, or pick an area to give it colours of its own. An area without its own paint follows the body.'));
 
     const presets = el('div', 'paint-section');
     presets.append(el('h4', '', 'PAINT SCHEMES'));
@@ -765,7 +925,7 @@ export class Garage {
         sw.append(i);
       }
       b.append(sw, document.createTextNode(p.name));
-      b.addEventListener('click', () => this.commit({ ...this.build, paint: { main: p.main, sub: p.sub, accent: p.accent, trim: p.trim } }));
+      b.addEventListener('click', () => this._paintWith({ main: p.main, sub: p.sub, accent: p.accent, trim: p.trim }));
       grid.append(b);
     }
     presets.append(grid);
@@ -778,11 +938,11 @@ export class Garage {
       const row = el('label', '', label);
       const input = el('input');
       input.type = 'color';
-      input.value = this.build.paint[key];
+      input.value = this._paintTarget()[key];
       input.addEventListener('input', () => {
         // colour pickers fire continuously while dragging: apply at most once per frame
         cancelAnimationFrame(this._paintRaf);
-        this._paintRaf = requestAnimationFrame(() => this.commit({ ...this.build, paint: { ...this.build.paint, [key]: input.value } }));
+        this._paintRaf = requestAnimationFrame(() => this._paintWith({ [key]: input.value }));
       });
       this._colorInputs[key] = input;
       row.append(input);
@@ -834,15 +994,23 @@ export class Garage {
     }
     thr.append(tRow);
 
-    wrap.append(presets, colors, marks, energy, thr);
+    wrap.append(areas, presets, colors, marks, energy, thr);
     this._syncPaint();
   }
 
   _syncPaint() {
     if (!this._energySw || this.tab !== 'paint') return;
+    const target = this._paintTarget();
     for (const [k, input] of Object.entries(this._colorInputs)) {
-      if (document.activeElement !== input) input.value = this.build.paint[k];
+      if (document.activeElement !== input) input.value = target[k];
     }
+    for (const [id, b] of Object.entries(this._zoneBtns)) {
+      b.classList.toggle('selected', id === this.zone);
+      b.classList.toggle('painted', id === 'body' ? false : !!this.build.zones[id]);
+    }
+    const any = Object.keys(this.build.zones).length > 0;
+    this._zoneReset.textContent = this.zone === 'body' ? 'CLEAR ALL AREAS' : 'FOLLOW THE BODY';
+    this._zoneReset.disabled = this.zone === 'body' ? !any : !this.build.zones[this.zone];
     for (const [id, b] of Object.entries(this._energySw)) b.classList.toggle('selected', id === this.build.energy);
     for (const [id, b] of Object.entries(this._thrusterSw)) b.classList.toggle('selected', id === this.build.thruster);
     for (const [id, b] of Object.entries(this._markBtns)) b.classList.toggle('selected', id === this.build.marks);
@@ -928,8 +1096,10 @@ export class Garage {
     if (stats.counts.arms > 2) rigBits.push(`${stats.counts.arms} arms`);
     if (stats.counts.heads > 1) rigBits.push(`${stats.counts.heads} heads`);
     if (rigBits.length) line('RIG', rigBits.join(' · '));
-    const armGuns = stats.limbs.filter((l) => l.kind === 'gun' || l.kind === 'cannon');
+    const armGuns = stats.limbs.filter((l) => ['gun', 'cannon', 'shotgun', 'rail'].includes(l.kind));
     if (armGuns.length) line('ARM GUNS', `${armGuns.map((l) => l.name.replace('ARM ', '').toLowerCase()).join(', ')}: fire with ${w.weapon.kind === 'melee' ? 'H' : 'the gun button'}`);
+    if (stats.turrets.length) line('AUTO-TURRETS', `${stats.turrets.map((t) => partOf(t.slot, this.build[t.slot]).name.toLowerCase()).join(', ')}: they pick targets on their own`);
+    if (stats.sets.length) line('SET BONUS', stats.sets.map((s) => s.name).join(', '), 'good');
     if (stats.lock > 1) line('LOCK-ON', `${stats.lock} targets at once: missiles are shared out among them`);
     if (stats.salvo > 4) line('SALVO', `${stats.salvo} missiles each time`);
     line('WEAPON', w.weapon.kind === 'melee' ? `${w.name}: LMB and RMB swing the saber` : `${w.name}: ${w.weapon.mag} rounds, ${per}`);
@@ -941,5 +1111,6 @@ export class Garage {
     line('MOBILITY', `weight ${stats.weight} gives ${Math.round(stats.weightFactor * stats.loadFactor * 100)}% of base speed`);
     line('DASH', `${Math.round(stats.dashSpeed)} u/s · ${stats.dashCost} EN each · ${stats.dashInvuln.toFixed(2)}s invulnerable`);
     line('BURST', `lasts ${stats.burstTime}s`);
+    if (stats.parts.length) line('BREAKABLE', `${stats.parts.length} parts have armor of their own: shot off, they stop working until the pit stop`);
   }
 }

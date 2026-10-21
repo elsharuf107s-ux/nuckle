@@ -46,7 +46,18 @@ export const LAYOUTS = {
     kind: 'legs', legK: 1.0, ext: 0.86, radius: 8.2,
     rows: [{ z: -5.2, hipX: 2.8, footX: 8.2, footZ: -9.4 }, { z: 0, hipX: 3.1, footX: 9.6, footZ: 0 }, { z: 5.2, hipX: 2.8, footX: 8.2, footZ: 9.4 }],
   },
+  // three legs: one ahead, a pair behind, their steps a third of a cycle apart
+  tripod: {
+    kind: 'legs', legK: 0.94, ext: 0.86, radius: 6.8, phases: [0, 2.0944, 4.1888],
+    rows: [{ z: -5.0, solo: true, footX: 0, footZ: -9.2 }, { z: 3.4, hipX: 2.6, footX: 5.8, footZ: 6.8 }],
+  },
+  // eight legs in four rows, a walking fortress
+  octo: {
+    kind: 'legs', legK: 1.0, ext: 0.84, radius: 9.8,
+    rows: [{ z: -8.4, hipX: 2.6, footX: 7.4, footZ: -12.2 }, { z: -2.8, hipX: 2.9, footX: 9.6, footZ: -3.8 }, { z: 2.8, hipX: 2.9, footX: 9.6, footZ: 3.8 }, { z: 8.4, hipX: 2.6, footX: 7.4, footZ: 12.2 }],
+  },
   tread: { kind: 'tread', hipY: 3.5, trackX: 5.1, radius: 7 },
+  wheel: { kind: 'wheel', hipY: 3.9, wheelX: 4.7, wheelZ: 4.6, wheelR: 2.4, radius: 7 },
   hover: { kind: 'hover', hipY: 7.4, podX: 4.6, podZ: 4.2, radius: 6.4 },
 };
 
@@ -61,10 +72,15 @@ export function makeSkeleton(spec) {
   if (lay.kind === 'legs') {
     const rows = lay.rows ?? [{ z: 0, hipX: style.x, footX: style.x, footZ: 0 }];
     rows.forEach((r, row) => {
-      for (const side of [-1, 1]) {
-        const dx = r.footX - r.hipX, dz = r.footZ - r.z;
+      for (const side of r.solo ? [0] : [-1, 1]) { // (a solo leg stands on the centre line)
+        const dx = (r.footX ?? 0) - (r.hipX ?? 0), dz = r.footZ - r.z;
         // the leg's heading: the way it points to reach its foot (yaw about the hips' y axis; 0 is straight ahead)
-        sk.hips.push({ side, row, x: side * r.hipX, z: r.z, footX: side * r.footX, footZ: r.footZ, yaw: Math.atan2(-side * dx, -dz) * (Math.hypot(dx, dz) > 0.5 ? 1 : 0), run: Math.hypot(dx, dz) });
+        const i = sk.hips.length;
+        sk.hips.push({
+          side, row, x: side * (r.hipX ?? 0), z: r.z, footX: side * (r.footX ?? 0), footZ: r.footZ,
+          yaw: Math.atan2(-side * dx, -dz) * (Math.hypot(dx, dz) > 0.5 ? 1 : 0), run: Math.hypot(dx, dz),
+          phase: lay.phases ? lay.phases[i] : ((row + (side > 0 ? 1 : 0)) % 2) * Math.PI, // where in the stride cycle this leg is
+        });
       }
     });
     // standing: the legs extended `ext` of their length, so the hips sit at the height that leaves

@@ -19,6 +19,12 @@ export function buildFrame(rig) {
   add(hips, box(2.0, 0.5, span + 1.4), M.sub, 0, 0.75, mid, { edge: true });
   add(hips, box(1.2, 0.7, span + 2.6), M.metal, 0, -1.05, mid);
   for (const r of rows) {
+    if (r.solo) { // a single leg on the centre line
+      add(hips, box(3.0, 1.4, 2.4), M.sub, 0, -0.3, r.z, { edge: true });
+      add(hips, cyl(1.35, 1.35, 1.8, 12), M.metal, 0, -0.35, r.z, { rz: PI / 2 });
+      add(hips, sph(0.55), glow, 0, 0.3, r.z + 0.4, { shadow: false });
+      continue;
+    }
     // the yoke each pair of hips swings from, and a drum at every hip joint
     add(hips, box(r.hipX * 2 + 1.2, 1.4, 2.4), M.sub, 0, -0.3, r.z, { edge: true });
     add(hips, box(r.hipX * 2 - 1.0, 0.4, 2.0), M.accent, 0, 0.55, r.z, { edge: true });
@@ -35,6 +41,10 @@ export function buildFrame(rig) {
   add(hips, box(2.4, 0.3, 2.0), M.trim, 0, 1.35, engine);
   rig.holsterAt = { x: -2.9, y: 0.6, z: engine + 0.6 };
   rig.tailAt = { x: 0, y: 0.3, z: engine + 1.4 };
+  // the flank pods sit between the legs' rows, out beyond the hip yokes
+  const widest = Math.max(...rows.map((r) => r.hipX ?? 0));
+  const gap = rows.length > 2 ? (rows.length % 2 === 0 ? (rows[rows.length / 2 - 1].z + rows[rows.length / 2].z) / 2 : (rows[Math.floor(rows.length / 2)].z + rows[Math.floor(rows.length / 2) + 1].z) / 2) : (rows.length === 2 && rows[0].solo ? 0.4 : 0);
+  rig.flankAt = { x: widest + 1.5, y: 0.2, z: gap };
   rig.hullClear = 1.6; // how far the lowest part of the frame hangs below the hip joints' centre line
 }
 
@@ -125,6 +135,7 @@ export function buildTreads(rig) {
   for (const s of [-1, 1]) add(hips, box(1.0, 0.4, 0.2), cyanGlow, s * 1.0, -0.8, half + 2.05, { shadow: false });
   rig.holsterAt = { x: -2.9, y: -0.2, z: half + 1.2 };
   rig.tailAt = { x: 0, y: -0.9, z: half + 2.2 };
+  rig.flankAt = { x: X + W / 2 + 0.7, y: 0.7, z: -0.8 };
 
   const tex = cleatTexture();
   for (const s of [-1, 1]) {
@@ -184,6 +195,7 @@ export function buildHover(rig) {
   }
   rig.holsterAt = { x: -2.9, y: -0.5, z: 3.4 };
   rig.tailAt = { x: 0, y: -1.2, z: 3.6 };
+  rig.flankAt = { x: 5.6, y: -0.9, z: 0 };
 
   const lift = sk.hipY; // the pods' height above the ground is hipY - 2.2
   for (const sx of [-1, 1]) {
@@ -217,4 +229,44 @@ export function buildHover(rig) {
   rig.groundRing = ring;
   rig.calfFlames = 0;
   rig.legAnchor = k.node(hips, 0, -2.9, 0);
+}
+
+// ------------------------------------------------------------------ wheels
+
+/** Four big wheels at the corners of a low hull; the front pair steer. `rig.wheels` carries each wheel's steer and roll groups. */
+export function buildWheels(rig) {
+  const { k, hips, sk } = rig;
+  const { add, group, M, box, cyl, prow, cyanGlow } = k;
+  const lay = sk.lay;
+  const R = lay.wheelR, X = lay.wheelX, Z = lay.wheelZ;
+  rig.wheels = [];
+
+  // the hull and its mudguards
+  add(hips, box(X * 2 - 3.2, 2.0, Z * 2 + 1.6), M.dark, 0, -1.4, 0, { edge: true });
+  add(hips, box(X * 2 - 4.4, 0.5, Z * 2 - 0.2), M.sub, 0, -0.35, 0.1, { edge: true });
+  add(hips, prow(X * 2 - 3.4, 1.7, 3.2, 0.5), M.accent, 0, -1.1, -Z - 2.2, { edge: true });
+  add(hips, box(4.2, 1.7, 2.6), M.sub, 0, -0.8, Z + 1.7, { edge: true });
+  for (const s of [-1, 1]) add(hips, box(1.1, 0.4, 0.2), cyanGlow, s * 1.1, -0.7, Z + 3.05, { shadow: false });
+  rig.holsterAt = { x: -2.9, y: -0.2, z: Z + 2.0 };
+  rig.tailAt = { x: 0, y: -0.9, z: Z + 3.2 };
+  rig.flankAt = { x: X + 1.7, y: 0.7, z: 0 };
+
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const mount = group(hips, sx * X, -sk.hipY + R, sz * Z);
+      const steer = group(mount, 0, 0, 0);
+      const roll = group(steer, 0, 0, 0);
+      add(roll, cyl(R, R, 2.2, 18), M.dark, 0, 0, 0, { rz: PI / 2, edge: true });     // the tyre
+      add(roll, cyl(R * 0.62, R * 0.62, 2.35, 14), M.metal, 0, 0, 0, { rz: PI / 2 }); // the rim
+      for (const o of [-1, 1]) {
+        add(roll, cyl(R * 0.34, R * 0.34, 0.2, 10), M.trim, o * 1.2, 0, 0, { rz: PI / 2 }); // the hub
+        for (let i = 0; i < 3; i++) add(roll, box(0.12, R * 1.1, 0.35), M.dark, o * 1.25, 0, 0, { rx: (i * PI) / 3 });
+      }
+      add(steer, box(2.9, 0.4, R * 2 + 0.6), M.accent, 0, R + 0.5, 0, { edge: true }); // the mudguard (it turns with the wheel)
+      add(hips, box(Math.abs(sx * X) - 1.4, 0.6, 1.2), M.sub, sx * (X * 0.5 + 0.8), -1.5, sz * Z, { edge: true }); // axle
+      rig.wheels.push({ steer, roll, front: sz < 0, side: sx, r: R });
+    }
+  }
+  rig.calfFlames = 0;
+  rig.legAnchor = k.node(hips, X, -sk.hipY * 0.55, 0);
 }

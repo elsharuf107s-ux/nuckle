@@ -264,6 +264,17 @@ export class Projectiles {
   }
 
   /** Number of live enemy missiles homing on a mech (drives the MISSILE ALERT). */
+  /** The nearest enemy missile that is homing on `mech` within `range` of `from` (null if none): what a point-defence gun shoots first. */
+  incomingNear(mech, from, range) {
+    let best = null, bd = range * range;
+    for (const q of this.list) {
+      if (q.dead || q.type !== 'missile' || q.team === mech.team || q.target !== mech) continue;
+      const d2 = q.pos.distanceToSquared(from);
+      if (d2 < bd) { bd = d2; best = q; }
+    }
+    return best;
+  }
+
   incomingAt(mech) {
     let n = 0;
     for (const p of this.list) if (p.type === 'missile' && p.target === mech) n++;

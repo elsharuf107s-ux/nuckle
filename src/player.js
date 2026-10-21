@@ -21,6 +21,7 @@ const LUNGE_RANGE = 135;
 const LUNGE_SPEED = 300;
 const LUNGE_TIME = 0.5; // the longest a lunge chases before it swings anyway
 const LOCK_RANGE = 800;
+const FIRING_LIMBS = new Set(['gun', 'cannon', 'shotgun', 'rail']); // the arm weapons that fire with the gun button
 const MOUNT_KEYS = ['KeyF', 'KeyG']; // the first shoulder mount fitted fires on F, the second on G
 // Touch aim assist: with no lock-on, shots bend toward the enemy nearest the crosshair
 const ASSIST_CONE = 0.14;   // radians off the crosshair (less the target's own angular size)
@@ -42,6 +43,8 @@ export class Player {
     this.missileT = 0;
     this.missileQueue = []; // seconds until each queued missile launches
     this.limbGuns = [];     // the guns on extra arms: { def, cd, idx } (see applyBuild); they fire with the gun button
+    this.turrets = [];      // the self-aiming guns (tail, pods, chest): { def, cd } (see applyBuild)
+    this.lost = new Set();  // the slots of parts shot off this sortie (the stats are worked out without them)
     this.extraLocks = [];   // the other targets a many-headed machine has locked: missiles are shared out among them
     this._limbShots = 0;
     this.mounts = [];       // fitted shoulder mounts: { def, cd, key } (see applyBuild)
@@ -93,9 +96,11 @@ export class Player {
     // extra arms that carry a gun: each has its own cooldown and finds its muzzle on the model
     const limbs = this.mech.model.rig.limbs;
     this.limbGuns = d.stats.limbs
-      .filter((l) => l.kind === 'gun' || l.kind === 'cannon')
+      .filter((l) => FIRING_LIMBS.has(l.kind))
       .map((def) => ({ def, cd: 0, idx: limbs.findIndex((l) => l.slot === def.slot) }));
+    this.turrets = d.stats.turrets.map((def) => ({ def, cd: Math.random() * def.interval }));
     this.extraLocks = [];
+    this.lost.clear();
     this.lock = null;
     this._resetLoadout();
   }
@@ -164,6 +169,41 @@ export class Player {
   }
 
   /** Restock between waves: ammo and missiles refill, armour is partly repaired. */
+  /** A part of the machine was shot off: work the machine out without it. */
+  onPartBroken(part) {
+    this.lost.add(part.slot);
+    this.refreshStats();
+  }
+
+  /** The stats of the machine as it is now (parts shot off are gone), applied without rebuilding the mech. */
+  refreshStats() {
+    const lostSlots = [...this.lost].filter((s) => !s.startsWith('leg'));
+    const lostLegs = this.lost.size - lostSlots.length;
+    const d = deriveMech(this.build, { lost: lostSlots, lostLegs });
+    const mech = this.mech;
+    this.stats = d.stats;
+    this.weapon = d.stats.weapon;
+    Object.assign(mech.def, d.def, { spec: mech.def.spec, parts: mech.def.parts });
+    mech.maxHp = d.def.hp;
+    mech.hp = Math.min(mech.hp, mech.maxHp);
+    mech.maxEn = d.def.en;
+    mech.en = Math.min(mech.en, mech.maxEn);
+    mech.barrierMax = d.def.barrier ?? 0;
+    mech.barrier = Math.min(mech.barrier, mech.barrierMax);
+    this.missiles = Math.min(this.missiles, this.stats.missileCharges);
+    this.limbGuns = this.limbGuns.filter((L) => d.stats.limbs.some((l) => l.slot === L.def.slot));
+    this.turrets = this.turrets.filter((T) => d.stats.turrets.some((t) => t.slot === T.def.slot));
+    this.extraLocks.length = Math.min(this.extraLocks.length, Math.max(0, this.stats.lock - 1));
+    this.game.hud.configure();
+  }
+
+  /** Between waves the parts that were shot off are replaced. Returns how many. */
+  repairParts() {
+    const n = this.mech.restoreParts();
+    if (this.lost.size) { this.lost.clear(); this.refreshStats(); }
+    return n;
+  }
+
   resupply(healFraction) {
     this.ammo = this.magSize;
     this.reloadT = 0;
@@ -174,6 +214,8 @@ export class Player {
     this.mech.en = this.mech.maxEn;
     this.mech.overheat = false;
     this.mech.heal(this.mech.maxHp * healFraction);
+    const replaced = this.repairParts();
+    if (replaced > 0) this.game.hud.message(replaced > 1 ? `${replaced} PARTS REPLACED` : 'PART REPLACED', 'good');
   }
 
   // ------------------------------------------------------------------ lock-on
@@ -418,6 +460,7 @@ export class Player {
     // ---- extra arms: their guns fire with the gun button (the H key on a melee build, where the button swings the blade)
     const limbTrigger = this.meleeOnly ? input.down('KeyH') : input.down('Mouse0');
     this._updateLimbs(dt, limbTrigger && !this.melee);
+    this._updateTurrets(dt);
     if (this.lock && !this.melee) {
       const c = this.lock.center(this._w);
       const m = mech.center(this._v);
@@ -534,26 +577,86 @@ export class Player {
     }
   }
 
-  /** One extra arm fires: a beam gun's rapid bolt or an arm cannon's shell, from its own muzzle toward the aim. */
+  /** One extra arm fires: a beam gun's bolt, a cannon's shell, a shotgun's pellets or a railgun's slug, from its own muzzle toward the aim. */
   _fireLimb(L) {
     const game = this.game, mech = this.mech, def = L.def;
-    const cannon = def.kind === 'cannon';
+    const cannon = def.kind === 'cannon', shotgun = def.kind === 'shotgun', rail = def.kind === 'rail';
     mech.model.limbMuzzleWorld(L.idx, this._muzzle);
     const aim = this._aimDir(this._muzzle, def.speed, this._w);
     if (aim.dot(mech.forward()) < -0.2) aim.copy(mech.forward());
-    const color = cannon ? 0xffa040 : this.energy.beam;
-    game.projectiles.spawn({
-      type: cannon ? 'cannon' : 'beam', team: 'player', source: mech, pos: this._muzzle, dir: aim,
-      damage: def.damage * this.dmgMul, color, speed: def.speed, knock: cannon ? 20 : 0,
-      target: this.lock, turn: this.lock && !cannon ? 0.9 : 0,
-      splash: def.splash ? { radius: def.splash.radius, damage: def.splash.damage * this.dmgMul } : null,
-    });
-    mech.model.fireLimb(L.idx, cannon ? 0.9 : 0.3);
+    const color = cannon ? 0xffa040 : rail ? 0xffffff : this.energy.beam;
+    const pellets = shotgun ? def.pellets : 1;
+    for (let i = 0; i < pellets; i++) {
+      const dir = this._d.copy(aim);
+      if (def.spread) {
+        dir.x += rand(-def.spread, def.spread);
+        dir.y += rand(-def.spread, def.spread);
+        dir.z += rand(-def.spread, def.spread);
+        dir.normalize();
+      }
+      game.projectiles.spawn({
+        type: cannon ? 'cannon' : 'beam', team: 'player', source: mech, pos: this._muzzle, dir,
+        damage: def.damage * this.dmgMul, color, speed: def.speed, knock: cannon ? 20 : rail ? 14 : 0,
+        life: shotgun ? 0.42 : rail ? 1.3 : undefined, pierce: rail,
+        target: this.lock, turn: this.lock && !cannon && !shotgun && !rail ? 0.9 : 0,
+        splash: def.splash ? { radius: def.splash.radius, damage: def.splash.damage * this.dmgMul } : null,
+      });
+    }
+    mech.model.fireLimb(L.idx, cannon ? 0.9 : rail ? 0.85 : shotgun ? 0.6 : 0.3);
     const m = this._muzzle;
-    game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.08, cannon ? 9 : 5, 3, [1, 1, 1], rgb(color), 0.9);
-    if (cannon) { game.audio.cannon(m); game.shake(0.25); } else if (this._limbShots++ % 3 === 0) game.audio.beam(m);
+    game.fx.glow.spawn(m.x, m.y, m.z, 0, 0, 0, 0.08, cannon || rail ? 9 : shotgun ? 7 : 5, 3, [1, 1, 1], rgb(color), 0.9);
+    if (cannon || rail) { game.audio.cannon(m); game.shake(rail ? 0.3 : 0.25); } else if (shotgun) { game.audio.gun(m); game.shake(0.15); } else if (this._limbShots++ % 3 === 0) game.audio.beam(m);
     L.cd = def.interval * (this.burstT > 0 ? 0.6 : 1);
     this.lastFired = game.time;
+  }
+
+  // ------------------------------------------------------------------ self-aiming guns
+
+  /**
+   * The tail gun, the turret pods and the chest vulcan pick the nearest enemy in range and keep firing at it without
+   * your aim. The vulcan goes for missiles that are coming at you first. They draw power like everything else.
+   */
+  _updateTurrets(dt) {
+    if (!this.turrets.length) return;
+    const game = this.game, mech = this.mech;
+    for (const T of this.turrets) {
+      const def = T.def;
+      T.cd = Math.max(0, T.cd - dt * this.stats.powerFactor);
+      if (mech.dead) continue;
+      mech.model.turretMuzzleWorld(def.slot, this._muzzle);
+      const from = this._muzzle;
+      let at = null;
+      if (def.intercept) {
+        const q = game.projectiles.incomingNear(mech, from, def.range);
+        if (q) at = this._a.copy(q.pos);
+      }
+      if (!at) {
+        let best = null, bd = def.range * def.range;
+        for (const e of game.enemies) {
+          if (e.mech.dead) continue;
+          const c = e.mech.center(this._v);
+          const d2 = c.distanceToSquared(from);
+          if (d2 < bd) { bd = d2; best = e.mech; }
+        }
+        if (best) {
+          const c = best.center(this._a);
+          c.addScaledVector(best.vel, (Math.sqrt(bd) / def.speed) * 0.85);
+          at = c;
+        }
+      }
+      if (!at) continue;
+      mech.model.aimTurret(def.slot, at);
+      if (T.cd > 0) continue;
+      const dir = this._d.copy(at).sub(from).normalize();
+      dir.x += rand(-0.02, 0.02); dir.y += rand(-0.02, 0.02); dir.z += rand(-0.02, 0.02);
+      dir.normalize();
+      game.projectiles.spawn({
+        type: 'beam', team: 'player', source: mech, pos: from, dir, damage: def.damage * this.dmgMul, color: this.energy.beam,
+        speed: def.speed, life: def.range / def.speed + 0.1, knock: 0.5, intercept: !!def.intercept,
+      });
+      if (Math.random() < 0.25) game.audio.gun(from);
+      T.cd = def.interval;
+    }
   }
 
   // ------------------------------------------------------------------ sub-weapon (V) and passives

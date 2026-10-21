@@ -106,9 +106,23 @@ export function makeKit(spec) {
     return o;
   };
 
-  return {
+  const kit = {
     THREE, P, M, flashMats, glow, cyanGlow, greenGlow, energyGlow, warmGlow,
     box: boxGeo, cyl: cylGeo, sph: sphGeo, cone: coneGeo, wedge: wedgeGeo, prow: prowGeo,
     add, group, node,
   };
+
+  // a paint zone: the same kit with its own four colours (the dark metal, the glows and the geometry are shared)
+  const zones = new Map();
+  kit.variant = (pal, key = JSON.stringify(pal)) => {
+    if (!zones.has(key)) {
+      zones.set(key, {
+        ...kit,
+        P: { ...P, main: pal.main, sub: pal.sub, accent: pal.accent, trim: pal.trim },
+        M: { ...M, main: std(pal.main), sub: std(pal.sub), accent: std(pal.accent), trim: std(pal.trim) },
+      });
+    }
+    return zones.get(key);
+  };
+  return kit;
 }

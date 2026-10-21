@@ -49,6 +49,13 @@ const GARAGE_FOCUS = {
   tail:      { y: 8, dist: 44, yaw: 0.35 },
   podL:      { y: 11.5, dist: 34, yaw: -0.65 },
   podR:      { y: 11.5, dist: 34, yaw: 0.65 },
+  armMidL:   { y: 10.5, dist: 33, yaw: Math.PI + 1.1 },
+  armMidR:   { y: 10.5, dist: 33, yaw: Math.PI - 1.1 },
+  wingL:     { y: 13.5, dist: 42, yaw: -0.55 },
+  wingR:     { y: 13.5, dist: 42, yaw: 0.55 },
+  chestMod:  { y: 13.2, dist: 30, yaw: Math.PI },
+  flankL:    { y: 9, dist: 36, yaw: Math.PI + 1.2 },
+  flankR:    { y: 9, dist: 36, yaw: Math.PI - 1.2 },
 };
 
 // the garage's saber preview: the player's combo (see player.js) and a pause in guard
@@ -766,6 +773,28 @@ export class Game {
       this.hud.playerHit(amount);
       this.audio.playerHit();
       this.shake(clamp(amount / 350, 0.15, 0.9));
+    }
+  }
+
+  /** A part was shot off a machine: sparks, a small blast, the part itself tumbling away, and (for the player) the stats without it. */
+  onPartBroken(mech, part, info) {
+    const model = mech.model;
+    const at = model.partNode(part.slot)?.getWorldPosition(new THREE.Vector3()) ?? mech.center(new THREE.Vector3());
+    const away = info?.point ? at.clone().sub(info.point) : new THREE.Vector3(rand(-1, 1), 0, rand(-1, 1));
+    away.y = 0;
+    if (away.lengthSq() < 1e-4) away.set(rand(-1, 1), 0, rand(-1, 1));
+    away.normalize().multiplyScalar(rand(18, 34)).add(new THREE.Vector3(rand(-6, 6), rand(26, 42), rand(-6, 6)));
+    model.breakPart(part.slot, (node) => this.fx.flyOff(node, away));
+    this.fx.explosion(at, 2.6 * mech.spec.scale, { sound: false, shake: 0 });
+    this.fx.sparks(at, null, 22, [1, 0.8, 0.45]);
+    this.audio.explosion(0.6, at);
+    if (mech.team === 'player') {
+      this.player.onPartBroken(part);
+      this.hud.message('PART LOST', 'bad', part.name);
+      this.shake(0.55);
+    } else {
+      mech.enemy?.onPartBroken?.(part);
+      this.stats.partsShot = (this.stats.partsShot ?? 0) + 1;
     }
   }
 

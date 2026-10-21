@@ -69,6 +69,15 @@ export function copyActive(hangar) {
   return { active: free, slots };
 }
 
+/** Put a build (from a build code) in the first empty slot and switch to it; with a full hangar it replaces the active one. */
+export function placeBuild(hangar, build) {
+  const slots = hangar.slots.slice();
+  const free = slots.findIndex((b) => !b);
+  const index = free >= 0 ? free : hangar.active;
+  slots[index] = sanitizeBuild(build);
+  return { hangar: { active: index, slots }, index, replaced: free < 0 };
+}
+
 /** Empty a slot. The last build can never be removed; clearing the active one moves to another. */
 export function clearSlot(hangar, index) {
   if (!hangar.slots[index] || filledCount(hangar) <= 1) return hangar;

@@ -3,8 +3,11 @@
 // A build picks one part for each slot, spends tuning points, sets the proportions and paints the result.
 // The slots sit on HARDPOINTS, the places on the machine that the garage lets you click: the shoulders are
 // separate left and right (each with an armor pad and a weapon mount on top), so the two sides can differ.
-// Beyond the base body there are SOCKETS you bolt more onto: a leg layout (two legs, four, six, treads or
-// hover pods), a second and third pair of arms, a head on each shoulder, a tail and two back pods. Each part contributes additive (`add`) and multiplicative (`mul`) stat changes,
+// Beyond the base body there are SOCKETS you bolt more onto: a leg layout (two legs, three, four, six, eight,
+// wheels, treads or hover pods), up to three extra pairs of arms, a head on each shoulder, a tail, back pods, wings,
+// flank pods and a chest module. Any part can be upgraded (a few points each), matching parts earn set bonuses, parts
+// can be painted in zones, and every socketed part has health of its own (see deriveStats' `parts`). Each part
+// contributes additive (`add`) and multiplicative (`mul`) stat changes,
 // and a model style that the model builder knows how to draw. deriveMech() folds a build into the same
 // "def" shape the fixed enemy mechs use, so the Mech class needs no special casing.
 //
@@ -23,6 +26,7 @@ export const SLOTS = [
   'layout',
   'armLowerL', 'armLowerR', 'armUpperL', 'armUpperR',
   'headL', 'headR', 'tail', 'podL', 'podR',
+  'armMidL', 'armMidR', 'wingL', 'wingR', 'chestMod', 'flankL', 'flankR',
 ];
 
 /** Sockets that share a catalogue: both shoulders, both mounts, all four extra arms, both side heads, both pods. */
@@ -30,6 +34,7 @@ const POOL = {
   shoulderL: 'shoulder', shoulderR: 'shoulder', mountL: 'mount', mountR: 'mount',
   armLowerL: 'limb', armLowerR: 'limb', armUpperL: 'limb', armUpperR: 'limb',
   headL: 'head2', headR: 'head2', podL: 'pod', podR: 'pod',
+  armMidL: 'limb', armMidR: 'limb', wingL: 'wing', wingR: 'wing', chestMod: 'module', flankL: 'flank', flankR: 'flank',
 };
 export const poolOf = (slot) => POOL[slot] ?? slot;
 /** The other side of a left/right slot, for the symmetry switch. */
@@ -37,6 +42,7 @@ export const MIRROR = {
   shoulderL: 'shoulderR', shoulderR: 'shoulderL', mountL: 'mountR', mountR: 'mountL',
   armLowerL: 'armLowerR', armLowerR: 'armLowerL', armUpperL: 'armUpperR', armUpperR: 'armUpperL',
   headL: 'headR', headR: 'headL', podL: 'podR', podR: 'podL',
+  armMidL: 'armMidR', armMidR: 'armMidL', wingL: 'wingR', wingR: 'wingL', flankL: 'flankR', flankR: 'flankL',
 };
 
 /** What the garage calls each slot. */
@@ -47,6 +53,7 @@ export const SLOT_LABELS = {
   layout: 'LEG LAYOUT',
   armLowerL: 'LOWER ARM', armLowerR: 'LOWER ARM', armUpperL: 'BACK ARM', armUpperR: 'BACK ARM',
   headL: 'SIDE HEAD', headR: 'SIDE HEAD', tail: 'TAIL', podL: 'BACK POD', podR: 'BACK POD',
+  armMidL: 'MID ARM', armMidR: 'MID ARM', wingL: 'WING', wingR: 'WING', chestMod: 'CHEST MODULE', flankL: 'FLANK POD', flankR: 'FLANK POD',
 };
 
 /**
@@ -75,7 +82,16 @@ export const HARDPOINTS = [
   { id: 'tail', name: 'TAIL', slots: ['tail'], socket: true },
   { id: 'podL', name: 'L BACK POD', slots: ['podL'], socket: true },
   { id: 'podR', name: 'R BACK POD', slots: ['podR'], socket: true },
+  { id: 'armMidL', name: 'L MID ARM', slots: ['armMidL'], socket: true },
+  { id: 'armMidR', name: 'R MID ARM', slots: ['armMidR'], socket: true },
+  { id: 'wingL', name: 'L WING', slots: ['wingL'], socket: true },
+  { id: 'wingR', name: 'R WING', slots: ['wingR'], socket: true },
+  { id: 'chestMod', name: 'CHEST MODULE', slots: ['chestMod'], socket: true },
+  { id: 'flankL', name: 'L FLANK', slots: ['flankL'], socket: true },
+  { id: 'flankR', name: 'R FLANK', slots: ['flankR'], socket: true },
 ];
+/** The slots of the sockets: the extra parts, each with health of its own. */
+export const SOCKET_SLOTS = HARDPOINTS.filter((h) => h.socket).map((h) => h.slots[0]);
 export const hardpointOf = (slot) => HARDPOINTS.find((h) => h.slots.includes(slot));
 
 /** The slots of a hardpoint that make sense for this build: the leg style means nothing on treads or hover pods, the skirt only hangs from a biped's hips. */
@@ -416,6 +432,15 @@ export const PARTS = {
     { id: 'hover', name: 'HOVER PODS', model: 'hover', legScale: 0, legs: 0,
       desc: 'Repulsor pods in place of legs: it skims the ground with great air speed and dashes, but has little armor and a small load limit. Power hungry.',
       add: { weight: 12, draw: 16, hp: 200, load: 96, ascendSpeed: 8, airSpeed: 14, dashSpeed: 28, enAir: 8 }, mul: { mobility: 1.04 } },
+    { id: 'tripod', name: 'TRIPOD', model: 'tripod', legScale: 1.2, legs: 3,
+      desc: 'Three legs, one in front and a pair behind: steadier than a biped and still nimble, with a strange rolling walk.',
+      add: { weight: 9, draw: 4, staggerAt: 70, dashSpeed: -15, ascendSpeed: -2 }, mul: { mobility: 0.99, reload: 1.03 } },
+    { id: 'octo', name: 'OCTOPOD', model: 'octo', legScale: 2.8, legs: 8,
+      desc: 'Eight legs under a long spine: a walking fortress with enormous armor and load, and the slowest, clumsiest dash of all.',
+      add: { weight: 34, draw: 16, hp: 220, staggerAt: 340, ascendSpeed: -10, dashSpeed: -75 }, mul: { mobility: 0.84, dash: 0.78 } },
+    { id: 'wheel', name: 'WHEELBASE', model: 'wheel', legScale: 0, legs: 0,
+      desc: 'Four big wheels: the fastest thing on the ground, and sturdy, but it cannot climb, and a hard hit sends it into a spin.',
+      add: { weight: 22, draw: 6, hp: 260, load: 120, staggerAt: -30, ascendSpeed: -6, airSpeed: -8 }, mul: { mobility: 1.22, dash: 1.05 } },
   ],
   // Extra arms. They fit any of the four arm sockets (a lower pair at the waist, a back pair over the shoulders) and all
   // fire together with the gun button; `limb` says what each does. Every one draws power, so a many-armed machine pays for it.
@@ -434,6 +459,14 @@ export const PARTS = {
       add: { weight: 9, draw: 10, salvoBonus: 2 }, limb: { name: 'ARM LAUNCHER', kind: 'launcher' } },
     { id: 'repair', name: 'NANO ARM', model: 'repair', desc: 'A repair arm: mends armor steadily once you have been left alone for a moment.',
       add: { weight: 7, draw: 12, regen: 6 }, limb: { name: 'NANO ARM', kind: 'repair' } },
+    { id: 'shotgun', name: 'ARM SHOTGUN', model: 'shotgun', desc: 'A wide-barrelled arm gun that throws seven pellets: brutal up close, thin at range. Fires with the gun button.',
+      add: { weight: 8, draw: 12 }, limb: { name: 'ARM SHOTGUN', kind: 'shotgun', damage: 22, pellets: 7, spread: 0.09, interval: 0.85, speed: 520 } },
+    { id: 'rail', name: 'ARM RAILGUN', model: 'rail', desc: 'A long-barrelled arm railgun: a very fast slug that pierces everything in its line, every three seconds.',
+      add: { weight: 12, draw: 18 }, limb: { name: 'ARM RAILGUN', kind: 'rail', damage: 320, interval: 3.2, speed: 900 } },
+    { id: 'sensor', name: 'SENSOR ARM', model: 'sensor', desc: 'An arm that carries a sensor dish: a longer radar range and tighter missile tracking.',
+      add: { weight: 4, draw: 6, radar: 140, missileTurn: 1.2 }, limb: { name: 'SENSOR ARM', kind: 'sensor' } },
+    { id: 'drill', name: 'DRILL ARM', model: 'drill', desc: 'A spinning drill on its own arm: it whirs up with the saber and adds punch to every stroke, and the weight steadies you.',
+      add: { weight: 9, draw: 10, staggerAt: 30 }, mul: { melee: 1.18 }, limb: { name: 'DRILL ARM', kind: 'drill' } },
   ],
   // A tail grows from the rear of the body.
   tail: [
@@ -445,6 +478,8 @@ export const PARTS = {
       add: { weight: 7, draw: 6 }, mul: { melee: 1.12 } },
     { id: 'booster', name: 'BOOST TAIL', model: 'booster', desc: 'A tail with a thruster in its tip: more boost fuel and a stronger climb. Power hungry.',
       add: { weight: 10, draw: 12, ascendSpeed: 6, en: 25 } },
+    { id: 'turret', name: 'TAIL GUN', model: 'turret', desc: 'A turret on the end of the tail that tracks and shoots the nearest enemy on its own, whichever way you face: it covers your back.',
+      add: { weight: 8, draw: 10 }, turret: { name: 'TAIL GUN', damage: 11, interval: 0.28, range: 240, speed: 720 } },
   ],
   // Two pods on the back, one per side (the values are PER SIDE).
   pod: [
@@ -456,6 +491,52 @@ export const PARTS = {
       add: { weight: 9, draw: 8, missileCharges: 1 } },
     { id: 'plate', name: 'ARMOR PLATE POD', model: 'plate', desc: 'A slab of armor on the back: armor and stagger resistance, no power draw to speak of.',
       add: { hp: 160, weight: 12, staggerAt: 30, draw: 2 } },
+    { id: 'turret', name: 'TURRET POD', model: 'turret', desc: 'A pod with a small autonomous turret: it picks the nearest enemy and keeps firing at it without you aiming.',
+      add: { weight: 8, draw: 9 }, turret: { name: 'TURRET POD', damage: 9, interval: 0.32, range: 230, speed: 700 } },
+    { id: 'barrier', name: 'BARRIER POD', model: 'barrier', desc: 'A projector that adds a shield barrier: it soaks damage first and recharges when you are left alone.',
+      add: { weight: 8, draw: 12, barrier: 130 } },
+    { id: 'radar', name: 'RADAR POD', model: 'radar', desc: 'A dish on the back: a longer radar range and tighter missile tracking.',
+      add: { weight: 5, draw: 6, radar: 90, missileTurn: 0.6 } },
+  ],
+  // Wings: one on each side of the back (the values are PER SIDE). They spread under thrust.
+  wing: [
+    { id: 'none', name: 'NO WING', model: 'none', desc: 'Nothing on this side: no extra weight or power draw.', add: {} },
+    { id: 'fighter', name: 'FIGHTER WING', model: 'fighter', desc: 'Swept delta wings: higher air speed, longer boost and quicker dashes.',
+      add: { weight: 10, draw: 6, airSpeed: 16, en: 10, dashSpeed: 20 } },
+    { id: 'angel', name: 'ANGEL WING', model: 'angel', desc: 'A fan of feathered fins: a great deal of boost fuel, a stronger climb and quicker air recovery. Power hungry.',
+      add: { weight: 14, draw: 12, en: 36, ascendSpeed: 8, enAir: 6 } },
+    { id: 'blade', name: 'BLADE WING', model: 'blade', desc: 'Long bladed wings: they sweep in with every saber stroke for extra damage, and deflect a little fire.',
+      add: { weight: 12, draw: 6 }, mul: { melee: 1.1 }, guard: 0.02 },
+    { id: 'plate', name: 'SHIELD WING', model: 'plate', desc: 'Great plates folded over the back: armor, stagger resistance and some absorption, at a cost to the climb.',
+      add: { hp: 140, weight: 16, draw: 3, staggerAt: 50, ascendSpeed: -2 }, guard: 0.04 },
+    { id: 'solar', name: 'SOLAR WING', model: 'solar', desc: 'Panels of solar cells: free power output for builds that draw too much. They are fragile and heavy.',
+      add: { weight: 12, draw: 0, supply: 24 } },
+  ],
+  // The chest module: one extra, on the front of the chest.
+  module: [
+    { id: 'none', name: 'NO MODULE', model: 'none', desc: 'Nothing on the chest: no extra weight or power draw.', add: {} },
+    { id: 'radar', name: 'RADAR ARRAY', model: 'radar', desc: 'A phased array on the chest: a much longer radar range and tighter missile tracking.',
+      add: { weight: 6, draw: 8, radar: 160, missileTurn: 1 } },
+    { id: 'reactor', name: 'AUX REACTOR', model: 'reactor', desc: 'A second reactor in a chest housing: more power output and a little boost fuel.',
+      add: { weight: 14, draw: 0, supply: 40, en: 10 } },
+    { id: 'vulcan', name: 'CHEST VULCAN', model: 'vulcan', desc: 'Twin chest guns that fire on their own at the nearest enemy, and shoot down missiles that come for you.',
+      add: { weight: 8, draw: 10 }, turret: { name: 'CHEST VULCAN', damage: 8, interval: 0.1, range: 200, speed: 760, intercept: true } },
+    { id: 'emitter', name: 'BARRIER EMITTER', model: 'emitter', desc: 'A glowing emitter that adds a large shield barrier.',
+      add: { weight: 10, draw: 14, barrier: 180 } },
+    { id: 'bay', name: 'MISSILE BAY', model: 'bay', desc: 'A hatch of missiles in the chest: one more missile charge, a little harder hitting.',
+      add: { weight: 12, draw: 8, missileCharges: 1 }, mul: { missileDamage: 1.08 } },
+  ],
+  // Flank pods: one on each hip (the values are PER SIDE).
+  flank: [
+    { id: 'none', name: 'NO FLANK POD', model: 'none', desc: 'Nothing on this hip: no extra weight or power draw.', add: {} },
+    { id: 'rack', name: 'MISSILE RACK', model: 'rack', desc: 'A rack of missiles on the hip: harder hitting, tighter tracking.',
+      add: { weight: 7, draw: 5, missileTurn: 0.6 }, mul: { missileDamage: 1.1 } },
+    { id: 'vernier', name: 'FLANK VERNIERS', model: 'vernier', desc: 'Side thrusters: cheaper, faster dashes and a quicker turn.',
+      add: { weight: 5, draw: 6, dashCost: -3, dashSpeed: 25, turn: 2 } },
+    { id: 'plate', name: 'FLANK ARMOR', model: 'plate', desc: 'Plates on the hips: armor and stagger resistance for little weight.',
+      add: { hp: 120, weight: 9, draw: 1, staggerAt: 40 } },
+    { id: 'blade', name: 'FLANK SABERS', model: 'blade', desc: 'Extra saber hilts on the hip: they strengthen every stroke of the combo.',
+      add: { weight: 5, draw: 4 }, mul: { melee: 1.1 } },
   ],
 };
 
@@ -499,6 +580,89 @@ export const THRUSTERS = {
 
 const DARK = 0x3a3f4d; // frame metal; the same for every build
 
+// ------------------------------------------------------------------ upgrades, paint zones, health
+
+/** Upgrades: points spent on one part each, 0..3. Every level makes the part's good numbers 12% better and costs 8% weight and 6% power draw. */
+export const UPGRADE_POOL = 10;
+export const UPGRADE_MAX = 3;
+export const UPGRADE_STEP = 0.12;
+const UP_WEIGHT = 0.08;
+const UP_DRAW = 0.06;
+const UP_SKIP = new Set(['crest', 'layout']); // cosmetic or structural: nothing to upgrade
+const INT_KEYS = new Set(['missileCharges', 'salvoBonus', 'lock']); // whole numbers stay whole
+const NEG_GOOD = new Set(['dashCost']);                              // a bigger cut is better
+
+/** Can this slot's part be upgraded? */
+export const upgradable = (slot, id) => !UP_SKIP.has(slot) && id !== 'none' && id !== undefined;
+export const upgradeSpent = (up) => Object.values(up ?? {}).reduce((n, v) => n + v, 0);
+
+/** `part` at upgrade `level`: the benefits scale up, the weight and power draw grow with them. */
+export function tunedPart(part, level) {
+  if (!level || part.id === 'none') return part;
+  const f = 1 + UPGRADE_STEP * level;
+  const out = { ...part, add: {}, mul: {} };
+  for (const [k, v] of Object.entries(part.add ?? {})) {
+    if (k === 'weight') out.add[k] = v * (1 + UP_WEIGHT * level);
+    else if (k === 'draw') out.add[k] = v * (1 + UP_DRAW * level);
+    else if (INT_KEYS.has(k)) out.add[k] = v;
+    else if (NEG_GOOD.has(k)) out.add[k] = v < 0 ? v * f : v;
+    else out.add[k] = v > 0 ? v * f : v;
+  }
+  for (const [k, v] of Object.entries(part.mul ?? {})) out.mul[k] = v > 1 ? 1 + (v - 1) * f : v;
+  if (part.guard) out.guard = part.guard * f;
+  if (part.weapon && part.weapon.kind !== 'melee') out.weapon = { ...part.weapon, damage: part.weapon.damage * f };
+  if (part.weapon && part.weapon.kind === 'melee') out.mul.melee = (out.mul.melee ?? 1) * f;
+  if (part.limb?.damage) out.limb = { ...part.limb, damage: part.limb.damage * f };
+  if (part.turret) out.turret = { ...part.turret, damage: part.turret.damage * f };
+  if (part.ability) out.ability = { ...part.ability, damage: part.ability.damage * f };
+  if (part.sub?.damage) out.sub = { ...part.sub, damage: part.sub.damage * f };
+  return out;
+}
+
+/** Whole levels, 0..UPGRADE_MAX, only on parts that exist and can be upgraded, at most UPGRADE_POOL in all. */
+export function cleanUp(src, b) {
+  const out = {};
+  let left = UPGRADE_POOL;
+  for (const slot of SLOTS) {
+    const v = Math.round(Number(src?.[slot]));
+    if (!Number.isFinite(v) || v <= 0 || !upgradable(slot, b[slot])) continue;
+    const lv = Math.min(UPGRADE_MAX, v, left);
+    if (lv > 0) { out[slot] = lv; left -= lv; }
+  }
+  return out;
+}
+
+/** Paint zones: each can carry its own four colours instead of the body's. */
+export const ZONES = [
+  { id: 'head', name: 'HEAD' }, { id: 'chest', name: 'CHEST' }, { id: 'arms', name: 'ARMS' }, { id: 'legs', name: 'LEGS' },
+  { id: 'shoulders', name: 'SHOULDERS' }, { id: 'back', name: 'BACKPACK' }, { id: 'weapon', name: 'WEAPONS' }, { id: 'rig', name: 'RIG PARTS' },
+];
+const PAINT_KEYS = ['main', 'sub', 'accent', 'trim'];
+
+/** Zones with their own paint; any colour left out follows the body. Unknown zones and unreadable colours are dropped. */
+export function cleanZones(src, paint) {
+  const out = {};
+  for (const { id } of ZONES) {
+    const z = src?.[id];
+    if (!z || typeof z !== 'object') continue;
+    const zone = {};
+    let any = false;
+    for (const k of PAINT_KEYS) {
+      if (typeof z[k] === 'string' && HEX.test(z[k])) { zone[k] = z[k].toLowerCase(); any = true; } else zone[k] = paint[k];
+    }
+    if (any) out[id] = zone;
+  }
+  return out;
+}
+
+/** The health of a socketed part: from its weight (and armor), plus the upgrade. */
+export function partHp(part, level = 0) {
+  const base = part.hp ?? Math.round(110 + 17 * (part.add?.weight ?? 6) + 0.8 * (part.add?.hp ?? 0));
+  return Math.round(base * (1 + UPGRADE_STEP * level));
+}
+/** The health of each leg of a many-legged layout. */
+export const legHp = (b) => Math.round(180 + 0.5 * (partOf('legs', b.legs).add?.hp ?? 0));
+
 // ------------------------------------------------------------------ builds
 
 export const DEFAULT_BUILD = Object.freeze({
@@ -509,7 +673,10 @@ export const DEFAULT_BUILD = Object.freeze({
   layout: 'biped',
   armLowerL: 'none', armLowerR: 'none', armUpperL: 'none', armUpperR: 'none',
   headL: 'none', headR: 'none', tail: 'none', podL: 'none', podR: 'none',
+  armMidL: 'none', armMidR: 'none', wingL: 'none', wingR: 'none', chestMod: 'none', flankL: 'none', flankR: 'none',
   prop: { size: 1, legs: 1, arms: 1, torso: 1, head: 1 },
+  up: {},    // upgrade levels by slot
+  zones: {}, // paint zones that differ from the body
   sym: true, // the garage keeps the left and right sockets matched while this is on
   tuning: { plating: 0, servos: 0, thrusters: 0, weapons: 0 },
   paint: { main: '#eceff6', sub: '#2a56b8', accent: '#d23a32', trim: '#f5c518' },
@@ -524,6 +691,11 @@ export const partOf = (slot, id) => partsFor(slot).find((p) => p.id === id) ?? p
 export function withPart(build, slot, id, mirror = true) {
   const out = { ...build, [slot]: id };
   if (mirror && MIRROR[slot]) out[MIRROR[slot]] = id;
+  if (build.up && (build.up[slot] || (mirror && MIRROR[slot] && build.up[MIRROR[slot]]))) { // upgrades belong to the part that was fitted
+    out.up = { ...build.up };
+    if (build[slot] !== id) delete out.up[slot];
+    if (mirror && MIRROR[slot] && build[MIRROR[slot]] !== id) delete out.up[MIRROR[slot]];
+  }
   return out;
 }
 
@@ -568,7 +740,7 @@ export function cleanProp(src) {
 /** Turn anything (e.g. parsed localStorage JSON) into a valid build, filling gaps from the default. */
 export function sanitizeBuild(input) {
   const src = input && typeof input === 'object' ? input : {};
-  const out = { ...DEFAULT_BUILD, paint: { ...DEFAULT_BUILD.paint }, tuning: { ...DEFAULT_BUILD.tuning }, prop: { ...DEFAULT_BUILD.prop } };
+  const out = { ...DEFAULT_BUILD, paint: { ...DEFAULT_BUILD.paint }, tuning: { ...DEFAULT_BUILD.tuning }, prop: { ...DEFAULT_BUILD.prop }, up: {}, zones: {} };
   out.name = cleanName(src.name);
   const valid = (slot, id) => typeof id === 'string' && partsFor(slot).some((p) => p.id === id);
   for (const slot of SLOTS) if (valid(slot, src[slot])) out[slot] = src[slot];
@@ -588,6 +760,8 @@ export function sanitizeBuild(input) {
   for (const k of ['main', 'sub', 'accent', 'trim']) {
     if (typeof src.paint?.[k] === 'string' && HEX.test(src.paint[k])) out.paint[k] = src.paint[k].toLowerCase();
   }
+  out.up = cleanUp(src.up, out);
+  out.zones = cleanZones(src.zones, out.paint);
   if (src.energy in ENERGY) out.energy = src.energy;
   if (src.thruster in THRUSTERS) out.thruster = src.thruster;
   return out;
@@ -599,13 +773,14 @@ export function randomBuild(rand = Math.random) {
   for (const slot of SLOTS) b[slot] = pick(partsFor(slot)).id;
   // the rig: mostly a biped, sometimes something stranger, and now and then a few extra limbs
   b.layout = rand() < 0.55 ? 'biped' : pick(PARTS.layout).id;
-  for (const pair of [['armLowerL', 'armLowerR'], ['armUpperL', 'armUpperR'], ['headL', 'headR'], ['podL', 'podR']]) {
+  for (const pair of [['armLowerL', 'armLowerR'], ['armMidL', 'armMidR'], ['armUpperL', 'armUpperR'], ['headL', 'headR'], ['podL', 'podR'], ['wingL', 'wingR'], ['flankL', 'flankR']]) {
     const on = rand() < 0.28;
     const id = on ? pick(partsFor(pair[0]).filter((p) => p.id !== 'none')).id : 'none';
     b[pair[0]] = id;
     b[pair[1]] = rand() < 0.8 ? id : (rand() < 0.5 ? 'none' : pick(partsFor(pair[1])).id);
   }
   b.tail = rand() < 0.3 ? pick(PARTS.tail.filter((p) => p.id !== 'none')).id : 'none';
+  b.chestMod = rand() < 0.3 ? pick(PARTS.module.filter((p) => p.id !== 'none')).id : 'none';
   b.prop = cleanProp(Object.fromEntries(PROPORTIONS.map(({ id, min, max }) => [id, rand() < 0.5 ? 1 : min + rand() * (max - min)])));
   if (rand() < 0.7) { b.shoulderR = b.shoulderL; b.mountR = b.mountL; } // usually matched, sometimes not
   b.sym = b.shoulderL === b.shoulderR && b.mountL === b.mountR && Object.keys(MIRROR).every((slot) => b[slot] === b[MIRROR[slot]]);
@@ -620,7 +795,19 @@ export function randomBuild(rand = Math.random) {
     if (t[id] < TUNING_MAX) t[id]++;
   }
   b.tuning = t;
-  return b;
+  // a few upgrades on parts that exist, and now and then a zone of its own colours
+  const fitted = SLOTS.filter((slot) => upgradable(slot, b[slot]));
+  b.up = {};
+  for (let i = 0; i < Math.floor(rand() * 6); i++) {
+    const slot = pick(fitted);
+    b.up[slot] = Math.min(UPGRADE_MAX, (b.up[slot] ?? 0) + 1);
+  }
+  b.zones = {};
+  if (rand() < 0.35) {
+    const zp = pick(PAINTS);
+    b.zones[pick(ZONES).id] = { main: zp.main, sub: zp.sub, accent: zp.accent, trim: zp.trim };
+  }
+  return sanitizeBuild(b);
 }
 
 // ------------------------------------------------------------------ derivation
@@ -643,18 +830,71 @@ const EXT_EFFECT = 0.5;
 const EXT_COST = 0.6;
 const MAX_LOCK = 3;
 const MAX_SALVO = 10;
-const LIMB_SLOTS = ['armLowerL', 'armLowerR', 'armUpperL', 'armUpperR'];
+const LIMB_SLOTS = ['armLowerL', 'armLowerR', 'armMidL', 'armMidR', 'armUpperL', 'armUpperR'];
+const TURRET_SLOTS = ['tail', 'podL', 'podR', 'chestMod']; // parts that carry an auto-turret
+const FIRE_KINDS = new Set(['gun', 'cannon', 'shotgun', 'rail']); // arm weapons that fire with the gun button
+const limbRow = (slot) => (slot.includes('Lower') ? 'lower' : slot.includes('Mid') ? 'mid' : 'upper');
+const PAIR_SLOTS = [['armLowerL', 'armLowerR'], ['armMidL', 'armMidR'], ['armUpperL', 'armUpperR'], ['headL', 'headR'], ['podL', 'podR'], ['wingL', 'wingR'], ['flankL', 'flankR']];
+
+/** What a build is made of, counted for the set bonuses. */
+function census(b) {
+  const part = (slot) => partOf(slot, b[slot]);
+  const limbs = LIMB_SLOTS.map(part).filter((p) => p.limb);
+  const kinds = limbs.map((p) => p.limb.kind);
+  const fitted = (slot) => b[slot] !== 'none';
+  const count = (slots, id) => slots.filter((slot) => b[slot] === id).length;
+  return {
+    matched: PAIR_SLOTS.filter(([l, r]) => fitted(l) && b[l] === b[r]).length,
+    fireLimbs: kinds.filter((k) => FIRE_KINDS.has(k)).length,
+    melee: kinds.filter((k) => k === 'blade' || k === 'drill').length + count(['tail'], 'lash') + count(['wingL', 'wingR'], 'blade') + count(['flankL', 'flankR'], 'blade'),
+    shields: kinds.filter((k) => k === 'shield').length + count(['wingL', 'wingR'], 'plate') + count(['flankL', 'flankR'], 'plate') + count(['podL', 'podR'], 'plate')
+      + count(['chestMod'], 'emitter') + count(['podL', 'podR'], 'barrier'),
+    missiles: count(['podL', 'podR'], 'missile') + count(['flankL', 'flankR'], 'rack') + kinds.filter((k) => k === 'launcher').length + count(['chestMod'], 'bay'),
+    heads: 1 + ['headL', 'headR'].filter(fitted).length,
+    wings: fitted('wingL') && fitted('wingR'),
+    thrust: b.tail === 'booster' || count(['podL', 'podR'], 'thruster') > 0,
+    walker: b.layout === 'hexa' || b.layout === 'octo',
+  };
+}
+
+/**
+ * Set bonuses: matching or complementary parts reward the builder. Each is checked against the census; the bonus
+ * folds into the same add / mul / guard the parts use.
+ */
+export const SETS = [
+  { id: 'matched', name: 'MATCHED SET', need: 'three pairs of identical parts', desc: '+5% gun damage, +50 stagger resistance and 4 less power draw.',
+    test: (c) => c.matched >= 3, add: { staggerAt: 50, draw: -4 }, mul: { gunDamage: 1.05 } },
+  { id: 'battery', name: 'BATTERY', need: 'three arm guns', desc: 'The guns cycle 10% faster.',
+    test: (c) => c.fireLimbs >= 3, mul: { fireRate: 1.1 } },
+  { id: 'hydra', name: 'HYDRA', need: 'three heads', desc: '+120 radar range and much tighter missile tracking.',
+    test: (c) => c.heads >= 3, add: { radar: 120, missileTurn: 1.2 } },
+  { id: 'dancer', name: 'BLADE DANCER', need: 'three blades (arm sabers, drills, lash tail, blade wings, flank sabers)', desc: 'Every saber stroke hits 12% harder.',
+    test: (c) => c.melee >= 3, mul: { melee: 1.12 } },
+  { id: 'bastion', name: 'BASTION', need: 'two shields (arm shields, wings, flank or pod plates, emitters, barrier pods)', desc: '+4% absorption and +60 stagger resistance.',
+    test: (c) => c.shields >= 2, add: { staggerAt: 60 }, guard: 0.04 },
+  { id: 'airwing', name: 'AIR WING', need: 'two wings and a thruster tail or pod', desc: 'Dashes cost 3 less and air speed is +12.',
+    test: (c) => c.wings && c.thrust, add: { dashCost: -3, airSpeed: 12 } },
+  { id: 'barrage', name: 'ROCKET BARRAGE', need: 'three missile sources (missile pods, racks, launcher arms, the bay)', desc: 'One more missile charge.',
+    test: (c) => c.missiles >= 3, add: { missileCharges: 1 } },
+  { id: 'nest', name: 'GUN NEST', need: 'a spider or an octopod with two arm guns', desc: '+80 stagger resistance and +120 armor.',
+    test: (c) => c.walker && c.fireLimbs >= 2, add: { staggerAt: 80, hp: 120 } },
+];
+export const activeSets = (b) => { const c = census(b); return SETS.filter((set) => set.test(c)); };
 
 /** Fold a build into numbers. Pure and cheap, so the garage calls it for every hover preview. */
-export function deriveStats(build) {
+export function deriveStats(build, opts = {}) {
   const b = sanitizeBuild(build);
+  // parts shot off in a fight: the machine is worked out without them (and a many-legged one loses speed for each leg gone)
+  for (const slot of opts.lost ?? []) { if (SLOTS.includes(slot)) { b[slot] = 'none'; delete b.up[slot]; } }
+  const lostLegs = Math.max(0, opts.lostLegs ?? 0);
   const layout = partOf('layout', b.layout);
   const legK = layout.legScale; // sets of legs the leg style is multiplied by (0: treads and hover pods ignore it)
   const s = { ...BASE };
   const mul = { mobility: 1, dash: 1, melee: 1, fireRate: 1, reload: 1, gunDamage: 1, missileDamage: 1, burstGain: 1 };
   let guard = 0;
+  const tuned = (slot) => tunedPart(partOf(slot, b[slot]), b.up[slot] ?? 0);
   for (const slot of SLOTS) {
-    const p = partOf(slot, b[slot]);
+    const p = tuned(slot);
     const ext = EXT_HEADS.has(slot);
     if (ext && p.id !== 'none') s.lock += 1;
     const addK = slot === 'legs' ? legK : 1;
@@ -667,6 +907,19 @@ export function deriveStats(build) {
       mul[k] *= ext ? Math.pow(v, EXT_EFFECT) : v;
     }
     guard += (p.guard ?? 0) * (ext ? EXT_EFFECT : slot === 'legs' ? Math.min(1, legK) : 1);
+  }
+  // set bonuses
+  const sets = activeSets(b);
+  for (const set of sets) {
+    for (const [k, v] of Object.entries(set.add ?? {})) s[k] = (s[k] ?? 0) + v;
+    for (const [k, v] of Object.entries(set.mul ?? {})) mul[k] *= v;
+    guard += set.guard ?? 0;
+  }
+  // a many-legged machine is hobbled by each leg it loses
+  if (lostLegs > 0) {
+    mul.mobility *= Math.max(0.4, 1 - 0.1 * lostLegs);
+    mul.dash *= Math.max(0.4, 1 - 0.12 * lostLegs);
+    s.staggerAt -= 35 * lostLegs;
   }
 
   // proportions: every stretch is a trade
@@ -693,28 +946,38 @@ export function deriveStats(build) {
   s.ascendSpeed += 1.5 * t.thrusters;
   const damage = 1 + 0.03 * t.weapons;
 
-  // budgets
+  // budgets (whole numbers: upgrades and proportions would otherwise leave long decimals on the bars)
+  for (const k of ['weight', 'load', 'supply', 'draw']) s[k] = Math.round(s[k]);
   const wf = clamp(1 + (REF_WEIGHT - s.weight) * WEIGHT_SLOPE, 0.82, 1.15);
   const over = Math.max(0, s.weight - s.load);
   const loadFactor = clamp(1 - OVERLOAD_SLOPE * over, OVERLOAD_FLOOR, 1);
   const powerFactor = s.draw <= s.supply ? 1 : clamp(Math.pow(s.supply / s.draw, POWER_CURVE), POWER_FLOOR, 1);
   const move = wf * loadFactor;
 
-  const weaponPart = partOf('weapon', b.weapon);
+  const weaponPart = tuned('weapon');
   const w = { ...weaponPart.weapon };
   w.cooldown = w.cooldown / mul.fireRate / powerFactor;
   w.reload = w.reload / mul.reload / powerFactor;
   if (w.kind !== 'melee') w.damage *= softCap(mul.gunDamage, GUN_SOFT_CAP);
 
-  const subPart = partOf('sub', b.sub);
+  const subPart = tuned('sub');
   // extra arms: every one is listed (the model draws them all); the guns and cannons also fire with the gun button
   const limbs = LIMB_SLOTS
-    .map((slot) => ({ part: partOf(slot, b[slot]), slot }))
+    .map((slot) => ({ part: tuned(slot), slot }))
     .filter(({ part }) => part.limb)
-    .map(({ part, slot }) => ({ ...part.limb, id: part.id, slot, row: slot.includes('Lower') ? 'lower' : 'upper', side: slot.endsWith('L') ? 'L' : 'R' }));
+    .map(({ part, slot }) => ({ ...part.limb, id: part.id, slot, row: limbRow(slot), side: slot.endsWith('L') ? 'L' : 'R' }));
+  // parts that shoot on their own: the nearest enemy in range, whichever way you face
+  const turrets = TURRET_SLOTS
+    .map((slot) => ({ part: tuned(slot), slot }))
+    .filter(({ part }) => part.turret)
+    .map(({ part, slot }) => ({ ...part.turret, id: part.id, slot }));
+  // everything with health of its own: each socketed part, and each leg of a many-legged machine
+  const parts = SOCKET_SLOTS.filter((slot) => b[slot] !== 'none')
+    .map((slot) => ({ slot, id: b[slot], name: partOf(slot, b[slot]).name, kind: 'part', hp: partHp(partOf(slot, b[slot]), b.up[slot] ?? 0) }));
+  if (layout.legs >= 3) for (let i = 0; i < layout.legs; i++) parts.push({ slot: `leg${i}`, id: b.legs, name: `LEG ${i + 1}`, kind: 'leg', hp: legHp(b) });
   // weapon mounts: the first one fitted fires on F, the second on G
   const abilities = ['mountL', 'mountR']
-    .map((slot, i) => ({ part: partOf(slot, b[slot]), side: i === 0 ? 'L' : 'R' }))
+    .map((slot, i) => ({ part: tuned(slot), side: i === 0 ? 'L' : 'R' }))
     .filter(({ part }) => part.ability)
     .map(({ part, side }) => ({ ...part.ability, side }));
   const stats = {
@@ -761,7 +1024,11 @@ export function deriveStats(build) {
     abilities,
     ability: abilities[0] ?? null, // the F ability (kept for the single-ability code paths and the tests)
     limbs,
-    counts: { arms: 2 + limbs.length, legs: layout.legs, heads: clamp(s.lock, 1, MAX_LOCK) },
+    turrets,
+    parts,
+    sets: sets.map(({ id, name, desc }) => ({ id, name, desc })),
+    up: { ...b.up },
+    counts: { arms: 2 + limbs.length, legs: layout.legs - lostLegs, heads: clamp(s.lock, 1, MAX_LOCK) },
     layout: { id: layout.id, legs: layout.legs },
     prop: { ...pr },
     sub: subPart.sub ? { ...subPart.sub } : null,
@@ -781,10 +1048,18 @@ export function paletteOf(build) {
   };
 }
 
-/** Everything the game needs to field a build: the model spec, a Mech "def", and the derived stats. */
-export function deriveMech(build) {
+/** The paint of each zone that has its own, as the integer colours the model builder takes. */
+export function zonePalettes(build) {
   const b = sanitizeBuild(build);
-  const stats = deriveStats(b);
+  const out = {};
+  for (const [id, z] of Object.entries(b.zones)) out[id] = { main: hexToInt(z.main), sub: hexToInt(z.sub), accent: hexToInt(z.accent), trim: hexToInt(z.trim) };
+  return out;
+}
+
+/** Everything the game needs to field a build: the model spec, a Mech "def", and the derived stats. */
+export function deriveMech(build, opts = {}) {
+  const b = sanitizeBuild(build);
+  const stats = deriveStats(b, opts);
   const m = (slot) => partOf(slot, b[slot]).model;
   const spec = {
     scale: b.prop.size,
@@ -794,6 +1069,8 @@ export function deriveMech(build) {
     layout: m('layout'),
     armLowerL: m('armLowerL'), armLowerR: m('armLowerR'), armUpperL: m('armUpperL'), armUpperR: m('armUpperR'),
     headL: m('headL'), headR: m('headR'), tail: m('tail'), podL: m('podL'), podR: m('podR'),
+    armMidL: m('armMidL'), armMidR: m('armMidR'), wingL: m('wingL'), wingR: m('wingR'), chestMod: m('chestMod'), flankL: m('flankL'), flankR: m('flankR'),
+    zones: zonePalettes(b),
     prop: { ...b.prop },
     marks: b.marks,
     bulk: partOf('torso', b.torso).bulk * b.prop.torso,
@@ -807,6 +1084,7 @@ export function deriveMech(build) {
     dashSpeed: stats.dashSpeed, dashTime: stats.dashTime, dashCost: stats.dashCost,
     enGround: stats.enGround, enAir: stats.enAir, dashInvuln: stats.dashInvuln, turn: stats.turn,
     staggerAt: stats.staggerAt, guard: stats.guard, jam: stats.jam, barrier: stats.barrier, score: 0,
+    parts: stats.parts, // the socketed parts and legs, each with health of its own (see Mech)
   };
   return { build: b, stats, spec, def, energy: ENERGY[b.energy] };
 }
@@ -836,24 +1114,36 @@ const RANGE_KEYS = {
 export function statRanges() {
   if (ranges) return ranges;
   const r = {};
-  for (const [key, get] of Object.entries(RANGE_KEYS)) {
+  const keys = Object.entries(RANGE_KEYS);
+  // slots are almost independent: score every part once against the default build, give each slot its best part for the
+  // stat in question, then one refinement pass from there (there are millions of builds, so no enumeration)
+  const base = sanitizeBuild({});
+  const baseStats = deriveStats(base);
+  const trial = []; // [slot, id, stats]
+  for (const slot of SLOTS) for (const p of partsFor(slot)) trial.push([slot, p.id, deriveStats({ ...base, [slot]: p.id })]);
+  for (const [key, get] of keys) {
     r[key] = {};
     for (const [dir, label] of [[1, 'max'], [-1, 'min']]) {
       const b = sanitizeBuild({});
+      for (const slot of SLOTS) {
+        let bestId = b[slot], bestV = get(baseStats) * dir;
+        for (const [sl, id, st] of trial) if (sl === slot && get(st) * dir > bestV + 1e-9) { bestV = get(st) * dir; bestId = id; }
+        b[slot] = bestId;
+      }
       let best = get(deriveStats(b)) * dir;
-      for (let pass = 0; pass < 3; pass++) {
-        for (const slot of SLOTS) {
-          for (const p of partsFor(slot)) {
-            const v = get(deriveStats({ ...b, [slot]: p.id })) * dir;
-            if (v > best + 1e-9) { best = v; b[slot] = p.id; }
-          }
+      for (const slot of SLOTS) {
+        for (const p of partsFor(slot)) {
+          const v = get(deriveStats({ ...b, [slot]: p.id })) * dir;
+          if (v > best + 1e-9) { best = v; b[slot] = p.id; }
         }
       }
       r[key][label] = best * dir;
     }
   }
   // the best case for tuning is 6 points in the relevant dial
-  r.hp.max *= 1 + 0.04 * TUNING_MAX;
+  r.hp.max *= (1 + 0.04 * TUNING_MAX) * (1 + 0.04 * UPGRADE_MAX); // (upgrades and sets stretch it a little)
+  r.dps.max *= 1 + UPGRADE_STEP * UPGRADE_MAX;
+  r.melee.max *= 1 + UPGRADE_STEP * UPGRADE_MAX;
   r.speed.max *= 1 + 0.02 * TUNING_MAX;
   r.en.max *= 1 + 0.04 * TUNING_MAX;
   r.dps.max *= 1 + 0.03 * TUNING_MAX;

@@ -33,6 +33,10 @@ const SKID_TIME = 0.32;   // after a step (or a fast landing) the mech slides to
 // a knockdown: thrown down (until it hits the ground), lying there, then getting up
 const KNOCK_LIE = 0.55;
 const KNOCK_RISE = 0.7;
+// parts with health of their own: a hit that lands near one is shared with it (and a blow with no clear point sometimes finds one)
+const PART_SHARE = 0.4;    // the share of a hit a part near the impact soaks
+const PART_REACH = 3.6;    // how near the impact has to be, in model units
+const PART_BLIND = 0.35;   // the chance a saber stroke or a falling wall takes a random part instead
 
 export class Mech {
   /** `defOverride` lets the garage field a custom build (see parts.js deriveMech) instead of a stock mech. */
@@ -57,6 +61,8 @@ export class Mech {
     this.yaw = 0;
     this.pitch = 0;
 
+    // the socketed parts and legs, each with its own health: { slot, name, kind, hp, maxHp, broken }
+    this.parts = (this.def.parts ?? []).map((p) => ({ slot: p.slot, name: p.name, kind: p.kind, hp: p.hp, maxHp: p.hp, broken: false }));
     this.maxHp = this.hp = this.def.hp;
     this.maxEn = this.en = this.def.en;
     this.overheat = false;
@@ -398,6 +404,7 @@ export class Mech {
         if (amount <= 0) return 0;
       }
     }
+    if (this.parts.length) amount = this._hitParts(amount, info);
     this.hp -= amount;
     this.flashT = 0.12;
     this.lastHitAt = this.game.time; // the nano-repair core waits for a lull
@@ -416,6 +423,50 @@ export class Mech {
       this.game.onDestroyed(this, info);
     }
     return amount;
+  }
+
+  /**
+   * A hit that lands near a part is shared with it: the part soaks a share and, once it is out of health, comes off.
+   * Returns what is left for the body. A saber stroke or a collapse has no clear point, so it sometimes takes a part at random.
+   */
+  _hitParts(amount, info) {
+    let hit = null;
+    if (info.kind === 'saber' || info.kind === 'collapse' || info.kind === 'pulse' || !info.point) {
+      const alive = this.parts.filter((p) => !p.broken);
+      if (alive.length && info.kind !== 'pulse' && Math.random() < PART_BLIND) hit = alive[Math.floor(Math.random() * alive.length)];
+    } else {
+      let best = PART_REACH * this.spec.scale;
+      for (const p of this.parts) {
+        if (p.broken) continue;
+        const d = this.model.partDistance(p.slot, info.point);
+        if (d < best) { best = d; hit = p; }
+      }
+    }
+    if (!hit) return amount;
+    const share = amount * PART_SHARE;
+    hit.hp -= share;
+    if (hit.hp > 0) return amount - share;
+    const over = -hit.hp;
+    hit.hp = 0;
+    this._breakPart(hit, info);
+    return amount - share + over;
+  }
+
+  /** A part's health ran out: it comes off the model (see Game.onPartBroken for the sparks, the chunk and the stats). */
+  _breakPart(part, info) {
+    part.broken = true;
+    this.game.onPartBroken(this, part, info);
+  }
+
+  /** Put every torn-off part back and give them all full health (the pit stop). Returns how many were replaced. */
+  restoreParts() {
+    let n = 0;
+    for (const p of this.parts) {
+      if (p.broken) { this.model.restorePart(p.slot); n++; }
+      p.broken = false;
+      p.hp = p.maxHp;
+    }
+    return n;
   }
 
   /** The model's hit reaction: which way the blow pushed us (in our own frame) and how hard, against what staggers us. */

@@ -133,6 +133,7 @@ export class Fx {
     this.smoke = new Particles(this.scene, 1400, false);
     this.timed = []; // { obj, age, life, update(t, obj) , dispose() }
     this.debris = [];
+    this.flying = []; // parts shot off a machine, tumbling away: { obj, vel, spin, age, life, base }
     this._ghostPools = new Map(); // mech -> { list: [{ group, meshes, mat, age }], next }
     this._ghostsLive = new Set();
     this._debrisMats = new Map();
@@ -166,6 +167,29 @@ export class Fx {
       const t = gh.age / GHOST_LIFE;
       if (t >= 1) { gh.group.visible = false; this._ghostsLive.delete(gh); continue; }
       gh.mat.opacity = GHOST_ALPHA * (1 - t) * (1 - t);
+    }
+
+    for (let i = this.flying.length - 1; i >= 0; i--) {
+      const f = this.flying[i];
+      f.age += dt;
+      f.vel.y -= 55 * dt;
+      f.obj.position.addScaledVector(f.vel, dt);
+      f.obj.rotation.x += f.spin.x * dt;
+      f.obj.rotation.y += f.spin.y * dt;
+      f.obj.rotation.z += f.spin.z * dt;
+      if (f.obj.position.y < 1.2) {
+        f.obj.position.y = 1.2;
+        f.vel.y *= -0.3;
+        f.vel.x *= 0.7; f.vel.z *= 0.7;
+        f.spin.multiplyScalar(0.55);
+        if (Math.abs(f.vel.y) < 2) f.vel.y = 0;
+      }
+      if (f.age < f.life - 0.5 && Math.random() < dt * 16) {
+        this.smoke.spawn(f.obj.position.x, f.obj.position.y + 1, f.obj.position.z, rand(-1, 1), rand(3, 7), rand(-1, 1), 0.9, 1.2, 3.5, SMOKE_A, SMOKE_B, 0.35, 0, 0.5);
+      }
+      const left = f.life - f.age;
+      if (left < 0.5) f.obj.scale.setScalar(Math.max(0.001, (left / 0.5) * f.base));
+      if (left <= 0) this._dropFlying(i);
     }
 
     for (let i = this.debris.length - 1; i >= 0; i--) {
@@ -311,6 +335,22 @@ export class Fx {
     mesh.castShadow = true;
     this.scene.add(mesh);
     this.debris.push({ mesh, size, age: 0, life, vel: vel.clone(), spin: new THREE.Vector3(rand(-5, 5), rand(-5, 5), rand(-5, 5)) });
+  }
+
+  /** A part shot off a machine: a copy of its model, in the pose it was in, tumbles away smoking and fades. */
+  flyOff(node, vel) {
+    while (this.flying.length >= 24) this._dropFlying(0);
+    node.updateWorldMatrix(true, false);
+    const obj = node.clone(true);
+    obj.visible = true;
+    node.matrixWorld.decompose(obj.position, obj.quaternion, obj.scale);
+    this.scene.add(obj);
+    this.flying.push({ obj, vel: vel.clone(), spin: new THREE.Vector3(rand(-7, 7), rand(-7, 7), rand(-7, 7)), age: 0, life: rand(2.2, 3.2), base: obj.scale.x });
+  }
+
+  _dropFlying(i) {
+    this.scene.remove(this.flying[i].obj);
+    this.flying.splice(i, 1);
   }
 
   /** A wrecked mech: hull chunks scatter and burn. */
@@ -498,6 +538,8 @@ export class Fx {
     this._ghostsLive.clear();
     for (const d of this.debris) this.scene.remove(d.mesh);
     this.debris.length = 0;
+    for (const f of this.flying) this.scene.remove(f.obj);
+    this.flying.length = 0;
     for (const p of [this.glow, this.smoke]) {
       p.age.fill(1);
       p.alpha.fill(0);

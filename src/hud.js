@@ -7,6 +7,15 @@ import { clamp, fmtTime } from './util.js';
 const $ = (id) => document.getElementById(id);
 const CYAN = '#52e0ff', RED = '#ff4260', AMBER = '#ffb62e', GREEN = '#5dffa5', PINK = '#ff6ad5';
 
+/** A two-letter tag for a part's cell: `LA` for the left lower arm, `W` for a wing, `1` for the first leg. */
+function partLabel(p) {
+  if (p.kind === 'leg') return String(Number(p.slot.slice(3)) + 1);
+  const side = p.slot.endsWith('L') ? 'L' : p.slot.endsWith('R') ? 'R' : '';
+  const base = p.slot.replace(/[LR]$/, '');
+  const tag = { armLower: 'A', armMid: 'A', armUpper: 'A', head: 'H', tail: 'T', pod: 'P', wing: 'W', flank: 'F', chestMod: 'C' }[base] ?? '?';
+  return side + tag;
+}
+
 export class Hud {
   constructor(game) {
     this.game = game;
@@ -22,6 +31,7 @@ export class Hud {
       ammo: $('ammo-pips'), ammoCount: $('ammo-count'), missiles: $('missile-pips'), reload: $('reload-note'),
       weaponName: $('weapon-name'), weaponKey: $('weapon-key'), gunRow: $('gun-row'), saberRow: $('saber-row'),
       cannonRow: $('cannon-row'), cannonFill: $('cannon-fill'), cannon2Row: $('cannon2-row'), cannon2Fill: $('cannon2-fill'), cannon2Name: $('cannon2-name'), mechName: $('mech-name'), buildFlags: $('build-flags'),
+      partsPanel: $('parts-panel'), partsGrid: $('parts-grid'),
       armsRow: $('arms-row'), armsName: $('arms-name'), armsKey: $('arms-key'), armsFill: $('arms-fill'),
       subRow: $('sub-row'), subName: $('sub-name'), subFill: $('sub-fill'), subState: $('sub-state'), subBar: $('sub-fill').parentElement,
       boss: $('boss-bar'), bossFill: $('boss-fill'), bossName: $('boss-name'),
@@ -91,6 +101,19 @@ export class Hud {
     }
     this._lastAmmo = -1;
     this._lastMissile = -1;
+    // the parts panel: one cell per socketed part and leg, recoloured as they are hurt and struck out when shot off
+    const grid = e.partsGrid;
+    grid.textContent = '';
+    this._partCells = this.game.player.mech.parts.map((p) => {
+      const c = document.createElement('i');
+      c.className = `part-cell ${p.kind}`;
+      c.title = p.name;
+      c.textContent = partLabel(p);
+      grid.append(c);
+      return c;
+    });
+    this._partSig = '';
+    e.partsPanel.style.display = this._partCells.length ? '' : 'none';
   }
 
   show(on) {
@@ -192,6 +215,7 @@ export class Hud {
     if (m1) e.cannon2Fill.style.width = `${(1 - m1.cd / m1.def.cooldown) * 100}%`;
     if (player.limbGuns.length) e.armsFill.style.width = `${(player.limbGuns.reduce((n, l) => n + 1 - l.cd / l.def.interval, 0) / player.limbGuns.length) * 100}%`;
     if (player.sub) this._updateSubRow(player);
+    this._updateParts(mech);
     e.reload.classList.toggle('on', player.reloadT > 0);
     if (player.reloadT > 0) e.reload.textContent = `RELOADING ${Math.round((1 - player.reloadT / player.reloadDur) * 100)}%`;
 
@@ -402,6 +426,21 @@ export class Hud {
         ctx.restore();
       }
     }
+  }
+
+  /** Recolour the parts panel when a part's health band changes: green, amber, red, and out. */
+  _updateParts(mech) {
+    const cells = this._partCells;
+    if (!cells?.length) return;
+    const bands = mech.parts.map((p) => (p.broken ? 0 : p.hp / p.maxHp > 0.66 ? 4 : p.hp / p.maxHp > 0.33 ? 3 : p.hp / p.maxHp > 0.12 ? 2 : 1));
+    const sig = bands.join('');
+    if (sig === this._partSig) return;
+    this._partSig = sig;
+    cells.forEach((c, i) => {
+      const b = bands[i];
+      c.dataset.band = String(b);
+      c.classList.toggle('out', b === 0);
+    });
   }
 
   /** The brackets for a secondary lock (a many-headed machine holds several): a smaller green frame and its number. */

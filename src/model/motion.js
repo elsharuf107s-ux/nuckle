@@ -147,6 +147,14 @@ function stepCycle(psi, stride, sideStride, clearance, g) {
   }
 }
 
+/** How an extra arm stands in each row of sockets: at rest, aiming, in guard, with a blade out, holding a tool, in the air, limp. */
+const ROW = {
+  lower: { x: 0.55, el: 0.55, z: 0.22, aimEl: 0.3, air: -0.25, airEl: 0.3, guard: [1.1, 0.95], blade: [0.95, 0.8], hold: [0.75, 0.7], clear: [0.35, 0.5], limp: [0.3, 0.2], swing: 0.8, stride: -0.35, drop: 0.25 },
+  mid: { x: 0.9, el: 0.6, z: 0.5, aimEl: 0.2, air: 0.05, airEl: 0.4, guard: [1.25, 0.8], blade: [1.1, 0.7], hold: [0.95, 0.65], clear: [0.5, 0.5], limp: [0.35, 0.2], swing: 0.85, stride: -0.2, drop: 0.4 },
+  upper: { x: 2.55, el: -1.25, z: 0.3, aimEl: -0.45, air: 2.95, airEl: -0.25, guard: [2.3, -0.35], blade: [2.0, -0.6], hold: [2.3, -0.7], clear: [2.7, -1.0], limp: [2.1, -0.1], swing: 0.95, stride: 0.1, drop: null },
+};
+const AIMING = new Set(['gun', 'cannon', 'launcher', 'shotgun', 'rail']); // the arms that point at the target when they fire
+
 export function createMotion(rig) {
   const { spec, hips, torso, head, legs, armL, armR, saber, blade, rifle, flames, chargeGlow, chargeMat, eyeNode, L } = rig;
   const scale = spec.scale ?? 1;
@@ -154,8 +162,8 @@ export function createMotion(rig) {
   const { thigh: THIGH, shin: SHIN, reach: REACH, hipY: HIP_Y } = SK;
   const HK = HIP_Y / STOCK_HIP_Y;    // the whole-body poses below are written for the stock height
   const kind = SK.kind === 'legs' ? (SK.layout === 'biped' ? 'biped' : 'multi') : SK.kind; // biped | multi | tread | hover
-  const drive = kind === 'tread' || kind === 'hover';
-  const STRIDE_K = SK.layout === 'hexa' ? 0.75 : 1;
+  const drive = kind === 'tread' || kind === 'hover' || kind === 'wheel';
+  const STRIDE_K = { hexa: 0.75, octo: 0.7, tripod: 0.9 }[SK.layout] ?? 1; // many legs take shorter steps
   const solve = (shoulder, target, pole, q) => solveArm(SK.upper, SK.fore, shoulder, target, pole, q);
   const meleeOnly = spec.weapon === 'saber' || spec.weapon === 'greatsword'; // the "gun" is the hilt itself
   const twoHanded = rig.foregrip !== null && rig.foregrip !== undefined;
@@ -187,7 +195,8 @@ export function createMotion(rig) {
   const wings = rig.wings.map(() => sp());
   // the extra parts: each extra arm has its own pose springs, side heads their own scan, the tail a chain of springs
   const limbs = rig.limbs ?? [];
-  const limbS = limbs.map((L, i) => ({ x: L.row === 'upper' ? 2.55 : 0.55, y: 0, z: L.side * 0.22, el: L.row === 'upper' ? -1.25 : 0.55, rec: 0, hold: 0, ext: 0, ph: i * 1.7 + 0.6, glow: 0 }));
+  const limbS = limbs.map((L, i) => ({ x: ROW[L.row].x, y: 0, z: L.side * ROW[L.row].z, el: ROW[L.row].el, rec: 0, hold: 0, ext: 0, ph: i * 1.7 + 0.6, glow: 0 }));
+  const wings2 = rig.wings2 ?? [];
   const sideHeads = rig.sideHeads ?? [];
   const tailS = rig.tail ? rig.tail.segs.map(() => ({ x: sp(), y: sp() })) : [];
   const swingPoseL = {}; // an extra arm's own copy of the swing pose (a few frames behind the right arm)
@@ -639,7 +648,7 @@ export function createMotion(rig) {
 
     // ---- secondary motion
     secondary(dt, dF, dR, dY);
-    if (limbs.length || sideHeads.length || tailS.length) {
+    if (limbs.length || sideHeads.length || tailS.length || wings2.length || rig.turrets.length || rig.spinners.length || rig.moduleSpin) {
       updateExtras(dt, { s, aimUp, aimYaw, chestPitch, twist, swing, lunge, down, relaxed, kneel, flinch, still, walk, hh, hhy, dF, dR, dY, ov });
     }
 
@@ -691,63 +700,66 @@ export function createMotion(rig) {
     const kick = clamp(c.dF, -260, 260) * 0.012, side = clamp(c.dR, -260, 260) * 0.012, bump = Math.min(Math.abs(c.dY), 200) * 0.006;
 
     limbs.forEach((L, i) => {
+      if (L.broken) return; // shot off
       const S = limbS[i];
-      const up = L.row === 'upper', out = L.side;
+      const R = ROW[L.row], up = L.row === 'upper';
+      const out = L.side;
       S.rec = Math.max(0, S.rec - dt * 6);
       S.hold = Math.max(0, S.hold - dt);
       const sway = Math.sin(st.t * 1.3 + S.ph);
-      // at rest: a lower arm hangs forward a little, a back arm is raised over the shoulder with its forearm forward
-      let x = up ? 2.55 : 0.55, y = -out * 0.06, z = out * (up ? 0.3 : 0.22), el = up ? -1.25 : 0.55;
+      // at rest: a lower arm hangs forward a little, a middle arm is held out at its side, a back arm is raised over the shoulder
+      let x = R.x, y = -out * 0.06, z = out * R.z, el = R.el;
       x += sway * 0.04;
       let rate = 16;
       // the arms swing against the stride a little
       const leg = gait[out < 0 ? 0 : 1];
-      x += (up ? 0.1 : -0.35) * (leg.fx / 8) * (1 - st.air) * (1 - still) * walk;
+      x += R.stride * (leg.fx / 8) * (1 - st.air) * (1 - still) * walk;
 
-      if (L.kind === 'gun' || L.kind === 'cannon' || L.kind === 'launcher') {
+      if (AIMING.has(L.kind)) {
         // held at the ready; a shot snaps it onto the target and holds it there
         const aim = canAimLimb(down, relaxed) ? (S.hold > 0 ? 1 : 0) : 0;
         S.aimW = damp(S.aimW ?? 0, aim, aim ? 40 : 7, dt);
-        const elA = up ? -0.45 : 0.3;
-        x = lerp(x, Math.PI / 2 + aimUp - chestPitch - elA + S.rec * 0.3, S.aimW);
+        x = lerp(x, Math.PI / 2 + aimUp - chestPitch - R.aimEl + S.rec * 0.3, S.aimW);
         y = lerp(y, -twist + aimYaw * 0.9 - out * 0.04, S.aimW);
         z = lerp(z, out * 0.05, S.aimW);
-        el = lerp(el, elA + S.rec * 0.25, S.aimW);
+        el = lerp(el, R.aimEl + S.rec * 0.25, S.aimW);
         if (S.aimW > 0.05) rate = 44;
-        if (sabering || c.s.attack) { x = lerp(x, up ? 2.7 : 0.35, 0.6); el = lerp(el, up ? -1.0 : 0.5, 0.6); } // out of the way of the blade
-      } else if (L.kind === 'blade') {
+        if (sabering || c.s.attack) { x = lerp(x, R.clear[0], 0.6); el = lerp(el, R.clear[1], 0.6); } // out of the way of the blade
+      } else if (L.kind === 'blade' || L.kind === 'drill') {
         S.ext = damp(S.ext, sabering || swing || lunge ? 1 : 0, 22, dt);
-        L.blade.scale.y = Math.max(0.001, S.ext);
-        if (S.ext > 0.05) { // blade out: held across the body in guard
-          x = lerp(x, up ? 2.0 : 0.95, S.ext); el = lerp(el, up ? -0.6 : 0.8, S.ext); y = lerp(y, -out * 0.3, S.ext);
+        if (L.blade) L.blade.scale.y = Math.max(0.001, S.ext);
+        if (S.ext > 0.05) { // blade out (or drill whirring): held across the body in guard
+          x = lerp(x, R.blade[0], S.ext); el = lerp(el, R.blade[1], S.ext); y = lerp(y, -out * 0.3, S.ext);
         }
         if (swing) { // the same stroke as the main arm, a few frames behind, the left side mirrored
           swingPose(swing.kind, clamp(swing.t - 0.05 - 0.02 * i, 0, 1), swingPoseL);
-          const m = out; // +1 right, -1 left (the left arm's stroke mirrors the right's)
-          x = lerp(x, swingPoseL.x * (up ? 0.95 : 0.8), 0.9);
-          y = lerp(y, swingPoseL.y * 0.75 * m, 0.9);
+          x = lerp(x, swingPoseL.x * R.swing, 0.9);
+          y = lerp(y, swingPoseL.y * 0.75 * out, 0.9); // (+1 right, -1 left: the left arm's stroke mirrors the right's)
           el = lerp(el, swingPoseL.el * 0.7, 0.9);
           rate = 60;
         } else if (lunge) { x = lerp(x, 0.2, 0.9); y = lerp(y, -out * 0.5, 0.9); el = lerp(el, 0.4, 0.9); rate = 30; }
       } else if (L.kind === 'shield') {
         // raised across the front in guard, harder when fighting
         const g = 0.7 + 0.3 * st.fight;
-        x = lerp(x, up ? 2.3 : 1.1, g); el = lerp(el, up ? -0.35 : 0.95, g); y = lerp(y, -out * 0.4, g); z = lerp(z, out * 0.1, g);
+        x = lerp(x, R.guard[0], g); el = lerp(el, R.guard[1], g); y = lerp(y, -out * 0.4, g); z = lerp(z, out * 0.1, g);
         x -= flinch * 0.25;
-      } else if (L.kind === 'repair') {
-        x = lerp(x, up ? 2.3 : 0.75, 0.8); el = lerp(el, up ? -0.7 : 0.7, 0.8); y = lerp(y, -out * 0.2, 0.8);
-        S.glow = damp(S.glow, 0.6 + 0.4 * Math.sin(st.t * 3 + S.ph), 10, dt);
-        L.glow.scale.setScalar(0.8 + 0.4 * S.glow);
+      } else if (L.kind === 'repair' || L.kind === 'sensor') {
+        x = lerp(x, R.hold[0], 0.8); el = lerp(el, R.hold[1], 0.8); y = lerp(y, -out * 0.2, 0.8);
+        if (L.glow) {
+          S.glow = damp(S.glow, 0.6 + 0.4 * Math.sin(st.t * 3 + S.ph), 10, dt);
+          L.glow.scale.setScalar(0.8 + 0.4 * S.glow);
+        }
       }
 
       // in the air the arms stream back (lower ones) or up (back ones); a skid or a landing drops the lower ones
       const air = Math.max(st.air * 0.55, st.flight);
-      x = lerp(x, up ? 2.95 : -0.25, air); el = lerp(el, up ? -0.25 : 0.3, air); z = lerp(z, out * 0.45, air * 0.8);
-      x = lerp(x, up ? x : 0.25, Math.max(kneel, st.skid * 0.7)); z += st.land * out * 0.4;
+      x = lerp(x, R.air, air); el = lerp(el, R.airEl, air); z = lerp(z, out * 0.45, air * 0.8);
+      if (R.drop !== null) x = lerp(x, R.drop, Math.max(kneel, st.skid * 0.7));
+      z += st.land * out * 0.4;
       x -= (flinch * 0.3 + s.stagger * 0.5) * (up ? -0.5 : 1);
       if (ov) { // knocked down or breaking down: limp
         const w = down;
-        x = lerp(x, up ? 2.1 : 0.3, w); el = lerp(el, up ? -0.1 : 0.2, w); z = lerp(z, out * 0.5, w); y = lerp(y, 0, w);
+        x = lerp(x, R.limp[0], w); el = lerp(el, R.limp[1], w); z = lerp(z, out * 0.5, w); y = lerp(y, 0, w);
       }
       const k = 1 - Math.exp(-rate * dt);
       S.x += (x - S.x) * k; S.y += (y - S.y) * k; S.z += (z - S.z) * k; S.el += (el - S.el) * k;
@@ -755,15 +767,49 @@ export function createMotion(rig) {
       L.elbow.rotation.x = S.el;
     });
 
+    // things that turn: radar dishes always, a drill while its arm is in a fight
+    for (const sp of rig.spinners) {
+      const want = sp.when === 'always' ? sp.speed : (sabering || swing || lunge) && (!sp.limb || limbS[limbs.indexOf(sp.limb)]?.ext > 0.3) ? sp.speed : 0;
+      sp.w = damp(sp.w ?? 0, want, want > 0 ? 6 : 3, dt);
+      sp.node.rotation[sp.axis] += sp.w * dt;
+    }
+
+    // wings fold down against the back and spread under thrust, in flight and on a step
+    for (let i = 0; i < wings2.length; i++) {
+      const w = wings2[i];
+      if (w.g.userData.broken) continue;
+      const open = clamp(0.06 + st.boost * 0.9 + st.flight * 0.5 + st.flare * 0.3 + st.step * 0.3 - c.down * 0.5, 0, 1);
+      w.o = damp(w.o ?? 0, open, open > (w.o ?? 0) ? 9 : 4, dt);
+      const flutter = Math.sin(st.t * 9 + i * 2) * 0.02 * w.o;
+      w.g.rotation.z = -w.side * (lerp(1.3, 0.12, w.o) + flutter + (swing ? 0.05 : 0));
+      w.g.rotation.y = -w.side * (st.flight * 0.12 + hit.hy.x * 0.2);
+    }
+
+    // chest module cores pulse
+    if (rig.moduleSpin) rig.moduleSpin.scale.setScalar(1 + 0.08 * Math.sin(st.t * 4.5));
+
+    // self-aiming guns: swing onto what the player code last handed them (see aimTurret), else ease back to rest
+    for (const T of rig.turrets) {
+      T.hold = Math.max(0, T.hold - dt);
+      const k2 = 1 - Math.exp(-(T.hold > 0 ? 18 : 4) * dt);
+      if (T.hold > 0 && T.tgt) {
+        _qa.copy(T.aim.quaternion);
+        T.aim.lookAt(T.tgt);
+        _qd.copy(T.aim.quaternion);
+        T.aim.quaternion.copy(_qa).slerp(_qd, k2);
+      } else T.aim.quaternion.slerp(T.rest, k2);
+    }
+
     // side heads look about on their own while at ease, and follow the aim in a fight
     sideHeads.forEach((H, i) => {
+      if (H.broken) return;
       const scan = relaxed ? Math.sin(st.t * 0.7 + i * 2.4) * 0.35 * st.idle : Math.sin(st.t * 1.1 + i * 2.4) * 0.08;
       H.head.rotation.x = clamp(aimUp * 0.5, -0.3, 0.45) - torso.rotation.x * 0.6 + hh * 0.8 + s.stagger * 0.3 + (ov ? ov.headX * down : 0);
       H.head.rotation.y = H.rest + scan + aimYaw * 0.4 * st.aim - twist * 0.5 + hhy * 0.8;
     });
 
     // the tail: each segment lags a little more than the one before it
-    if (tailS.length) {
+    if (tailS.length && !rig.tail.root.userData.broken) {
       const lash = rig.tail.id === 'lash';
       const swingDir = swing ? (swing.kind === 'slash2' ? -1 : swing.kind === 'slash1' ? 1 : 0.4) : 0;
       rig.tail.segs.forEach((g, i) => {
@@ -798,8 +844,7 @@ export function createMotion(rig) {
     for (let i = 0; i < legs.length; i++) {
       const h = legs[i].hip, g = gaitM[i];
       const lead = rows > 1 ? 1 - (2 * h.row) / (rows - 1) : 1; // +1 on the front row, -1 on the last
-      const parity = (h.row + (h.side > 0 ? 1 : 0)) % 2;
-      const psi = (((st.phase + parity * Math.PI) % TAU) + TAU) % TAU;
+      const psi = (((st.phase + h.phase) % TAU) + TAU) % TAU;
       stepCycle(psi, stride, sideStride, clearance, g);
       // standing, fighting (feet apart front to back), skating and skidding (the front feet lead, the back ones trail)
       g.fx = lerp(g.fx, lead * (0.5 + 1.1 * st.fight + 0.9 * Math.max(st.aim * 0.6, st.brace)), still);
@@ -814,6 +859,8 @@ export function createMotion(rig) {
 
     // the pelvis: as high as the stance allows, lower in a crouch, never higher than the planted legs reach
     let hipH = HIP_Y - 0.3 - st.crouch * 2.2 - kneel * 2.2;
+    const lostN = legs.filter((l) => l.lost).length;
+    if (lostN) hipH -= Math.min(2.2, 0.55 * lostN); // a machine missing legs sags
     const aim = legs.map((l, i) => {
       const h = l.hip, g = gaitM[i];
       const dx = h.footX + g.fz - h.x, dz = h.footZ - g.fx - h.z;
@@ -825,19 +872,21 @@ export function createMotion(rig) {
       const off = (h.x * sr - PIVOT * cr) * cp - h.z * spn;
       return { h, g, fx, yaw: h.yaw - Math.atan(lat / safe), off };
     });
-    for (const a of aim) {
-      if (a.g.lift > 0.02) continue;
+    for (let i = 0; i < aim.length; i++) {
+      const a = aim[i];
+      if (legs[i].lost || a.g.lift > 0.02) continue;
       const reachY = Math.sqrt(Math.max(0, REACH * REACH - a.fx * a.fx)) * cp * cr;
       hipH = Math.min(hipH, SOLE + reachY - a.off);
     }
 
     for (let i = 0; i < legs.length; i++) {
       const { h, g, fx, yaw, off } = aim[i];
+      if (legs[i].lost) { legOut.push({ th: 0, kn: 0, ft: 0, splay: 0, yaw: h.yaw, yawed: true }); continue; }
       const fy = (SOLE + g.lift - (hipH + off)) / (cp * cr);
       ik(THIGH, SHIN, fx, fy, solvedM);
       let th = solvedM[0], kn = solvedM[1];
       let ft = g.swing * 0.12 * walk * (1 - still);
-      const kneeUp = (h.row + (h.side > 0 ? 1 : 0)) % 2 === 0; // as a biped's lead leg: one knee up while rising
+      const kneeUp = Math.cos(h.phase) > 0.3; // as a biped's lead leg: some knees up while rising
       let airTh = lerp(kneeUp ? 0.45 : -0.14, kneeUp ? 0.22 : 0.04, falling) - airTrail;
       let airKn = lerp(kneeUp ? -1.15 : -0.38, kneeUp ? -0.6 : -0.3, falling);
       let airFt = lerp(-0.5, -0.05, falling);
@@ -861,7 +910,7 @@ export function createMotion(rig) {
    */
   function driveHull(dt, c) {
     const { along, kneel, dY, s } = c;
-    const tread = kind === 'tread';
+    const tread = kind === 'tread' || kind === 'wheel'; // (both stay on the ground: the hull only tilts and rocks)
     // a landing or a bump pushes the hull down; it rebounds on a spring
     hull.v -= clamp(dY, -300, 300) * 0.012;
     const bounce = spring(hull, 0, 240, 9, dt, 0.9);
@@ -870,7 +919,16 @@ export function createMotion(rig) {
     const hipH = tread ? HIP_Y + Math.max(0, bounce) * 0.4 : HIP_Y - 0.3 - st.crouch * 1.4 - kneel * 1.5 + bounce * 0.5 + bob;
     const hipY = lerp(hipH, HIP_Y + (tread ? 0.2 : 0.8), st.air);
 
-    if (tread) {
+    if (kind === 'wheel') {
+      const grounded = s.grounded;
+      const vis = clamp(along, -110, 110) * (grounded ? 1 : 0.15);
+      const turnV = clamp((s.turnRate ?? 0) * SK.lay.wheelX, -40, 40) * (grounded && st.pace < 6 ? 1 : 0.35);
+      const steer = clamp((s.turnRate ?? 0) * 0.14, -0.55, 0.55) * (grounded ? 1 : 0.3);
+      for (const w of rig.wheels) {
+        w.roll.rotation.x -= ((vis + turnV * w.side) * dt) / w.r;
+        w.steer.rotation.y = lerp(w.steer.rotation.y, w.front ? -steer : 0, 1 - Math.exp(-12 * dt));
+      }
+    } else if (tread) {
       const grounded = s.grounded;
       const vis = clamp(along, -95, 95) * (grounded ? 1 : 0.15);
       const turnV = clamp((s.turnRate ?? 0) * SK.lay.trackX, -40, 40) * (grounded && st.pace < 6 ? 1 : 0.35);
@@ -1050,6 +1108,15 @@ export function createMotion(rig) {
     st.flare = Math.max(st.flare, k);
   }
 
+  /** Point the self-aiming gun in `slot` at a world position (for a moment: it eases back to rest when nothing refreshes it). */
+  function aimTurret(slot, at) {
+    const T = rig.turrets.find((t) => t.slot === slot);
+    if (!T) return;
+    if (!T.tgt) T.tgt = at.clone();
+    else T.tgt.copy(at);
+    T.hold = 0.5;
+  }
+
   /** An extra arm fired (`i` is its index in rig.limbs): it snaps onto the target, kicks, and holds the pose. */
   function fireLimb(i, k = 0.4) {
     const S = limbS[i];
@@ -1059,5 +1126,5 @@ export function createMotion(rig) {
     hit.p.v += k * 0.4;
   }
 
-  return { update, land, recoil, setSaber, hit: onHit, flare: flareThrusters, fireLimb, state: st };
+  return { update, land, recoil, setSaber, hit: onHit, flare: flareThrusters, fireLimb, aimTurret, state: st };
 }

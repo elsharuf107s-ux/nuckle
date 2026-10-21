@@ -50,6 +50,7 @@
       <div class="meter"><span>BOOST</span><div class="bar en"><i id="en-fill"></i></div><b id="en-text">100</b></div>
       <div class="meter" id="barrier-row"><span>BARRIER</span><div class="bar barrier"><i id="barrier-fill"></i></div><b id="barrier-text">0</b></div>
       <div class="meter"><span>BURST</span><div class="bar burst"><i id="burst-fill"></i></div><b id="burst-text">0%</b></div>
+      <div id="parts-panel"><div class="parts-label">PARTS</div><div id="parts-grid"></div></div>
     </div>
 
     <div class="panel" id="weapons">
@@ -156,6 +157,17 @@
   <!-- garage: the 3D canvas shows the mech on a turntable; these panels float over it -->
   <div id="screen-garage" class="hidden">
     <div id="g-markers" class="g-markers"></div>
+    <div id="g-share" class="g-share hidden">
+      <div class="g-share-box">
+        <h3>BUILD CODE</h3>
+        <p>Copy this code to share the machine with someone, or paste a code you were given below.</p>
+        <textarea id="g-code-out" rows="5" readonly spellcheck="false"></textarea>
+        <div class="g-share-row"><button id="g-code-copy" class="secondary" type="button">COPY</button><span id="g-code-note"></span></div>
+        <textarea id="g-code-in" rows="3" spellcheck="false" placeholder="Paste a build code here"></textarea>
+        <div class="g-share-row"><button id="g-code-load" class="secondary" type="button">LOAD IT</button><span id="g-code-error"></span></div>
+        <button id="g-code-close" class="primary" type="button">DONE</button>
+      </div>
+    </div>
     <div class="g-panel g-left">
       <div class="g-title">GARAGE</div>
       <div id="g-pit" class="g-pit hidden">
@@ -183,12 +195,18 @@
         <button class="pose active" data-pose="idle">IDLE</button>
         <button class="pose" data-pose="boost">BOOST</button>
         <button class="pose" data-pose="saber">SABER</button>
+        <span class="g-gap">MARKERS</span>
+        <button class="layer active" data-layer="all">ALL</button>
+        <button class="layer" data-layer="body">BODY</button>
+        <button class="layer" data-layer="sockets">SOCKETS</button>
       </div>
       <div class="g-actions">
         <button id="g-back" class="secondary">BACK</button>
         <button id="g-stats-toggle" class="secondary">STATS</button>
         <button id="g-random" class="secondary">RANDOMIZE</button>
         <button id="g-reset" class="secondary">RESET</button>
+        <button id="g-code" class="secondary">CODE</button>
+        <button id="g-range" class="secondary">TEST RANGE</button>
         <button id="g-go" class="primary">SORTIE</button>
       </div>
       <div class="g-hint">Click a marker &middot; drag to rotate &middot; <span class="no-touch">scroll</span><span class="touch-only">pinch</span> to zoom</div>

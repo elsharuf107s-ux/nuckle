@@ -164,6 +164,18 @@ button.secondary { margin-left: 10px; }
 #sub-state { margin-top: 4px; letter-spacing: 0.14em; }
 #build-flags { font-size: 10px; letter-spacing: 0.1em; color: var(--amber); margin: -2px 0 6px; line-height: 1.5; }
 #build-flags:empty { display: none; }
+/* the parts panel: a cell for each socketed part and leg, green while whole, amber, red, struck out when shot off */
+#parts-panel { margin-top: 6px; }
+.parts-label { font-size: 9px; letter-spacing: 0.2em; color: var(--dim); margin-bottom: 3px; }
+#parts-grid { display: flex; flex-wrap: wrap; gap: 3px; }
+.part-cell { font: 700 9px/16px var(--mono); font-style: normal; min-width: 20px; padding: 0 3px; text-align: center; border: 1px solid rgba(93, 255, 165, 0.7); color: var(--green); background: rgba(93, 255, 165, 0.12); }
+.part-cell.leg { border-radius: 8px; }
+.part-cell[data-band="3"] { border-color: rgba(255, 182, 46, 0.85); color: var(--amber); background: rgba(255, 182, 46, 0.12); }
+.part-cell[data-band="2"] { border-color: rgba(255, 110, 90, 0.9); color: #ff7a66; background: rgba(255, 90, 70, 0.14); }
+.part-cell[data-band="1"] { border-color: rgba(255, 60, 60, 1); color: #ff4646; background: rgba(255, 50, 50, 0.22); animation: pulse 0.45s infinite alternate; }
+.part-cell.out { border-color: rgba(255, 255, 255, 0.15); color: rgba(255, 255, 255, 0.25); background: transparent; text-decoration: line-through; animation: none; }
+html.touch #parts-panel { margin-top: 3px; }
+html.touch .parts-label { display: none; }
 #cannon-row .bar, #cannon2-row .bar { margin-top: 6px; }
 .title-buttons { display: flex; gap: 12px; }
 .build-line { margin-top: 14px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; color: var(--dim); }
@@ -240,11 +252,13 @@ button.secondary { margin-left: 10px; }
 
 .g-bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
 .g-actions { display: flex; gap: 10px; }
-.g-actions button { padding: 11px 26px; font-size: 13px; }
+.g-actions button { padding: 11px 20px; font-size: 13px; }
 .g-poses { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.2em; color: var(--dim); }
 .g-poses .pose { padding: 4px 12px; font-size: 10px; letter-spacing: 0.14em; clip-path: none; background: rgba(8, 16, 26, 0.7); }
-.g-poses .pose.active { border-color: var(--cyan); color: var(--cyan); }
-.g-hint { position: absolute; right: 26px; bottom: 14px; font-size: 10px; letter-spacing: 0.1em; color: var(--dim); }
+.g-poses .pose.active, .g-poses .layer.active { border-color: var(--cyan); color: var(--cyan); }
+.g-poses .layer { padding: 4px 10px; font-size: 10px; letter-spacing: 0.14em; clip-path: none; background: rgba(8, 16, 26, 0.7); }
+.g-poses .g-gap { margin-left: 14px; }
+.g-hint { position: absolute; left: 50%; bottom: 92px; transform: translateX(-50%); white-space: nowrap; font-size: 10px; letter-spacing: 0.1em; color: var(--dim); text-shadow: 0 0 6px #000, 0 0 3px #000; pointer-events: none; }
 
 /* ---------- the garage: hardpoint markers, inventory grid, hangar ---------- */
 .g-markers { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
@@ -284,6 +298,12 @@ button.secondary { margin-left: 10px; }
   #screen-garage.rigmode .g-marker:not(.socket) { display: none; }
 }
 .g-marker.off { display: none; }
+/* an explicit choice of layer overrides the small-screen default above */
+#screen-garage.layer-all .g-marker:not(.off) { display: block; }
+#screen-garage.layer-body .g-marker.socket { display: none; }
+#screen-garage.layer-body .g-marker:not(.socket):not(.off) { display: block; }
+#screen-garage.layer-sockets .g-marker:not(.socket) { display: none; }
+#screen-garage.layer-sockets .g-marker.socket:not(.off) { display: block; }
 
 .g-hangar { display: flex; gap: 5px; margin-bottom: 10px; align-items: stretch; }
 .hg-slot { width: 34px; padding: 6px 0; font-size: 12px; letter-spacing: 0; clip-path: none; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(120, 220, 255, 0.2); color: var(--dim); }
@@ -345,6 +365,38 @@ button.secondary { margin-left: 10px; }
 }
 
 .title-buttons button.secondary, .g-actions button.secondary { margin-left: 0; }
+
+/* ---------- garage: upgrades, set bonuses, paint areas, build codes ---------- */
+.g-detail .upgrade { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; padding-top: 7px; border-top: 1px dashed rgba(120, 220, 255, 0.22); }
+.g-detail .up-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.g-detail .up-info b { font-size: 11px; letter-spacing: 0.16em; color: var(--amber); }
+.g-detail .up-info span { font-size: 9px; letter-spacing: 0.06em; color: var(--dim); line-height: 1.3; }
+.g-detail .tune-pips i.on { background: var(--amber); box-shadow: 0 0 6px rgba(255, 182, 46, 0.6); }
+.up-total { letter-spacing: 0.12em; color: var(--amber); }
+.set-row { display: grid; grid-template-columns: 1fr; gap: 1px; padding: 7px 10px; margin-bottom: 5px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(120, 220, 255, 0.14); opacity: 0.7; }
+.set-row b { font-size: 11px; letter-spacing: 0.16em; }
+.set-row .set-need { font-size: 9px; letter-spacing: 0.08em; color: var(--dim); }
+.set-row .set-desc { font-family: var(--sans); font-size: 11px; line-height: 1.35; color: var(--dim); }
+.set-row.on { opacity: 1; border-color: var(--green); background: rgba(93, 255, 165, 0.1); }
+.set-row.on b, .set-row.on .set-need { color: var(--green); }
+.g-summary .good, .g-summary .good b { color: var(--green); }
+.areas { margin-bottom: 6px; }
+.areas .mark { padding: 6px 9px; }
+.areas .mark.painted::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--amber); }
+.pit #g-range { display: none; }
+
+.g-share { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(2, 6, 12, 0.72); pointer-events: auto; }
+.g-share-box { width: min(520px, calc(100% - 28px)); max-height: calc(100% - 20px); overflow-y: auto; padding: 18px 20px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 9px; }
+.g-share-box h3 { margin: 0; font-size: 14px; letter-spacing: 0.24em; color: var(--cyan); }
+.g-share-box p { margin: 0; font: 12px/1.45 var(--sans); color: var(--dim); }
+.g-share-box textarea { width: 100%; box-sizing: border-box; resize: none; padding: 8px 10px; font: 12px/1.4 var(--mono); color: var(--text); background: rgba(4, 10, 18, 0.9); border: 1px solid rgba(120, 220, 255, 0.3); word-break: break-all; }
+.g-share-box textarea:focus { outline: none; border-color: var(--cyan); }
+.g-share-row { display: flex; align-items: center; gap: 12px; min-height: 30px; }
+.g-share-row span { font-size: 11px; letter-spacing: 0.1em; color: var(--dim); }
+.g-share-row span.good { color: var(--green); }
+.g-share-row span.bad { color: var(--red); }
+.g-share-box button { margin-left: 0; }
+.g-share-box button.primary { align-self: flex-end; }
 
 /* ---------- garage: budgets, tuning ---------- */
 .stat .s-bar i.over { background: linear-gradient(90deg, #ff4260, #ff8a5a); }
@@ -552,8 +604,9 @@ html.touch .g-tabs { touch-action: pan-x; }
   .g-poses { gap: 6px; }
   .g-poses span, .g-hint { display: none; }
   .g-poses .pose { padding: 7px 10px; }
-  .g-actions { gap: 8px; }
-  .g-actions button { padding: 9px 14px; font-size: 11px; letter-spacing: 0.14em; background-color: rgba(8, 16, 26, 0.82); }
+  .g-poses .layer { display: none; } /* (small screens pick the marker layer themselves: the body, or the sockets while the RIG tab is open) */
+  .g-actions { gap: 6px; }
+  .g-actions button { padding: 9px 11px; font-size: 11px; letter-spacing: 0.1em; white-space: nowrap; background-color: rgba(8, 16, 26, 0.82); }
   .g-actions button.primary { background-color: rgba(12, 48, 62, 0.92); }
 }
 

@@ -2,7 +2,7 @@
 // in part of the `rig` (the shared record of nodes) and adds meshes through the kit.
 
 import { HIP_Y, LEG, NECK_Y, PIVOT, SHIN, SHOULDER_X, SHOULDER_Y, THIGH, TORSO_Y } from './skeleton.js';
-import { buildFrame, buildHover, buildTreads } from './layouts.js';
+import { buildFrame, buildHover, buildTreads, buildWheels } from './layouts.js';
 
 const PI = Math.PI;
 
@@ -125,7 +125,7 @@ export function buildPelvis(rig) {
 function buildLeg(rig, style, L, side, x, z, thruster) {
   const { k, hips, sk, makeFlame } = rig;
   const { add, group, M, box, cyl, sph, cone } = k;
-  const s = side;
+  const s = side || 1; // (a solo leg on the centre line borrows the right side's decoration)
   const kt = sk.thigh / THIGH, ks = sk.shin / SHIN;
   const leg = group(hips, x, -PIVOT, z);
   leg.rotation.order = 'YXZ';
@@ -198,6 +198,8 @@ export function buildLegs(rig) {
     if (sk.layout !== 'biped') buildFrame(rig);
   } else if (sk.kind === 'tread') {
     buildTreads(rig);
+  } else if (sk.kind === 'wheel') {
+    buildWheels(rig);
   } else {
     buildHover(rig);
   }

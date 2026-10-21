@@ -125,7 +125,7 @@ const LEGACY_SRC = legacy.toString();
 
   // ---- the expanded catalogue: two to four new parts in every slot
   const pools = [...new Set(P.SLOTS.map(P.poolOf))];
-  check('the catalogue has 26 slots on 20 hardpoints and 128 distinct parts', P.SLOTS.length === 26 && P.HARDPOINTS.length === 20 && pools.reduce((n, pl) => n + P.PARTS[pl].length, 0) === 128, `${pools.reduce((n, pl) => n + P.PARTS[pl].length, 0)} parts`);
+  check('the catalogue has 33 slots on 27 hardpoints and 156 distinct parts', P.SLOTS.length === 33 && P.HARDPOINTS.length === 27 && pools.reduce((n, pl) => n + P.PARTS[pl].length, 0) === 156, `${pools.reduce((n, pl) => n + P.PARTS[pl].length, 0)} parts`);
   check('every part id is unique within its pool and every part has a name, a description and a model', pools.every((pl) => new Set(P.PARTS[pl].map((p) => p.id)).size === P.PARTS[pl].length
     && P.PARTS[pl].every((p) => p.name && p.desc.length > 20 && typeof p.model === 'string')));
   check('every hardpoint holds real slots, and every slot belongs to exactly one hardpoint', P.HARDPOINTS.every((h) => h.slots.length >= 1 && h.slots.every((s) => P.SLOTS.includes(s)))
@@ -235,7 +235,7 @@ const LEGACY_SRC = legacy.toString();
   check('a side head adds one lock-on target and works at half strength (60% of the weight and power draw)', (() => {
     const base = head({ head: 'vfin' }), one = head({ headL: 'recon' }), main = head({ head: 'recon' });
     return one.lock === 2 && head({ headL: 'recon', headR: 'recon' }).lock === 3 && base.lock === 1 && one.radar > base.radar && one.radar < main.radar && Math.abs((one.radar - base.radar) - (main.radar - base.radar) * 0.5) < 1
-      && Math.abs(one.draw - base.draw - 0.6 * (P.partOf('head', 'recon').add.draw)) < 1e-9;
+      && Math.abs(one.draw - base.draw - 0.6 * (P.partOf('head', 'recon').add.draw)) <= 1; // (the budgets are whole numbers)
   })());
   check('lock-on targets are capped at three, and an empty side head adds nothing', head({ headL: 'recon', headR: 'jammer' }).lock === 3 && head({ headL: 'none' }).lock === 1 && JSON.stringify(head({ headL: 'none' }).counts) === JSON.stringify(def.counts));
   check('side heads can wear any helmet, and the counts show them', P.PARTS.head2.length === P.PARTS.head.length + 1 && head({ headL: 'hawk', headR: 'twin' }).counts.heads === 3);
@@ -278,6 +278,144 @@ const LEGACY_SRC = legacy.toString();
     }
     return ok && strange > 60 && strange < 380;
   })());
+
+  // ---- the expansion: more sockets and layouts, upgrades, set bonuses, paint zones, part health, build codes
+  const S = await import(path.join(root, 'src', 'share.js'));
+  const build = (patch) => ({ ...P.DEFAULT_BUILD, ...patch });
+  const stats = (patch, opts) => P.deriveStats(build(patch), opts);
+  check('the expanded rig: 33 slots on 27 hardpoints (16 sockets) and 156 distinct parts', P.SLOTS.length === 33 && P.HARDPOINTS.length === 27 && P.HARDPOINTS.filter((h) => h.socket).length === 16 && P.SOCKET_SLOTS.length === 16
+    && pools.reduce((n, pl) => n + P.PARTS[pl].length, 0) === 156, `${pools.reduce((n, pl) => n + P.PARTS[pl].length, 0)} parts`);
+  check('every new pair mirrors (mid arms, wings, flanks) and the chest module is a single socket', P.MIRROR.armMidL === 'armMidR' && P.MIRROR.wingR === 'wingL' && P.MIRROR.flankL === 'flankR' && !P.MIRROR.chestMod && P.poolOf('chestMod') === 'module');
+  const lay = (id) => stats({ layout: id });
+  check('layouts: three legs, eight legs and wheels join the five; every layout has its own trade-offs', [2, 3, 4, 6, 8, 0, 0, 0].join() === ['biped', 'tripod', 'quad', 'hexa', 'octo', 'wheel', 'tread', 'hover'].map((id) => lay(id).counts.legs).join()
+    && lay('octo').staggerAt > lay('hexa').staggerAt && lay('octo').speed < lay('hexa').speed && lay('wheel').speed > lay('biped').speed * 1.15 && lay('wheel').staggerAt < lay('biped').staggerAt && lay('tripod').staggerAt > lay('biped').staggerAt && lay('tripod').speed > lay('quad').speed,
+    JSON.stringify(['biped', 'tripod', 'quad', 'hexa', 'octo', 'wheel'].map((id) => [id, Math.round(lay(id).speed), lay(id).staggerAt])));
+  check('the wheelbase and treads ignore the leg style, the octopod multiplies it by eight legs\' worth', stats({ layout: 'wheel', legs: 'tank' }).hp === stats({ layout: 'wheel', legs: 'sprint' }).hp && stats({ layout: 'octo', legs: 'tank' }).load > stats({ layout: 'hexa', legs: 'tank' }).load);
+  const kind = (patch, key) => stats(patch)[key];
+  check('new arm tools: shotgun (pellets), railgun (a heavy piercing slug), sensor (radar), drill (melee) all list as arms in the new mid sockets', (() => {
+    const sh = stats({ armMidL: 'shotgun' }).limbs[0], rl = stats({ armMidR: 'rail' }).limbs[0];
+    return sh.kind === 'shotgun' && sh.pellets === 7 && sh.row === 'mid' && sh.side === 'L' && rl.kind === 'rail' && rl.damage > 250 && rl.row === 'mid' && kind({ armMidL: 'sensor' }, 'radar') === 420 + 140
+      && kind({ armMidL: 'drill' }, 'melee') > 1.15 && stats({ armMidL: 'sensor', armMidR: 'drill' }).counts.arms === 4;
+  })());
+  check('wings add their stats per side and the solar wing is free power', stats({ wingL: 'angel', wingR: 'angel' }).en === 100 + 72 && stats({ wingL: 'fighter' }).airSpeed > stats({}).airSpeed && stats({ wingL: 'solar', wingR: 'solar' }).supply === 100 + 48 && stats({ wingL: 'solar', wingR: 'solar' }).draw === stats({}).draw);
+  check('chest modules, flank pods and the new pods and tail do what they say', stats({ chestMod: 'reactor' }).supply === 140 && stats({ chestMod: 'radar' }).radar === 580 && stats({ chestMod: 'emitter' }).barrier === 180 && stats({ chestMod: 'bay' }).missileCharges === 3
+    && stats({ flankL: 'rack', flankR: 'rack' }).missileDamage > 1.2 && stats({ flankL: 'vernier' }).dashCost < stats({}).dashCost && stats({ flankL: 'plate', flankR: 'plate' }).hp === stats({}).hp + 240 && stats({ podL: 'barrier', podR: 'barrier' }).barrier === 260 && stats({ podL: 'radar' }).radar === 510);
+  check('auto-turrets: the tail gun, the turret pods and the chest vulcan are listed with their slots, and only the vulcan shoots missiles down', (() => {
+    const t = stats({ tail: 'turret', podL: 'turret', chestMod: 'vulcan' }).turrets;
+    return t.map((x) => x.slot).join() === 'tail,podL,chestMod' && t.every((x) => x.damage > 0 && x.interval > 0 && x.range > 100) && t.filter((x) => x.intercept).map((x) => x.slot).join() === 'chestMod';
+  })());
+
+  // upgrades
+  const gun = P.partOf('armLowerL', 'gun');
+  const g3 = P.tunedPart(gun, 3);
+  check('an upgrade makes a part\'s damage and benefits 12% better per level, at 8% more weight and 6% more power', Math.abs(g3.limb.damage - gun.limb.damage * 1.36) < 1e-9 && Math.abs(g3.add.weight - gun.add.weight * 1.24) < 1e-9 && Math.abs(g3.add.draw - gun.add.draw * 1.18) < 1e-9
+    && P.tunedPart(gun, 0) === gun && P.tunedPart(P.partOf('armLowerL', 'none'), 3).id === 'none');
+  check('upgrades keep whole numbers whole, improve penalties only where a bigger number is worse, and scale armor, guard and weapon damage', (() => {
+    const bay = P.tunedPart(P.partOf('chestMod', 'bay'), 3);
+    const vern = P.tunedPart(P.partOf('flankL', 'vernier'), 3);
+    const shield = P.tunedPart(P.partOf('armLowerL', 'shield'), 2);
+    const rifle = P.tunedPart(P.partOf('weapon', 'rifle'), 3);
+    const plate = P.tunedPart(P.partOf('flankL', 'plate'), 3);
+    return bay.add.missileCharges === 1 && vern.add.dashCost < -3 * 1.3 && shield.guard > 0.06 * 1.2 && rifle.weapon.damage > P.partOf('weapon', 'rifle').weapon.damage * 1.3 && plate.add.hp > 120 * 1.3 && P.tunedPart(P.partOf('layout', 'quad'), 3).add.ascendSpeed === -4;
+  })());
+  check('upgraded parts really change the build: more damage and armor, more weight and power draw', (() => {
+    const a = stats({ armLowerL: 'gun', flankL: 'plate' }), b = stats({ armLowerL: 'gun', flankL: 'plate', up: { armLowerL: 3, flankL: 3 } });
+    return b.limbs[0].damage > a.limbs[0].damage * 1.3 && b.hp > a.hp + 30 && b.weight > a.weight && b.draw > a.draw && b.up.armLowerL === 3;
+  })());
+  check('upgrade points: at most 3 per part and 10 in all, only on parts that exist, and they stay clear of cosmetic slots', (() => {
+    const b = P.sanitizeBuild(build({ armLowerL: 'gun', armLowerR: 'gun', armUpperL: 'gun', armUpperR: 'gun', headL: 'ace', up: { armLowerL: 9, armLowerR: 3, armUpperL: 3, armUpperR: 3, headL: 3, headR: 3, crest: 3, layout: 2, sub: 3 } }));
+    const spent = P.upgradeSpent(b.up);
+    return spent === 10 && !('headR' in b.up) && !('crest' in b.up) && !('layout' in b.up) && !('sub' in b.up) && Object.values(b.up).every((v) => v >= 1 && v <= 3) && b.up.armLowerL === 3 && P.UPGRADE_POOL === 10 && P.UPGRADE_MAX === 3;
+  })());
+  check('fitting a different part (or clearing the socket) drops the old part\'s upgrades, on both sides under symmetry', (() => {
+    const b = build({ armLowerL: 'gun', armLowerR: 'gun', up: { armLowerL: 2, armLowerR: 3 } });
+    const both = P.withPart(b, 'armLowerL', 'cannon', true), single = P.withPart(b, 'armLowerL', 'cannon', false), same = P.withPart(b, 'armLowerL', 'gun', true);
+    return !both.up.armLowerL && !both.up.armLowerR && !single.up.armLowerL && single.up.armLowerR === 3 && same.up.armLowerL === 2 && same.up.armLowerR === 3;
+  })());
+
+  // set bonuses
+  const setIds = (patch) => stats(patch).sets.map((s) => s.id);
+  check('a stock build has no set bonus', setIds({}).length === 0);
+  check('MATCHED SET needs three identical pairs and gives stagger resistance and a little gun damage', setIds({ armLowerL: 'gun', armLowerR: 'gun', headL: 'ace', headR: 'ace' }).includes('matched') === false
+    && setIds({ armLowerL: 'gun', armLowerR: 'gun', headL: 'ace', headR: 'ace', wingL: 'fighter', wingR: 'fighter' }).includes('matched')
+    && stats({ armLowerL: 'gun', armLowerR: 'gun', headL: 'ace', headR: 'ace', wingL: 'fighter', wingR: 'fighter' }).staggerAt === stats({ armLowerL: 'gun', armLowerR: 'gun', headL: 'ace', headR: 'ace', wingL: 'fighter', wingR: 'fighter' }, { lost: [] }).staggerAt
+    && stats({ armLowerL: 'gun', armLowerR: 'gun', headL: 'ace', headR: 'ace', wingL: 'fighter', wingR: 'fighter' }).staggerAt > stats({ armLowerL: 'gun', armLowerR: 'gun', headL: 'ace', headR: 'ace', wingL: 'fighter', wingR: 'none' }).staggerAt + 40);
+  check('BATTERY (three arm guns) speeds up the guns, HYDRA (three heads) widens the radar, BLADE DANCER (three blades) lifts melee', setIds({ armLowerL: 'gun', armLowerR: 'shotgun', armMidL: 'rail' }).includes('battery')
+    && Math.abs(stats({ armLowerL: 'gun', armLowerR: 'gun', armMidL: 'gun' }).weapon.cooldown - stats({ armLowerL: 'gun', armLowerR: 'gun', armMidL: 'sensor' }).weapon.cooldown / 1.1) < 1e-9
+    && setIds({ headL: 'ace', headR: 'ace' }).includes('hydra') && stats({ headL: 'ace', headR: 'ace' }).radar > stats({ headL: 'ace' }).radar + 100
+    && setIds({ armLowerL: 'blade', armLowerR: 'drill', tail: 'lash' }).includes('dancer') && setIds({ armLowerL: 'blade', armLowerR: 'drill' }).includes('dancer') === false);
+  check('BASTION, AIR WING, ROCKET BARRAGE and GUN NEST each trigger from their own parts and not from the stock build', setIds({ armLowerL: 'shield', wingL: 'plate' }).includes('bastion') && setIds({ wingL: 'fighter', wingR: 'fighter', tail: 'booster' }).includes('airwing')
+    && setIds({ wingL: 'fighter', wingR: 'fighter' }).includes('airwing') === false && setIds({ podL: 'missile', podR: 'missile', chestMod: 'bay' }).includes('barrage') && stats({ podL: 'missile', podR: 'missile', chestMod: 'bay' }).missileCharges === 4
+    && setIds({ layout: 'octo', armLowerL: 'gun', armLowerR: 'gun' }).includes('nest') && setIds({ layout: 'biped', armLowerL: 'gun', armLowerR: 'gun' }).includes('nest') === false);
+  check('every set has a name, a rule and a description, and they stack with the parts without breaking the caps', P.SETS.length === 8 && P.SETS.every((x) => x.name && x.need && x.desc && typeof x.test === 'function')
+    && stats({ armLowerL: 'shield', armLowerR: 'shield', wingL: 'plate', wingR: 'plate', flankL: 'plate', flankR: 'plate', podL: 'barrier', podR: 'barrier', chestMod: 'emitter', offhand: 'tower', shoulderL: 'bulwark', shoulderR: 'bulwark' }).guard <= 0.35 + 1e-9);
+
+  // paint zones
+  check('paint zones: a zone keeps its own colours (the ones left out follow the body), unknown zones and bad colours are dropped', (() => {
+    const b = P.sanitizeBuild(build({ zones: { head: { main: '#FF0000' }, legs: { main: 'red', sub: '#00ff00' }, banana: { main: '#ffffff' }, arms: 5, back: { main: 'nope' } } }));
+    return Object.keys(b.zones).join() === 'head,legs' && b.zones.head.main === '#ff0000' && b.zones.head.sub === b.paint.sub && b.zones.legs.sub === '#00ff00' && b.zones.legs.main === b.paint.main;
+  })());
+  check('the model spec carries each zone as integer colours, and no zones means none', (() => {
+    const z = P.deriveMech(build({ zones: { head: { main: '#ff0000', sub: '#00ff00', accent: '#0000ff', trim: '#ffffff' } } })).spec.zones;
+    return z.head.main === 0xff0000 && z.head.sub === 0x00ff00 && z.head.accent === 0x0000ff && z.head.trim === 0xffffff && Object.keys(P.deriveMech(P.DEFAULT_BUILD).spec.zones).length === 0;
+  })());
+
+  // part health
+  check('every socketed part has health from its weight, upgrades raise it, and many-legged layouts list each leg', (() => {
+    const a = stats({ armLowerL: 'cannon', armLowerR: 'sensor', tail: 'lash', layout: 'hexa' });
+    const heavy = a.parts.find((p) => p.slot === 'armLowerL'), light = a.parts.find((p) => p.slot === 'armLowerR');
+    const up = stats({ armLowerL: 'cannon', up: { armLowerL: 3 } }).parts.find((p) => p.slot === 'armLowerL');
+    return heavy.hp > light.hp && light.hp > 100 && up.hp === Math.round(heavy.hp * 1.36) && a.parts.filter((p) => p.kind === 'leg').length === 6 && a.parts.filter((p) => p.kind === 'part').length === 3
+      && stats({}).parts.length === 0 && stats({ layout: 'biped' }).parts.length === 0 && stats({ layout: 'quad' }).parts.length === 4 && stats({ layout: 'wheel' }).parts.length === 0;
+  })());
+  check('a part shot off takes its effects with it: the gun stops, the lock-on goes, the weight and power draw come off', (() => {
+    const full = stats({ armLowerL: 'cannon', headL: 'ace', podL: 'missile', tail: 'turret' });
+    const lost = stats({ armLowerL: 'cannon', headL: 'ace', podL: 'missile', tail: 'turret' }, { lost: ['armLowerL', 'headL', 'podL', 'tail'] });
+    return full.limbs.length === 1 && lost.limbs.length === 0 && full.lock === 2 && lost.lock === 1 && full.missileCharges === 3 && lost.missileCharges === 2 && full.turrets.length === 1 && lost.turrets.length === 0
+      && lost.weight < full.weight && lost.draw < full.draw && JSON.stringify(lost.hp) === JSON.stringify(stats({}).hp + 0) && lost.parts.length === 0;
+  })());
+  check('each leg lost from a many-legged machine slows it and makes it easier to stagger, but it never stops', (() => {
+    const a = stats({ layout: 'hexa' }), b = stats({ layout: 'hexa' }, { lostLegs: 2 }), c = stats({ layout: 'hexa' }, { lostLegs: 4 });
+    return b.speed < a.speed * 0.85 && c.speed < b.speed && c.speed > a.speed * 0.3 && b.staggerAt < a.staggerAt && b.counts.legs === 4 && b.dashSpeed < a.dashSpeed;
+  })());
+
+  // build codes
+  check('a build code round-trips every build: 300 random builds come back exactly, and the stock build is a tiny code', (() => {
+    for (let i = 0; i < 300; i++) {
+      const b = P.randomBuild();
+      const d = S.decodeBuild(S.encodeBuild(b));
+      if (!d.ok || JSON.stringify(d.build) !== JSON.stringify(P.sanitizeBuild(b))) return false;
+    }
+    return S.encodeBuild(P.DEFAULT_BUILD).length < 20 && S.encodeBuild(P.DEFAULT_BUILD).startsWith('SV1.');
+  })());
+  check('a build code survives whitespace and line breaks, and refuses damage, another version, nonsense and cut-off text with a plain message', (() => {
+    const code = S.encodeBuild(build({ layout: 'octo', armLowerL: 'gun', name: 'HYDRA-7' }));
+    const spaced = S.decodeBuild(`  ${code.slice(0, 12)}\n${code.slice(12)}  `);
+    const bad = [S.decodeBuild(code.slice(0, -3)), S.decodeBuild(code.replace('SV1', 'SV9')), S.decodeBuild('hello'), S.decodeBuild(''), S.decodeBuild(null), S.decodeBuild(code.slice(0, 15) + 'Z' + code.slice(16)), S.decodeBuild('SV1.e30.0000')];
+    return spaced.ok && spaced.build.layout === 'octo' && spaced.build.name === 'HYDRA-7' && bad.every((d) => !d.ok && d.error.length > 10);
+  })());
+  check('a hand-made code with junk inside is cleaned, not trusted', (() => {
+    const json = JSON.stringify({ layout: 'spaceship', armLowerL: 'laser', prop: { size: 99 }, name: '<b>HAX</b>', up: { weapon: 99 }, zones: { head: { main: 'url(x)' } } });
+    const body = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    let h = 0x1d0f; for (let i = 0; i < json.length; i++) h = ((h << 5) - h + json.charCodeAt(i) * 31) & 0xffff;
+    const d = S.decodeBuild(`SV1.${body}.${h.toString(16).padStart(4, '0')}`);
+    return d.ok && d.build.layout === 'biped' && d.build.armLowerL === 'none' && d.build.prop.size === 1.3 && /^[A-Z0-9 -]+$/.test(d.build.name) && d.build.up.weapon === 3 && Object.keys(d.build.zones).length === 0;
+  })());
+  check('random builds use the new sockets, upgrades and zones now and then, and are still all valid', (() => {
+    const seen = { wing: 0, flank: 0, mid: 0, module: 0, up: 0, zone: 0 };
+    for (let i = 0; i < 500; i++) {
+      const b = P.randomBuild();
+      if (b.wingL !== 'none') seen.wing++;
+      if (b.flankL !== 'none') seen.flank++;
+      if (b.armMidL !== 'none') seen.mid++;
+      if (b.chestMod !== 'none') seen.module++;
+      if (Object.keys(b.up).length) seen.up++;
+      if (Object.keys(b.zones).length) seen.zone++;
+      if (JSON.stringify(P.sanitizeBuild(b)) !== JSON.stringify(b)) return false;
+    }
+    return Object.values(seen).every((n) => n > 15);
+  })());
+
   const t0 = Date.now();
   const sampled = P.statRanges();
   check('stat ranges are quick to compute and cover load and power', Date.now() - t0 < 2000 && sampled.load.max > sampled.load.min && sampled.draw.max > sampled.supply.min, `${Date.now() - t0} ms`);
