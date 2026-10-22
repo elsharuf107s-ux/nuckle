@@ -609,41 +609,62 @@ export class Garage {
     if (!hp) return;
     const shown = part ?? partOf(this.slot, this.build[this.slot]);
     const box = this.detailEl;
-    box.textContent = '';
+    if (!this._detailInfo || !box.contains(this._detailInfo)) {
+      // the upgrade dial lives apart from the description: that changes with every hover, and the dial's buttons must
+      // survive it (a click that lands on a button that was replaced between pressing and releasing is lost)
+      box.textContent = '';
+      this._detailInfo = el('div');
+      this._upBox = el('div', 'up-box');
+      box.append(this._detailInfo, this._upBox);
+      this._up = null;
+    }
+    const info = this._detailInfo;
+    info.textContent = '';
     const head = el('div', 'd-name', shown.name);
     if (shown.id === this.build[this.slot]) head.append(el('i', '', `EQUIPPED${this.build.up[this.slot] ? `  ·  LV ${this.build.up[this.slot]}` : ''}`));
-    box.append(head, el('div', 'd-desc', shown.desc));
+    info.append(head, el('div', 'd-desc', shown.desc));
     const chips = el('div', 'o-chips');
     for (const [text, kind] of chipsFor(this.slot, shown)) chips.append(el('span', `chip ${kind}`, text));
-    box.append(chips);
-    const equipped = partOf(this.slot, this.build[this.slot]);
-    if (upgradable(this.slot, equipped.id)) box.append(this._upgradeRow(equipped, shown.id !== equipped.id));
+    info.append(chips);
+    this._syncUpgrade(partOf(this.slot, this.build[this.slot]), shown.id !== this.build[this.slot]);
   }
 
-  /** The upgrade dial of the equipped part: each level makes its good numbers better, at the cost of weight and power. */
-  _upgradeRow(equipped, named) {
+  /** The upgrade dial of the equipped part: each level makes its good numbers better, at the cost of weight and power. Built once, updated in place. */
+  _syncUpgrade(equipped, named) {
     const slot = this.slot;
+    const can = upgradable(slot, equipped.id);
+    this._upBox.classList.toggle('hidden', !can);
+    this.detailEl.classList.toggle('has-up', can);
+    if (!can) return;
+    if (!this._up) {
+      const row = el('div', 'upgrade');
+      const label = el('b');
+      const note = el('span');
+      const info = el('div', 'up-info');
+      info.append(label, note);
+      const controls = el('div', 'tune-controls');
+      const minus = el('button', 'tune-btn', '−');
+      const plus = el('button', 'tune-btn', '+');
+      minus.type = plus.type = 'button';
+      minus.dataset.up = '-1';
+      plus.dataset.up = '1';
+      minus.addEventListener('click', () => this._upgrade(-1));
+      plus.addEventListener('click', () => this._upgrade(1));
+      const pips = el('div', 'tune-pips');
+      for (let i = 0; i < UPGRADE_MAX; i++) pips.append(el('i'));
+      controls.append(minus, pips, plus);
+      row.append(info, controls);
+      this._upBox.append(row);
+      this._up = { label, note, minus, plus, pips };
+    }
     const level = this.build.up[slot] ?? 0;
     const left = UPGRADE_POOL - upgradeSpent(this.build.up);
-    const row = el('div', 'upgrade');
-    const info = el('div', 'up-info');
-    info.append(el('b', '', `${named ? `UPGRADE ${equipped.name}` : 'UPGRADE'}${level ? `  ·  LV ${level}` : ''}`),
-      el('span', '', `+${Math.round(UPGRADE_STEP * 100)}% per level, but heavier and hungrier  ·  ${left} OF ${UPGRADE_POOL} POINTS LEFT`));
-    const controls = el('div', 'tune-controls');
-    const minus = el('button', 'tune-btn', '−');
-    const plus = el('button', 'tune-btn', '+');
-    minus.type = plus.type = 'button';
-    minus.dataset.up = '-1';
-    plus.dataset.up = '1';
-    minus.disabled = level <= 0;
-    plus.disabled = level >= UPGRADE_MAX || left <= 0;
-    const pips = el('div', 'tune-pips');
-    for (let i = 0; i < UPGRADE_MAX; i++) pips.append(el('i', i < level ? 'on' : ''));
-    minus.addEventListener('click', () => this._upgrade(-1));
-    plus.addEventListener('click', () => this._upgrade(1));
-    controls.append(minus, pips, plus);
-    row.append(info, controls);
-    return row;
+    const u = this._up;
+    u.label.textContent = `${named ? `UPGRADE ${equipped.name}` : 'UPGRADE'}${level ? `  ·  LV ${level}` : ''}`;
+    u.note.textContent = `+${Math.round(UPGRADE_STEP * 100)}% per level, but heavier and hungrier  ·  ${left} OF ${UPGRADE_POOL} POINTS LEFT`;
+    u.minus.disabled = level <= 0;
+    u.plus.disabled = level >= UPGRADE_MAX || left <= 0;
+    [...u.pips.children].forEach((pip, i) => pip.classList.toggle('on', i < level));
   }
 
   /** Raise or lower the equipped part's upgrade (and its twin's, while the symmetry switch is on and the twin is the same part). */
@@ -890,10 +911,10 @@ export class Garage {
 
     const areas = el('div', 'paint-section');
     areas.append(el('h4', '', 'PAINT AREA'));
-    const aRow = el('div', 'marks areas');
+    const aRow = el('div', 'areas');
     this._zoneBtns = {};
     for (const [id, name] of [['body', 'WHOLE BODY'], ...ZONES.map((z) => [z.id, z.name])]) {
-      const b = el('button', 'mark', name);
+      const b = el('button', 'area-btn', name);
       b.type = 'button';
       b.dataset.zone = id;
       b.addEventListener('click', () => { this.zone = id; this._syncPaint(); });

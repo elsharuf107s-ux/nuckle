@@ -1,8 +1,9 @@
 # Steel Vanguard
 
 A 3D third-person mobile-suit combat game that runs in the browser, on desktop and on phones. **Build your own mech piece by piece** in the
-garage (eleven hardpoints and nine glowing sockets you click on the mech, 128 parts, tuning points and paint, balanced by a load limit and a power budget):
-give it four arms that all shoot, six spider legs or tank treads, extra heads that lock more targets, a tail, back pods, and stretch every proportion, then take it through a dusk-lit colony city:
+garage (eleven hardpoints and sixteen glowing sockets you click on the mech, 156 parts, upgrades, set bonuses, per-area paint, tuning points, balanced by a load limit and a power budget):
+give it six arms that all shoot, eight spider legs, wheels or tank treads, wings, extra heads that lock more targets, a tail gun, pods and a chest turret, stretch every proportion,
+trade a build code with a friend and try it on the **test range**, then take it through a dusk-lit colony city:
 boost over rooftops, lock on, burn enemies down with your weapon, homing missiles and a boost lunge into a four-hit
 beam-saber combo, and survive five waves ending in a fight with the **Crimson Baron**. Every sortie opens with a catapult
 launch, and the machines move like the mobile suits in the versus games: snap shots, saber draws, hard-leaning steps
@@ -107,13 +108,17 @@ erased; a bazooka build flattens more.
 | --- | --- |
 | 1 First Contact | 3 Drones |
 | 2 Pincer | 4 Drones, 1 Striker |
-| 3 Heavy Support | 4 Drones, 2 Bulwarks |
-| 4 Blade Dance | 3 Strikers, 3 Drones, 2 Bulwarks |
+| 3 Heavy Support | 3 Drones, 2 Bulwarks, 1 Crawler |
+| 4 Blade Dance | 3 Strikers, 2 Drones, 2 Bulwarks, 1 Hydra |
 | 5 The Crimson Baron | the boss and 2 Drones |
 
 - **DR-12 Drone**: mono-eye grunt that holds its distance and fires three-round bursts.
 - **ST-21 Striker**: fast blade fighter that dashes in for a saber combo, then backs off and shoots.
 - **HV-30 Bulwark**: slow artillery. Its cannon glows as it charges, then fires a splash shell.
+- **SP-18 Crawler** (wave 3): a six-legged gun platform built from the garage's own parts: four arm guns that fire in
+  volleys, and a tail turret. Shoot an arm or the tail off and that gun is gone; every leg you take slows it.
+- **HD-40 Hydra** (wave 4): three heads, two missile pods, a heavy rifle and a **chest vulcan that shoots down your
+  missiles**. Take the pods off to end its salvos, or come in with beams and sabers.
 - **CR-00 Crimson Baron**: boss ace. Rifle volleys, saber rushes, homing missile salvos from 66% armor, and a
   faster, more aggressive final phase below 33%. It dodges your beam shots.
 
@@ -177,8 +182,9 @@ layer as the keyboard, so the game plays identically.
 ## The garage
 
 Rotate your mech on the turntable and **click a hardpoint on it**: a marker floats over the head, each shoulder, the
-chest, the arms, the legs, the backpack, the waist, each hand and the hip, and **nine glowing sockets** (a green `+`
-while empty) are waiting for extra arms, side heads, a tail and back pods (see *Build a machine of your own* below). The camera swings to that spot and its
+chest, the arms, the legs, the backpack, the waist, each hand and the hip, and **sixteen glowing sockets** (a green `+`
+while empty) are waiting for extra arms, side heads, wings, a tail, pods, a chest module and flank pods (see *Build a machine of your own* below).
+With that many markers on one machine, the **MARKERS** switch under the mech shows all of them, just the body, or just the sockets (small screens choose for you). The camera swings to that spot and its
 parts open in an inventory grid, with a detail strip below showing the full description and every stat of the part
 you point at. Each part changes how your mech **looks** and how it **plays**, and the right-hand panel shows the
 totals as bars: hover a part to preview its effect on every stat (a white marker and a +/- delta) before you equip it.
@@ -197,7 +203,15 @@ hard to reach.
   the next empty slot, **CLEAR** empties a slot, and the one on the pad is what a sortie fields. (In the pit stop between
   waves the hangar is locked, so the pit stop stays a re-fit and not a free swap.) Everything is saved in the browser.
 - **Paint** has schemes, four custom colours, energy and thruster colours, and **markings** (stripes, chevrons or
-  hazard bands).
+  hazard bands). Pick a **paint area** (head, chest, arms, legs, shoulders, backpack, weapons or rig parts) to give it colours
+  of its own; an area with no paint follows the body.
+- **Upgrades.** Every part you have fitted (but the crest and the leg layout) has an upgrade dial under the detail strip:
+  each level makes the part's good numbers 12% better and costs 8% more weight and 6% more power draw. Ten points in all,
+  at most three on one part (the level is shown on the part's card).
+- **CODE** copies the build on the pad as a short piece of text (`SV1.…`) you can send to anyone, and loads one you were
+  sent into the next empty hangar slot. A damaged, cut-off or foreign code is refused with a plain message, and a code
+  that was tampered with is cleaned up, never trusted.
+- **TEST RANGE** (see below) takes the build on the pad to a practice ground.
 
 Every part changes the model: the suit is built in the real-robot style (a long-legged, narrow-waisted frame with
 broad shoulder pads, a face mask with a forehead camera, vents, a V-shaped knee mark, saber hilts racked on the
@@ -210,7 +224,7 @@ same kit: a domed green grunt, a winged blade-fighter, an orange tank and the re
 | **Crest** | Helmet default · V-Fin · Command Horn · Blade Crest · Twin Antenna · Spike Crown · No crest (cosmetic) |
 | **Frame** | Standard · Light Frame (fast, fragile, little power) · Heavy Plate (very tough, heavy) · Reactor Core (big power output, boost fuel, EN recovery) · Missile Bay Chest (an extra missile charge, harder missiles) · Command Chest (radar, burst gain, extra armor back between waves) · **Wedge Frame** (angular, nimble, a little armor) · **Ranger Frame** (boost fuel, steadier climb) |
 | **Arms** | Standard · Assault Bracers (armor, saber; slower reloads) · Precision Arms (faster fire and reload) · Blade Arms (big saber damage) · Guard Arms (armor, stagger resistance, a little gunfire absorption) · Heavy Recoil Arms (gun damage +12%, slower cycling) |
-| **Leg layout** | Biped (two legs, the only layout that skates through a dash) · Quad Walker (four legs: a steady gun platform, very hard to stagger, poor at dashing and climbing) · Spider (six legs: nearly impossible to knock down and carries enormous loads; slow, a poor jumper, dashes as a scuttle) · Tank Treads (fast on the ground, huge armor and load limit; heavy in the air) · Hover Pods (great air speed and dashes; little armor, small load limit, power hungry) |
+| **Leg layout** | Biped (two legs, the only layout that skates through a dash) · Quad Walker (four legs: a steady gun platform, very hard to stagger, poor at dashing and climbing) · Spider (six legs: nearly impossible to knock down and carries enormous loads; slow, a poor jumper, dashes as a scuttle) · Tank Treads (fast on the ground, huge armor and load limit; heavy in the air) · Hover Pods (great air speed and dashes; little armor, small load limit, power hungry) · **Tripod** (one leg in front, a pair behind: steady and nimble with a rolling walk) · **Octopod** (eight legs: a walking fortress with enormous armor and load, the clumsiest dash of all) · **Wheelbase** (four big wheels: the fastest on the ground and sturdy, but it cannot climb, and a hard hit sends it spinning) |
 | **Legs** (style) | Standard · Sprint (fast, cheap dashes, low load limit) · Tank (armor, stagger resistance, highest load limit; slow) · Jump (climb and air EN recovery) · Strider (fast walking, longer dash) · Siege (very hard to stagger, steadier gun; slow) |
 | **Shoulder armor** (per side) | Standard · Bulwark Shell (armor, some gunfire absorption) · Ram Spike (saber bonus) · Vernier Shoulder (turning and cheaper, faster dashes) · Missile Rack (harder missiles, tighter homing) · Aegis Emitter (absorbs 5% of gunfire) · **Fin Pauldron** (steadier turning, quicker dash) · **Dome Guard** (armor and stagger resistance without the weight) |
 | **Weapon mount** (per side) | None · Shoulder Cannon (a heavy splash shell, 7 s) · Micro-Missile Pod (six small homing missiles, 9 s) · **Rail Lance** (a fast slug that pierces everything in its line, 8 s) |
@@ -220,10 +234,13 @@ same kit: a domed green grunt, a winged blade-fighter, an orange tank and the re
 | **Pilot** | Rookie · Gunner (reload, fire rate) · Duelist (saber, dash invulnerability) · Engineer (half your armor back between waves) · Evader (cheap dashes, turning) · Veteran (stagger resistance, burst gain) · Marksman (gun damage +12%, bigger radar) · Tactician (harder, tighter missiles) · Guardian (stagger resistance, 5% absorption, extra wave repair) |
 | **Weapon** (right hand) | Beam Rifle · Rapid Beam Gun (30 rounds, low damage) · Blast Bazooka (3 explosive shells) · Beam Sniper (very fast heavy beams) · Twin Sabers (no gun, big melee bonus, deflects some gunfire) · Beam Shotgun (seven pellets: brutal up close, thin at range) · Seeker Rifle (beams that curve onto your lock, or whatever is near the crosshair) · Arc Lance (a heavy beam that pierces every enemy in its line) · Greatsword (no gun, the biggest melee bonus and reach, deflects 28% of gunfire; heavy) |
 | **Off-hand** (left hand) | Beam Shield (absorbs 22% of gunfire, missiles and shells) · None (lighter and quicker) · Parry Buckler (12% absorption, light, a little melee) · Tower Shield (30% absorption and stagger resistance; heavy and slow) |
-| **Extra arm** (four sockets: a lower pair at the waist, a back pair over the shoulders) | None · Arm Beam Gun (rapid bolts, fires with the gun button, never runs dry) · Arm Cannon (a slow explosive shell every 2.6 s) · Arm Saber (lights with your saber and adds a stroke to every swing: melee +14%) · Arm Shield (6% guard, harder to stagger) · Arm Launcher (two more missiles in every salvo) · Nano Arm (mends 6 armor/s once left alone) |
+| **Extra arm** (six sockets: a lower pair at the waist, a mid pair at the ribs, a back pair over the shoulders) | None · Arm Beam Gun (rapid bolts, fires with the gun button, never runs dry) · Arm Cannon (a slow explosive shell every 2.6 s) · Arm Saber (lights with your saber and adds a stroke to every swing: melee +14%) · Arm Shield (6% guard, harder to stagger) · Arm Launcher (two more missiles in every salvo) · Nano Arm (mends 6 armor/s once left alone) · **Arm Shotgun** (seven pellets, fires with the gun button) · **Arm Railgun** (a very fast slug that pierces everything in its line, every 3 s) · **Sensor Arm** (a dish: longer radar, tighter missile tracking) · **Drill Arm** (whirs up with your saber, adds punch to every stroke and steadies you) |
 | **Side head** (a socket on each shoulder) | None · any helmet, at half strength, and every one adds a missile **lock-on** target (up to three at once) |
-| **Tail** | None · Stabilizer Boom (much harder to stagger, cheaper dashes) · Lash Blade (cracks with every saber stroke: melee +12%) · Boost Tail (boost fuel and climb) |
-| **Back pod** (per side) | None · Thruster Pod (boost fuel, climb, cheaper dashes) · Missile Pod (one more missile charge) · Armor Plate Pod (armor and stagger resistance) |
+| **Tail** | None · Stabilizer Boom (much harder to stagger, cheaper dashes) · Lash Blade (cracks with every saber stroke: melee +12%) · Boost Tail (boost fuel and climb) · **Tail Gun** (a turret that shoots the nearest enemy on its own, whichever way you face) |
+| **Back pod** (per side) | None · Thruster Pod (boost fuel, climb, cheaper dashes) · Missile Pod (one more missile charge) · Armor Plate Pod (armor and stagger resistance) · **Turret Pod** (an autonomous gun) · **Barrier Pod** (a shield barrier that recharges when left alone) · **Radar Pod** (longer radar, tighter homing) |
+| **Wing** (per side) | None · Fighter Wing (air speed, longer boost, quicker dashes) · Angel Wing (lots of boost fuel, stronger climb; power hungry) · Blade Wing (sweeps in with every saber stroke, deflects a little fire) · Shield Wing (armor, stagger resistance, some absorption; weaker climb) · Solar Wing (free power output; fragile and heavy) |
+| **Chest module** | None · Radar Array (much longer radar) · Aux Reactor (power output and a little boost fuel) · **Chest Vulcan** (twin guns that fire on their own and shoot down missiles that come for you) · Barrier Emitter (a large barrier) · Missile Bay (one more missile charge, harder hitting) |
+| **Flank pod** (per side) | None · Missile Rack (harder hitting, tighter tracking) · Flank Verniers (cheaper, faster dashes, a quicker turn) · Flank Armor (armor and stagger resistance for little weight) · Flank Sabers (every stroke of the combo hits harder) |
 | **Sub-weapon** (hip) | None · Head Vulcans (hold `V`: a stream of rounds that also **shoots down missiles**; overheats) · Decoy Flares (`V`: detonates every missile homing on you; 12 s recharge) · Repair Kit (`V`: 15% armor over 4 s, one use per wave) · EN Injector (`V`: refills boost fuel and clears an overheat; 16 s) · Shock Pulse (`V`: damages and staggers everything near you; 14 s) · Aegis Field (`V`: 2.5 s of total invulnerability; 22 s) |
 
 Absorption from every source (shields, saber deflection, shoulder pads, emitters, guard arms, some pilots) adds up, capped at 35%. Missile
@@ -253,6 +270,34 @@ The garage is a construction kit, not a menu. Bolt on as much as the reactor and
   machine has more armor but weighs more and is slower and easier to hit; longer legs run faster and climb higher but topple
   more easily; longer arms reach further with the saber; a broader torso holds more armor and a bigger reactor; a bigger head
   sees further. The model, the walk cycle and the arm solver all follow the numbers.
+
+- **Auto-turrets.** The tail gun, turret pods and chest vulcan pick the nearest enemy in range and keep firing at it with no
+  aim from you, whichever way you face (they draw power too, and the vulcan goes for missiles that are coming at you first).
+  Their barrels swing on their own; you can watch them track in the garage.
+- **Set bonuses.** Matching or complementary parts reward the builder, and the **RIG** tab lists every set with what it needs:
+  *Matched Set* (three pairs of identical parts), *Battery* (three arm guns), *Hydra* (three heads), *Blade Dancer* (three
+  blades of any kind), *Bastion* (two shields of any kind), *Air Wing* (two wings and a thruster tail or pod), *Rocket
+  Barrage* (three missile sources) and *Gun Nest* (a spider or octopod with two arm guns). Active sets show in green on the
+  summary, and fold into the same numbers as the parts.
+
+#### Parts that break
+
+Everything you bolt on to a socket, and every leg of a many-legged layout, has **armor of its own** (from its weight, plus
+upgrades). A hit that lands near a part is shared with it (40% of the damage); a saber stroke or a falling wall sometimes takes a
+part at random. When a part's armor runs out it **flies off** (sparks, a small blast, the chunk tumbling away) and **its effects
+go with it**: the gun stops firing, the lock-on drops, the weight and power draw come off, a lost leg slows a walker and makes it
+easier to stagger (it never stops it). The **parts panel** on the HUD shows each part's condition (green, amber, red, gone), and
+the **pit stop replaces every lost part**. Your enemies are built the same way: shoot the crawler's arm off and it has three guns.
+
+### The test range
+
+Press **TEST RANGE** in the garage to try the build on the pad on a practice ground, with no way to lose. Four **target
+dummies** stand between 75 and 175 metres out; they soak a great deal, mend themselves when left alone and are replaced if you
+destroy them. The **damage meter** at the top left counts everything you deal (guns, saber, missiles, turrets, the lot): the last
+three seconds' **DPS**, the **peak**, the **average** over the time you were actually hitting, the **total** and the **parts you
+shot off**. Your armor stops at 1, so nothing can end the test; press **Esc** for the range tools: **Repair me** (armor, ammo and
+every part), **Reset meter**, **call in a sparring partner** (a drone, striker, bulwark, crawler or hydra, four at a time),
+**clear them**, and back to the garage with the change you wanted to try.
 
 Every extra part adds weight and draws power, so a many-armed monster pays for it twice: past the legs' **load limit** it slows
 down, and past the torso's **power output** every cooldown (arm guns included) slows. The garage and the HUD say so in red.
@@ -294,7 +339,9 @@ src/model/motion.js       the animation: planted-foot gait with two-bone leg IK 
                           of a wreck; hit reactions and the secondary motion on springs
 src/mech.js               mech physics: walk, jump, boost, dash, skids, knockdowns, collision, damage
 src/player.js             input to intent, lock-on, rifle, missiles, saber lunge and combo, burst
-src/ai.js                 Drone / Striker / Bulwark / Baron behaviours
+src/ai.js                 Drone / Striker / Bulwark / Baron behaviours, the practice dummy, and the rigged enemies (crawler, hydra)
+src/rigged.js             the two enemies built from the garage's rig (their builds and how they are scaled) and the dummy (no browser code)
+src/range.js              the test range: dummies, the damage meter, sparring partners, repair
 src/weapons.js            projectiles with swept collision and homing
 src/fx.js                 particles, explosions, dust clouds, smoke plumes, debris chunks, saber arcs and thrust streaks, afterimages
 src/camera.js             chase camera with lock-on framing, trauma shake, kill punches and scripted shots (the launch)
@@ -305,6 +352,7 @@ src/missions.js           wave director; hands over to the pit stop between wave
 src/audio.js              synthesised sound effects and music
 src/data.js               enemy mech stats, palettes and wave definitions
 src/parts.js              garage parts catalogue, hardpoints, load/power budgets, tuning, stat derivation, build validation (no browser code)
+src/share.js              build codes: encode and decode a whole machine as `SV1.<diff>.<checksum>` (no browser code)
 src/hangar.js             the six-slot hangar: pure state (select, copy, clear, migrate old saves) plus save/load (no browser code)
 src/garage.js             the garage screen (also the pit stop): hardpoint markers on the 3D mech, inventory grid, symmetry, hangar bar, stat bars with limit markers, tuning, paint
 vendor/three/             three.js r170 (MIT), vendored so the game runs offline
@@ -319,19 +367,19 @@ running game for debugging (`__game.cheat.invincible = true` is handy for sights
 ## Tests
 
 `scripts/test.mjs` first checks the parts maths in plain Node (every part's effect, weight scaling, input
-sanitising, the old-save migration, the rig's budgets and 400 random builds), then loads the game in headless Chromium and plays it: the garage UI by real clicks
-(a marker over each of the 20 hardpoints and the camera swinging to the one you click, the rig and size tabs, sockets, weld sparks, layouts, proportion sliders, sub-tabs, equip, hover preview,
+sanitising, the old-save migration, the rig's budgets, the upgrades, set bonuses, paint areas, part health and build codes, the rigged enemies' builds and 400 random builds), then loads the game in headless Chromium and plays it: the garage UI by real clicks
+(a marker over each of the 27 hardpoints and the camera swinging to the one you click, the rig and size tabs, sockets, weld sparks, layouts, proportion sliders, sub-tabs, equip, hover preview,
 the symmetry switch and lopsided shoulders, both weapon mounts firing on F and G, markings, the six-slot hangar with
-copy and clear, paint, rename, random/reset, saved builds across a reload), that every one of the 128 parts builds a
+copy and clear, paint, rename, random/reset, saved builds across a reload; the upgrade dial, the set bonus list, paint areas, the build-code box and the marker layers), that every one of the 156 parts builds a
 model standing on the ground and that no option reuses another's silhouette, the modular rig (every layout's legs, size and gait,
 planted feet on a quad and a spider, belts and jets, proportions, extra arms in their sockets and aiming, side heads, tail and pods, every layout with every
-extra part through every pose, arm guns firing on the gun button and on `H`, power starving them, missiles shared out among locked targets, a nano arm mending), movement, boosting, landing on roofs, building
+extra part through every pose, arm guns firing on the gun button and on `H`, power starving them, missiles shared out among locked targets, a nano arm mending; parts shot off in a fight, taking their guns and weight with them, and replaced in the pit stop; auto-turrets with no input; the test range, its damage meter and the pause-menu tools; the crawler and hydra, their guns lost with their arms), movement, boosting, landing on roofs, building
 collision (including a randomised stress run), every weapon, the shield, shoulder cannon, missile pod and weight
 effects in actual combat (vulcans shooting down missiles, flares, the repair kit, regen core, overload and
 power shortfalls, tuning), each new part's mechanic in combat (shotgun pellets, the seeker curving onto a target,
 the lance piercing, the greatsword's reach, the barrier's soak and recharge, ECM jamming, micro-missiles, the EN
 injector, shock pulse and aegis field), the pit stop (the card, no free repairs, launching back to the same spot, the
-setting to turn it off, no pit after the boss), 25 random builds through a short fight each, each enemy type and the
+setting to turn it off, no pit after the boss), 25 random builds through a short fight each, each enemy type (the crawler and hydra included) and the
 boss, a full scripted playthrough to victory through four pit stops, a defeat and retry, the pause/options UI, and the
 animation (planted feet do not slide or sink when walking, strafing, backing up or for enemies of any size; strafes
 turn the hips; dashes glide; landings crouch; the saber slashes sweep the right way and never cut the ground; the

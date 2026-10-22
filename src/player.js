@@ -191,8 +191,13 @@ export class Player {
     mech.barrierMax = d.def.barrier ?? 0;
     mech.barrier = Math.min(mech.barrier, mech.barrierMax);
     this.missiles = Math.min(this.missiles, this.stats.missileCharges);
-    this.limbGuns = this.limbGuns.filter((L) => d.stats.limbs.some((l) => l.slot === L.def.slot));
-    this.turrets = this.turrets.filter((T) => d.stats.turrets.some((t) => t.slot === T.def.slot));
+    // the firing lists follow the stats: a gun shot off drops out, a part replaced in the pit stop is back (keeping the cooldowns of those that stayed)
+    const limbs = mech.model.rig.limbs;
+    this.limbGuns = d.stats.limbs
+      .filter((l) => FIRING_LIMBS.has(l.kind))
+      .map((def) => ({ def, cd: this.limbGuns.find((L) => L.def.slot === def.slot)?.cd ?? 0, idx: limbs.findIndex((l) => l.slot === def.slot) }));
+    this.turrets = d.stats.turrets
+      .map((def) => ({ def, cd: this.turrets.find((T) => T.def.slot === def.slot)?.cd ?? Math.random() * def.interval }));
     this.extraLocks.length = Math.min(this.extraLocks.length, Math.max(0, this.stats.lock - 1));
     this.game.hud.configure();
   }

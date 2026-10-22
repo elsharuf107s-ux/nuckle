@@ -551,13 +551,13 @@ class Dummy extends Enemy {
 
 const RIG_AI = {
   crawler: {
-    band: [55, 130], strafe: 1.1, range: 230, volley: [1.3, 1.6], gunMul: 0.45, dodge: 0.12, color: 0xff9a30,
-    main: { type: 'bullet', speed: 420, damage: 8, interval: 0.18, spread: 0.06, color: 0xff9a30 },
+    band: [55, 130], strafe: 1.1, range: 230, volley: [1.2, 1.9], gunMul: 0.27, dodge: 0.12, color: 0xff9a30,
+    main: { type: 'bullet', speed: 420, damage: 6, interval: 0.22, spread: 0.06, color: 0xff9a30 },
   },
   hydra: {
-    band: [110, 210], strafe: 0.5, range: 340, volley: [1.8, 1.3], gunMul: 0.5, dodge: 0.05, color: 0x5dffa5,
-    main: { type: 'beam', speed: 560, damage: 85, interval: 1.4, spread: 0.03, color: 0x5dffa5, knock: 10 },
-    missiles: { perPod: 2, damage: 55, every: 8 },
+    band: [110, 210], strafe: 0.5, range: 340, volley: [1.6, 1.5], gunMul: 0.5, dodge: 0.05, color: 0x5dffa5,
+    main: { type: 'beam', speed: 560, damage: 70, interval: 1.5, spread: 0.03, color: 0x5dffa5, knock: 10 },
+    missiles: { perPod: 2, damage: 45, every: 9 },
   },
 };
 

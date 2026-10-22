@@ -380,10 +380,11 @@ html.touch .parts-label { display: none; }
 .set-row.on { opacity: 1; border-color: var(--green); background: rgba(93, 255, 165, 0.1); }
 .set-row.on b, .set-row.on .set-need { color: var(--green); }
 .g-summary .good, .g-summary .good b { color: var(--green); }
-.areas { margin-bottom: 6px; }
-.areas .mark { padding: 6px 9px; }
-.areas .mark.painted::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--amber); }
-.pit #g-range { display: none; }
+.areas { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.area-btn { padding: 6px 9px; font-size: 10px; letter-spacing: 0.1em; clip-path: none; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(120, 220, 255, 0.2); color: var(--text); }
+.area-btn.selected { border-color: var(--cyan); background: rgba(82, 224, 255, 0.16); }
+.area-btn.painted::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--amber); }
+.pit #g-range, .pit #g-code { display: none; } /* (the pit stop is a re-fit: no new builds from a code, no leaving for the range) */
 
 #range-tools { margin: 4px 0 14px; padding-top: 10px; border-top: 1px solid var(--line); }
 #range-tools h3 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.24em; color: var(--cyan); }
@@ -598,6 +599,13 @@ html.touch .g-tabs { touch-action: pan-x; }
   .g-detail .d-name { font-size: 10px; }
   .g-detail .d-desc { font-size: 10px; line-height: 1.35; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .g-detail .o-chips { display: none; }
+  /* the upgrade dial moves into the strip's top-right corner (a row of its own would leave the parts list too short) */
+  .g-detail { position: relative; }
+  .g-detail .up-box { position: absolute; top: 4px; right: 6px; }
+  .g-detail .upgrade { margin: 0; padding: 0; border: 0; gap: 6px; }
+  .g-detail .up-info, .g-detail .d-name i { display: none; }
+  .g-detail.has-up .d-name, .g-detail.has-up .d-desc { padding-right: 112px; }
+  html.touch .g-detail .tune-btn { width: 30px; height: 30px; }
   .opt { padding: 6px 8px; }
   .g-options .opt .o-chips .chip:nth-child(n+3) { display: none; }
   .opt .o-chips { margin-top: 5px; }

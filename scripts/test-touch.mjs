@@ -167,7 +167,7 @@ try {
     const sockets = [...document.querySelectorAll('.g-marker.socket')].map(measure);
     return { ms, sockets, cols: getComputedStyle(document.getElementById('g-options')).gridTemplateColumns.split(' ').length, desc: getComputedStyle(document.querySelector('.opt .o-desc')).display, detail: getComputedStyle(document.getElementById('g-detail')).display };
   });
-  check('garage: on a small screen the nine sockets stay hidden until the RIG tab is open (the mech is too small for twenty markers)', gm.sockets.length === 9 && gm.sockets.every((m) => m.w === 0), JSON.stringify(gm.sockets.map((m) => m.w)));
+  check('garage: on a small screen the sixteen sockets stay hidden until the RIG tab is open (the mech is too small for twenty-seven markers)', gm.sockets.length === 16 && gm.sockets.every((m) => m.w === 0), JSON.stringify(gm.sockets.map((m) => m.w)));
   check('garage: eleven hardpoint markers, each at least 28px, on screen', gm.ms.length === 11 && gm.ms.every((m) => !m.off && m.w >= 28 && m.h >= 28 && m.x > 0 && m.y > 0 && m.x < W && m.y < H), JSON.stringify(gm.ms.filter((m) => m.off || m.w < 28).map((m) => m.id)));
   check('garage: the parts grid is two columns with a compact detail strip instead of long descriptions', gm.cols === 2 && gm.desc === 'none' && gm.detail !== 'none', JSON.stringify([gm.cols, gm.desc, gm.detail]));
   await tap('.g-tab[data-tab="rig"]');
@@ -176,7 +176,7 @@ try {
     const measure = (m) => { const r = m.querySelector('i').getBoundingClientRect(); return { id: m.dataset.hp, w: r.width, h: r.height, x: r.x + r.width / 2, y: r.y + r.height / 2, off: m.classList.contains('off') }; };
     return { sockets: [...document.querySelectorAll('.g-marker.socket')].map(measure), body: [...document.querySelectorAll('.g-marker:not(.socket)')].filter((m) => m.getBoundingClientRect().width > 0).length };
   });
-  check('garage: the RIG tab shows the nine sockets, each at least 28px, on screen, in place of the body markers', rigView.sockets.length === 9 && rigView.sockets.every((m) => !m.off && m.w >= 28 && m.h >= 28 && m.x > 0 && m.y > 0 && m.x < W && m.y < H) && rigView.body === 0, JSON.stringify([rigView.sockets.filter((m) => m.off || m.w < 28).map((m) => m.id), rigView.body]));
+  check('garage: the RIG tab shows the sixteen sockets, each at least 28px, on screen, in place of the body markers', rigView.sockets.length === 16 && rigView.sockets.every((m) => !m.off && m.w >= 28 && m.h >= 28 && m.x > 0 && m.y > 0 && m.x < W && m.y < H) && rigView.body === 0, JSON.stringify([rigView.sockets.filter((m) => m.off || m.w < 28).map((m) => m.id), rigView.body]));
   await tap('.g-tab[data-tab="paint"]'); // (the paint tab keeps the camera on the whole machine, so the markers stay where they were)
   const hg = await G(() => [...document.querySelectorAll('.hg-slot')].map((b) => { const r = b.getBoundingClientRect(); return { w: r.width, h: r.height }; }));
   check('garage: the hangar slots are tappable', hg.length === 6 && hg.every((b) => b.h >= 28 && b.w >= 26), JSON.stringify(hg[0]));

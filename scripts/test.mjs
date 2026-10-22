@@ -416,6 +416,15 @@ const LEGACY_SRC = legacy.toString();
     return Object.values(seen).every((n) => n > 15);
   })());
 
+  // the budgets are whole numbers however the build is stretched or upgraded
+  const odd = P.deriveStats({ ...P.DEFAULT_BUILD, prop: { ...P.DEFAULT_BUILD.prop, size: 1.15, torso: 1.25 }, up: { weapon: 3, shoulderL: 2, shoulderR: 2, offhand: 3 } });
+  check('weight, load, power draw and output are whole numbers even for an upgraded, stretched build', [odd.weight, odd.load, odd.draw, odd.supply].every(Number.isInteger), JSON.stringify([odd.weight, odd.load, odd.draw, odd.supply]));
+  // the rigged enemies and the practice dummy
+  const R = await import(path.join(root, 'src', 'rigged.js'));
+  check('the crawler and the hydra are valid garage builds, each with its own enemy tuning', R.RIGGED_TYPES.every((t) => JSON.stringify(P.sanitizeBuild(R.RIGGED_BUILDS[t])) === JSON.stringify(R.RIGGED_BUILDS[t]) && R.riggedOf(t).def.hp > 1000 && R.riggedOf(t).def.parts.length >= 10 && R.riggedOf(t).def.score > 0));
+  check('the crawler has four arm guns and a tail turret on six legs; the hydra has three heads, two missile pods and a vulcan', R.riggedOf('crawler').stats.limbs.length === 4 && R.riggedOf('crawler').stats.turrets.length === 1 && R.riggedOf('crawler').stats.counts.legs === 6 && R.riggedOf('hydra').stats.counts.heads === 3 && R.riggedOf('hydra').stats.turrets[0].intercept === true && R.RIGGED_BUILDS.hydra.podL === 'missile');
+  check('the dummy soaks a lot and is worth nothing', R.DUMMY_DEF.hp >= 4000 && R.DUMMY_DEF.score === 0 && !R.DUMMY_DEF.boss);
+
   const t0 = Date.now();
   const sampled = P.statRanges();
   check('stat ranges are quick to compute and cover load and power', Date.now() - t0 < 2000 && sampled.load.max > sampled.load.min && sampled.draw.max > sampled.supply.min, `${Date.now() - t0} ms`);
@@ -472,7 +481,7 @@ try {
   // ------------------------------------------------------------ garage UI (real clicks)
   // hardpoint tab -> the slots behind it (and how many parts each lists)
   const counts = {
-    head: { head: 10, crest: 7 }, chest: { torso: 8, pilot: 9 }, arms: { arms: 6 }, legs: { layout: 5, legs: 6 },
+    head: { head: 10, crest: 7 }, chest: { torso: 8, pilot: 9 }, arms: { arms: 6 }, legs: { layout: 8, legs: 6 },
     shoulderL: { shoulderL: 8, mountL: 4 }, shoulderR: { shoulderR: 8, mountR: 4 },
     back: { backpack: 6 }, waist: { core: 7, skirt: 6 }, handR: { weapon: 9 }, handL: { offhand: 4 }, hips: { sub: 7 },
   };
@@ -495,7 +504,7 @@ try {
   // the markers on the 3D mech: one per hardpoint, on screen, and clicking one opens that hardpoint and swings the camera
   await page.evaluate(() => { window.__game.garageFocus('all'); window.__game.garageCam.goal = null; window.__game.render(); });
   const markers = await page.evaluate(() => [...document.querySelectorAll('.g-marker')].map((m) => ({ id: m.dataset.hp, off: m.classList.contains('off'), at: m.style.transform })));
-  check('the garage floats a clickable marker over each of the 20 hardpoints (11 body parts and 9 sockets)', markers.length === 20 && markers.every((m) => !m.off && /translate/.test(m.at)), JSON.stringify(markers.filter((m) => m.off).map((m) => m.id)));
+  check('the garage floats a clickable marker over each of the 27 hardpoints (11 body parts and 16 sockets)', markers.length === 27 && markers.every((m) => !m.off && /translate/.test(m.at)), JSON.stringify(markers.filter((m) => m.off).map((m) => m.id)));
   const spread = await page.evaluate(() => {
     const pts = [...document.querySelectorAll('.g-marker')].map((m) => { const r = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(m.style.transform); return [Number(r[1]), Number(r[2])]; });
     const ys = pts.map((p) => p[1]);
@@ -524,21 +533,21 @@ try {
     const marks = [...document.querySelectorAll('.g-marker.socket')];
     return { n: marks.length, empty: marks.filter((m) => m.classList.contains('empty')).length, bodyEmpty: document.querySelectorAll('.g-marker:not(.socket).empty').length };
   });
-  check('nine sockets glow on the machine, all empty on the stock build (the body markers never glow)', sockets.n === 9 && sockets.empty === 9 && sockets.bodyEmpty === 0, JSON.stringify(sockets));
+  check('sixteen sockets glow on the machine, all empty on the stock build (the body markers never glow)', sockets.n === 16 && sockets.empty === 16 && sockets.bodyEmpty === 0, JSON.stringify(sockets));
   await page.click('.g-tab[data-tab="rig"]');
   const rigTab = await page.evaluate(() => ({
     counts: [...document.querySelectorAll('.rig-count b')].map((b) => b.textContent).join('/'),
     cards: [...document.querySelectorAll('.socket-btn')].map((b) => b.dataset.hp).join(','),
     allEmpty: [...document.querySelectorAll('.socket-btn')].every((b) => !b.classList.contains('filled')),
   }));
-  check('the RIG tab counts the arms, legs and heads and lists all nine sockets', rigTab.counts === '2/2/1' && rigTab.cards === 'armLowerL,armLowerR,armUpperL,armUpperR,headL,headR,tail,podL,podR' && rigTab.allEmpty, JSON.stringify(rigTab));
+  check('the RIG tab counts the arms, legs and heads and lists all sixteen sockets', rigTab.counts === '2/2/1/0' && rigTab.cards === 'armLowerL,armLowerR,armUpperL,armUpperR,headL,headR,tail,podL,podR,armMidL,armMidR,wingL,wingR,chestMod,flankL,flankR' && rigTab.allEmpty, JSON.stringify(rigTab));
   await page.click('.socket-btn[data-hp="armUpperL"]');
   const upper = await page.evaluate(() => ({
     tab: window.__garage.tab, lit: document.querySelector('.g-tab.active')?.dataset.tab, opts: [...document.querySelectorAll('.opt')].map((o) => o.dataset.id).join(','),
     marker: document.querySelector('.g-marker.active')?.dataset.hp, goal: window.__game.garageCam.goal?.yaw ?? null, sym: !!document.getElementById('g-sym'),
   }));
   check('a socket card opens that socket (the RIG tab stays lit, the marker and camera follow)', upper.tab === 'armUpperL' && upper.lit === 'rig' && upper.marker === 'armUpperL' && upper.goal !== null && upper.sym
-    && upper.opts === 'none,gun,cannon,blade,shield,launcher,repair', JSON.stringify(upper));
+    && upper.opts === 'none,gun,cannon,blade,shield,launcher,repair,shotgun,rail,sensor,drill', JSON.stringify(upper));
   await page.click('.opt[data-id="cannon"]');
   const welded = await page.evaluate(() => {
     const g = window.__game, b = g.player.build, m = g.player.mech;
@@ -555,13 +564,13 @@ try {
   await page.click('#g-sym');
   await page.click('.g-tab[data-tab="rig"]');
   const filled = await page.evaluate(() => ({ cards: [...document.querySelectorAll('.socket-btn.filled')].map((b) => b.dataset.hp).join(','), counts: [...document.querySelectorAll('.rig-count b')].map((b) => b.textContent).join('/') }));
-  check('the rig tab shows the fitted sockets and the new arm count', filled.cards === 'armUpperL,armUpperR' && filled.counts === '4/2/1', JSON.stringify(filled));
+  check('the rig tab shows the fitted sockets and the new arm count', filled.cards === 'armUpperL,armUpperR' && filled.counts === '4/2/1/0', JSON.stringify(filled));
 
   // leg layouts live under LEGS: treads and hover have no leg style to pick
   await page.click('.g-tab[data-tab="legs"]');
   const legTabs = async () => page.evaluate(() => ({ slots: [...document.querySelectorAll('.g-slot')].map((b) => b.dataset.slot).join(','), opts: [...document.querySelectorAll('.opt')].map((o) => o.dataset.id).join(',') }));
   const legsStock = await legTabs();
-  check('LEGS offers the layout first (biped, quad, spider, treads, hover), then the leg style', legsStock.slots === 'layout,legs' && legsStock.opts === 'biped,quad,hexa,tread,hover', JSON.stringify(legsStock));
+  check('LEGS offers the layout first (biped, quad, spider, treads, hover, tripod, octopod, wheels), then the leg style', legsStock.slots === 'layout,legs' && legsStock.opts === 'biped,quad,hexa,tread,hover,tripod,octo,wheel', JSON.stringify(legsStock));
   await page.click('.opt[data-id="tread"]');
   const legsTread = await legTabs();
   const treadState = await page.evaluate(() => { const g = window.__game; return { layout: g.player.build.layout, legs: g.player.mech.model.rig.legs.length, treads: g.player.mech.model.rig.treads?.length ?? 0, tabHidden: document.getElementById('g-slots').classList.contains('hidden') }; });
@@ -1883,7 +1892,7 @@ try {
   });
   dump('models', models);
   check('every part in every slot builds a model without errors, standing on the ground', models.failures.length === 0 && models.built >= 100, `${models.built} models${models.failures.length ? ': ' + models.failures.slice(0, 3).join(' | ') : ''}`);
-  check('the model locates all 20 hardpoints, head highest and the legs lowest', Object.keys(models.anchors).length === 20 && models.anchors.head[1] > models.anchors.chest[1] && models.anchors.chest[1] > models.anchors.waist[1] && models.anchors.waist[1] > models.anchors.legs[1] && models.anchors.legs[1] > 0, JSON.stringify(models.anchors));
+  check('the model locates all 27 hardpoints, head highest and the legs lowest', Object.keys(models.anchors).length === 27 && models.anchors.head[1] > models.anchors.chest[1] && models.anchors.chest[1] > models.anchors.waist[1] && models.anchors.waist[1] > models.anchors.legs[1] && models.anchors.legs[1] > 0, JSON.stringify(models.anchors));
   check('the left and right shoulder anchors are on opposite sides', models.anchors.shoulderL[0] * models.anchors.shoulderR[0] < 0 && Math.abs(models.anchors.shoulderL[0] + models.anchors.shoulderR[0]) < 1.5);
   check('each shoulder mount fires from its own shoulder (L is the mech\'s left, R its right), well clear of the hand gun', models.muzzles.L[0] < -2 && models.muzzles.R[0] > 2 && models.muzzles.L[1] > 14 && models.muzzles.R[1] > 14 && models.fallback < 1e-6, JSON.stringify(models.muzzles));
   check('every option in every pool is its own silhouette (no part reuses another\'s model)', models.sameLook.length === 0, models.sameLook.join(' | '));
@@ -2830,6 +2839,395 @@ try {
   check('the results screen counts the structures brought down, once there are any', !ruin.results.clean && /^2 \(1 flattened\)$/.test(ruin.results.row ?? ''), JSON.stringify(ruin.results));
   check('a new sortie puts the whole city back: every building whole, solid and lit, no rubble, marks or smoke', ruin.reset.top && ruin.reset.standing && ruin.reset.marks === 0 && ruin.reset.slabs === 0 && ruin.reset.emitters === 0 && ruin.reset.solidAgain && ruin.reset.geoOk && ruin.reset.collapses === 0 && ruin.finite, JSON.stringify(ruin.reset));
 
+  // ------------------------------------------------------------ 5l. the expansion: upgrades, set bonuses, paint areas, build codes, marker layers
+  {
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.cheat.invincible = true;
+    g.toTitle();
+    for (const id of ['screen-end', 'screen-pause']) document.getElementById(id).classList.add('hidden');
+    document.getElementById('screen-title').classList.remove('hidden');
+  });
+  await page.click('#btn-garage');
+  await page.evaluate(async () => {
+    const P = await import('/src/parts.js');
+    window.__garage.commit({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning }, up: {}, zones: {} });
+    window.__game.manual = true;
+  });
+  const stats = () => page.evaluate(() => { const s = window.__game.player.stats; return { dmg: s.weapon.damage, weight: s.weight, hp: s.hp }; });
+
+  // ---- upgrades
+  await page.click('.g-tab[data-tab="handR"]');
+  const up0 = { ...(await stats()), row: await page.evaluate(() => !!document.querySelector('.g-detail .upgrade')) };
+  await page.click('.g-detail .upgrade .tune-btn[data-up="1"]');
+  await page.click('.g-detail .upgrade .tune-btn[data-up="1"]');
+  const up2 = await page.evaluate(() => ({
+    level: window.__garage.build.up.weapon, dmg: window.__game.player.stats.weapon.damage, weight: window.__game.player.stats.weight,
+    tag: document.querySelector('.opt.selected .o-tag')?.textContent, info: document.querySelector('.g-detail .up-info')?.textContent,
+  }));
+  check('every fitted part has an upgrade dial: two levels make the rifle hit 24% harder, and weigh more', up0.row && up2.level === 2 && Math.abs(up2.dmg / up0.dmg - 1.24) < 0.01 && up2.weight > up0.weight, JSON.stringify([up0, up2]));
+  check('the part\'s card and the dial show the level and the points left', /LV 2/.test(up2.tag) && /LV 2/.test(up2.info) && /8 OF 10 POINTS LEFT/.test(up2.info), JSON.stringify(up2));
+  await page.click('.g-detail .upgrade .tune-btn[data-up="1"]');
+  const up3 = await page.evaluate(() => ({ level: window.__garage.build.up.weapon, plusOff: document.querySelector('.g-detail .upgrade .tune-btn[data-up="1"]').disabled }));
+  check('an upgrade stops at level 3', up3.level === 3 && up3.plusOff, JSON.stringify(up3));
+  await page.click('.g-detail .upgrade .tune-btn[data-up="-1"]');
+  check('the minus button lowers it again', (await page.evaluate(() => window.__garage.build.up.weapon)) === 2);
+  await page.hover('.opt:not(.selected)');
+  const hov = await page.evaluate(() => document.querySelector('.g-detail .upgrade .up-info b')?.textContent ?? '');
+  check('the dial stays on the equipped part while you look at another one', /UPGRADE BEAM RIFLE/.test(hov) && /LV 2/.test(hov), hov);
+  await page.click('.g-tab[data-tab="head"]');
+  await page.click('.g-slot[data-slot="crest"]');
+  check('a crest has nothing to upgrade', !(await page.evaluate(() => !!document.querySelector('.g-detail .up-box:not(.hidden) .upgrade'))));
+  await page.click('.g-tab[data-tab="shoulderL"]');
+  await page.click('.opt[data-id="bulwark"]');
+  await page.click('.g-detail .upgrade .tune-btn[data-up="1"]');
+  const twin = await page.evaluate(() => ({ L: window.__garage.build.up.shoulderL, R: window.__garage.build.up.shoulderR, spent: Object.values(window.__garage.build.up).reduce((a, b) => a + b, 0) }));
+  check('with SYMMETRY on, an upgrade goes to both shoulders at once', twin.L === 1 && twin.R === 1 && twin.spent === 4, JSON.stringify(twin));
+  await page.evaluate(async () => {
+    const P = await import('/src/parts.js');
+    const out = { ...P.DEFAULT_BUILD, up: { weapon: 3, shoulderL: 2, shoulderR: 2, offhand: 3 }, shoulderL: 'bulwark', shoulderR: 'bulwark' };
+    window.__garage.commit(out);
+  });
+  await page.click('.g-tab[data-tab="shoulderL"]');
+  const pool = await page.evaluate(() => ({ spent: Object.values(window.__garage.build.up).reduce((a, b) => a + b, 0), plusOff: document.querySelector('.g-detail .upgrade .tune-btn[data-up="1"]').disabled, note: document.querySelector('.g-detail .up-info span').textContent }));
+  check('only ten upgrade points can be spent in all: with none left the plus button is off', pool.spent === 10 && pool.plusOff && /0 OF 10 POINTS LEFT/.test(pool.note), JSON.stringify(pool));
+
+  // ---- set bonuses on the RIG tab
+  await page.evaluate(async () => { const P = await import('/src/parts.js'); window.__garage.commit({ ...P.DEFAULT_BUILD, up: {}, zones: {} }); });
+  await page.click('.g-tab[data-tab="rig"]');
+  const sets0 = await page.evaluate(() => ({ rows: document.querySelectorAll('.set-row').length, on: [...document.querySelectorAll('.set-row.on')].map((r) => r.dataset.set).join(',') }));
+  check('the RIG tab lists the eight set bonuses with what each needs, none lit on the stock build', sets0.rows === 8 && sets0.on === '', JSON.stringify(sets0));
+  await page.click('.socket-btn[data-hp="armLowerL"]');
+  await page.click('.opt[data-id="gun"]');
+  await page.click('.g-tab[data-tab="rig"]');
+  await page.click('.socket-btn[data-hp="armMidL"]');
+  await page.click('.opt[data-id="gun"]');
+  await page.click('.g-tab[data-tab="rig"]');
+  const litSets = () => page.evaluate(() => ({ on: [...document.querySelectorAll('.set-row.on')].map((r) => r.dataset.set).sort().join(','), summary: document.getElementById('g-summary').textContent.includes('SET BONUS'), arms: document.querySelector('.rig-count b').textContent }));
+  const sets1 = await litSets();
+  check('four arm guns light BATTERY, and the summary says so', sets1.on === 'battery' && sets1.summary && sets1.arms === '6', JSON.stringify(sets1));
+  await page.click('.socket-btn[data-hp="wingL"]');
+  await page.click('.opt[data-id="fighter"]');
+  await page.click('.g-tab[data-tab="rig"]');
+  const sets2 = await litSets();
+  check('a third matched pair (the wings) adds the MATCHED SET', sets2.on === 'battery,matched', JSON.stringify(sets2));
+
+  // ---- paint areas
+  await page.click('.g-tab[data-tab="paint"]');
+  await page.click('.areas .area-btn[data-zone="chest"]');
+  await page.evaluate(() => { const i = document.querySelector('.colors input'); i.value = '#ff3366'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForFunction(() => Object.keys(window.__garage.build.zones).length > 0); // (colour pickers apply once per frame)
+  const withColour = (hex) => page.evaluate((hex) => { let n = 0; window.__game.player.mech.root.traverse((o) => { const m = o.material; if (m && !Array.isArray(m) && m.color && m.color.getHex() === hex) n++; }); return n; }, hex);
+  const zone = await page.evaluate(() => { const b = window.__garage.build; return { zones: Object.keys(b.zones).join(','), main: b.zones.chest?.main, body: b.paint.main, dot: document.querySelector('.areas .area-btn[data-zone="chest"]').classList.contains('painted') }; });
+  check('painting one area gives it colours of its own and leaves the body alone', zone.zones === 'chest' && zone.main === '#ff3366' && zone.body !== '#ff3366' && zone.dot, JSON.stringify(zone));
+  check('the model wears the area\'s colour', (await withColour(0xff3366)) > 0);
+  await page.click('.areas .area-btn[data-zone="body"]');
+  await page.evaluate(() => { const i = document.querySelector('.colors input'); i.value = '#113355'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForFunction(() => window.__garage.build.paint.main === '#113355');
+  check('repainting the body does not touch the painted area', (await withColour(0x113355)) > 0 && (await withColour(0xff3366)) > 0 && (await page.evaluate(() => window.__garage.build.zones.chest.main)) === '#ff3366');
+  await page.click('.areas .area-btn[data-zone="chest"]');
+  await page.click('.paint-section .size-reset');
+  check('FOLLOW THE BODY clears the area\'s paint', (await page.evaluate(() => Object.keys(window.__garage.build.zones).length)) === 0 && (await withColour(0xff3366)) === 0);
+
+  // ---- build codes
+  await page.evaluate(async () => { window.__garage.commit({ ...window.__garage.build, name: 'CODEWALKER', wingL: 'angel', wingR: 'angel', up: { wingL: 2, wingR: 2 } }); });
+  await page.click('#g-code');
+  const shared = await page.evaluate(async () => {
+    const S = await import('/src/share.js');
+    const out = document.getElementById('g-code-out').value;
+    const back = S.decodeBuild(out);
+    return { shown: !document.getElementById('g-share').classList.contains('hidden'), code: out, ok: back.ok && JSON.stringify(back.build) === JSON.stringify(window.__garage.build) };
+  });
+  check('CODE shows the machine on the pad as an SV1 code that decodes to the same build', shared.shown && /^SV1\.[A-Za-z0-9_-]+\.[0-9a-f]{4}$/.test(shared.code) && shared.ok, shared.code.slice(0, 50));
+  await page.focus('#g-code-in');
+  await page.keyboard.type('wasd ');
+  const typed = await page.evaluate(() => ({ keys: [...window.__game.input.keys].join(','), value: document.getElementById('g-code-in').value }));
+  check('typing in the code box does not drive the mech', typed.keys === '' && typed.value === 'wasd ', JSON.stringify(typed));
+  await page.fill('#g-code-in', 'SV1.garbage.0000');
+  await page.click('#g-code-load');
+  const bad = await page.evaluate(() => ({ text: document.getElementById('g-code-error').textContent, cls: document.getElementById('g-code-error').className }));
+  check('a damaged code is refused with a plain message', /damaged/.test(bad.text) && bad.cls === 'bad', JSON.stringify(bad));
+  await page.evaluate(async () => { window.__garage.commit({ ...window.__garage.build, name: 'SOMEONE ELSE', wingL: 'none', wingR: 'none', up: {} }); });
+  await page.fill('#g-code-in', shared.code);
+  const before = await page.evaluate(() => window.__garage.hangar.active);
+  await page.click('#g-code-load');
+  const loaded = await page.evaluate(() => ({ text: document.getElementById('g-code-error').textContent, name: window.__garage.build.name, wing: window.__garage.build.wingL, up: window.__garage.build.up.wingL, active: window.__garage.hangar.active, game: window.__game.player.build.name }));
+  check('a good code loads into the hangar and is fielded', /LOADED INTO SLOT/.test(loaded.text) && loaded.name === 'CODEWALKER' && loaded.wing === 'angel' && loaded.up === 2 && loaded.game === 'CODEWALKER', JSON.stringify([before, loaded]));
+  await page.keyboard.press('Escape');
+  const closed = await page.evaluate(() => ({ hidden: document.getElementById('g-share').classList.contains('hidden'), state: window.__game.state }));
+  check('Esc closes the code box and leaves you in the garage', closed.hidden && closed.state === 'garage', JSON.stringify(closed));
+
+  // ---- marker layers
+  await page.evaluate(() => { const g = window.__game; g.garageFocus('all'); g.garageCam.goal = null; g.render(); });
+  const layer = async (name) => { await page.click(`.layer[data-layer="${name}"]`); await page.evaluate(() => window.__game.render()); return page.evaluate(() => { const vis = (sel) => [...document.querySelectorAll(sel)].filter((m) => getComputedStyle(m).display !== 'none' && !m.classList.contains('off')).length; return { body: vis('.g-marker:not(.socket)'), sockets: vis('.g-marker.socket') }; }); };
+  const all = await layer('all'), body = await layer('body'), socks = await layer('sockets');
+  check('the MARKERS switch thins the markers: all 27, just the 11 on the body, or just the 16 sockets', all.body === 11 && all.sockets === 16 && body.body === 11 && body.sockets === 0 && socks.body === 0 && socks.sockets === 16, JSON.stringify({ all, body, socks }));
+  await layer('all');
+
+  // ---- the budgets are whole numbers
+  const text = await page.evaluate(() => [...document.querySelectorAll('.stat b')].map((b) => b.textContent).join(' '));
+  check('the bars show whole numbers, not long decimals', !/\d\.\d{3,}/.test(text), text);
+  await page.evaluate(() => window.__garage.close()); // (the next section starts from the title)
+  }
+
+  // ------------------------------------------------------------ 5m. the expansion in play: parts that break, auto-turrets, the rigged enemies, the test range
+  {
+  // ---- parts that break
+  const broke = await page.evaluate(async () => {
+    const g = window.__game, P = await import('/src/parts.js');
+    const THREE = await import('three');
+    const out = {};
+    const calls = [];
+    const msg = g.hud.message.bind(g.hud);
+    g.hud.message = (...a) => { calls.push(a.join('|')); msg(...a); };
+    g.cheat.invincible = false;
+    g.setBuild({ ...P.DEFAULT_BUILD, armLowerL: 'gun', armLowerR: 'gun', podL: 'missile', podR: 'missile', layout: 'hexa', tail: 'turret' });
+    g.startMission(); g.manual = true; g.missions.state = 'idle';
+    for (const id of ['screen-end', 'screen-pause', 'screen-title']) document.getElementById(id).classList.add('hidden');
+    g.hud.reset();
+    const p = g.player, m = p.mech;
+    m.place(0, 0, 0, 0); p.lock = null; p.lockEnabled = false; g.rig.reset(0); g.step(5);
+    const snap = () => ({ arms: p.stats.counts.arms, legs: p.stats.counts.legs, weight: p.stats.weight, speed: p.stats.speed, guns: p.limbGuns.length, turrets: p.turrets.length, missiles: p.stats.missileCharges, lost: p.lost.size });
+    const at = (slot) => (slot.startsWith('leg') ? m.model.feet[Number(slot.slice(3))] : m.model.partNode(slot)).getWorldPosition(new THREE.Vector3());
+    const shoot = (slot) => { m.hp = m.maxHp; const part = m.parts.find((q) => q.slot === slot); return m.takeDamage((part.hp / 0.4 + 1) / (1 - (m.def.guard || 0)), { kind: 'bullet', point: at(slot) }); };
+    const broken = () => m.parts.filter((q) => q.broken).map((q) => q.slot);
+    out.parts = m.parts.map((q) => q.slot).join(',');
+    out.before = snap();
+    // a hit that lands off every part is just a hit
+    m.hp = m.maxHp;
+    m.takeDamage(30, { kind: 'bullet', point: new THREE.Vector3(500, 5, 500) });
+    out.farHit = broken().length;
+    shoot('armLowerL');
+    g.step(3);
+    out.arm = { ...snap(), broken: broken().join(','), msg: calls.some((c) => /PART LOST/.test(c)), cells: document.querySelectorAll('#parts-grid .part-cell.out').length };
+    shoot('leg2');
+    out.leg = { ...snap(), broken: broken().join(',') };
+    shoot('tail');
+    out.tail = { ...snap() };
+    shoot('podL');
+    out.pod = { ...snap() };
+    out.hpAfter = m.hp;
+    g.step(3);
+    out.cellsAll = document.querySelectorAll('#parts-grid .part-cell.out').length;
+    p.resupply(0);
+    g.step(3);
+    out.repaired = { ...snap(), broken: broken().length, cells: document.querySelectorAll('#parts-grid .part-cell.out').length, banner: calls.some((c) => /REPLACED/.test(c)) };
+    // the same part, shot again, comes off again
+    shoot('armLowerL');
+    out.again = { broken: broken().join(','), guns: p.limbGuns.length };
+    g.hud.message = msg;
+    return out;
+  });
+  dump('broke', broke);
+  check('a hexa gun machine has eleven parts of its own: five sockets and six legs', broke.parts.split(',').length === 11 && broke.parts.split(',').filter((x) => x.startsWith('leg')).length === 6, broke.parts);
+  check('a hit that lands near no part breaks none', broke.farHit === 0);
+  check('shooting an arm off takes its gun, an arm and its weight, and the HUD says PART LOST', broke.arm.broken === 'armLowerL' && broke.arm.guns === broke.before.guns - 1 && broke.arm.arms === broke.before.arms - 1 && broke.arm.weight < broke.before.weight && broke.arm.msg && broke.arm.cells === 1, JSON.stringify(broke.arm));
+  check('a lost leg slows the walker but does not stop it', broke.leg.legs === broke.before.legs - 1 && broke.leg.speed < broke.before.speed && broke.leg.speed > 0.5 * broke.before.speed, JSON.stringify([broke.before.speed, broke.leg.speed]));
+  check('a lost tail takes its turret, and a lost pod one missile charge', broke.tail.turrets === 0 && broke.pod.missiles === broke.before.missiles - 1, JSON.stringify([broke.tail, broke.pod]));
+  check('the parts panel marks every lost part, and the armor survived the lot', broke.cellsAll === 4 && broke.hpAfter > 0, `${broke.cellsAll} cells, ${Math.round(broke.hpAfter)} armor`);
+  check('the pit stop\'s resupply puts every part back: guns, turret, weight and the panel included', broke.repaired.broken === 0 && broke.repaired.guns === broke.before.guns && broke.repaired.turrets === broke.before.turrets && broke.repaired.weight === broke.before.weight && broke.repaired.arms === broke.before.arms && broke.repaired.lost === 0 && broke.repaired.cells === 0 && broke.repaired.banner, JSON.stringify(broke.repaired));
+  check('a replaced part can be shot off again', broke.again.broken === 'armLowerL' && broke.again.guns === broke.before.guns - 1, JSON.stringify(broke.again));
+
+  // ---- auto-turrets
+  const turrets = await page.evaluate(async () => {
+    const g = window.__game, P = await import('/src/parts.js');
+    const THREE = await import('three');
+    const { createEnemy } = await import('/src/ai.js');
+    const out = {};
+    const fresh = (patch) => {
+      g.cheat.invincible = false;
+      g.setBuild({ ...P.DEFAULT_BUILD, ...patch });
+      g.startMission(); g.manual = true; g.missions.state = 'idle'; g.hud.reset();
+      g.player.mech.place(0, 0, 0, 0); g.player.lock = null; g.player.lockEnabled = false; g.rig.reset(0); g.step(5);
+      g.stats.damageTaken = 0;
+    };
+    const dummy = (x, z) => { const e = createEnemy(g, 'bulwark', 1); e.mech.place(x, z, 0, 0); e.update = () => {}; e.mech.hp = e.mech.maxHp = 100000; g.enemies.push(e); return e; };
+    const clear = () => { for (const e of g.enemies) e.mech.destroy(); g.enemies.length = 0; g.projectiles.clear(); };
+    const missile = (e) => g.projectiles.spawn({ type: 'missile', team: 'enemy', source: e.mech, pos: new THREE.Vector3(0, 12, -90), dir: new THREE.Vector3(0, 0, 1), color: 0xff6040, damage: 80, speed: 90, maxSpeed: 230, delay: 0, turn: 3, target: g.player.mech, splash: { radius: 18, damage: 45 }, knock: 20 });
+    // a tail gun shoots the nearest enemy with nobody touching the controls, even one behind the machine
+    fresh({ tail: 'turret' });
+    let e = dummy(0, 100); // behind the mech (it faces -z)
+    g.step(150);
+    out.tail = { lost: e.mech.maxHp - e.mech.hp, mine: g.projectiles.list.filter((q) => q.team === 'player').length >= 0 };
+    clear();
+    // ... and nothing in range means nothing fired
+    fresh({ tail: 'turret' });
+    e = dummy(0, 400);
+    g.step(120);
+    out.far = { lost: e.mech.maxHp - e.mech.hp, shots: g.projectiles.list.filter((q) => q.team === 'player').length };
+    clear();
+    // an enemy missile closing on a stock machine hits; with the chest vulcan it is shot down on the way
+    fresh({});
+    e = dummy(0, -250);
+    let q = missile(e);
+    for (let i = 0; i < 150 && !q.dead; i++) g.step(1);
+    out.stock = { dead: q.dead, taken: g.stats.damageTaken };
+    clear();
+    fresh({ chestMod: 'vulcan' });
+    e = dummy(0, -250);
+    q = missile(e);
+    for (let i = 0; i < 150 && !q.dead; i++) g.step(1);
+    out.vulcan = { dead: q.dead, taken: g.stats.damageTaken, z: Math.round(q.pos.z) };
+    clear();
+    // the turret pods and the vulcan are one gun each in the stats
+    out.listed = P.deriveStats({ ...P.DEFAULT_BUILD, tail: 'turret', podL: 'turret', podR: 'turret', chestMod: 'vulcan' }).turrets.map((t) => t.slot).join(',');
+    return out;
+  });
+  dump('turrets', turrets);
+  check('a tail gun shoots an enemy behind you with no input at all', turrets.tail.lost > 50, JSON.stringify(turrets.tail));
+  check('and holds its fire when nothing is in range', turrets.far.lost === 0, JSON.stringify(turrets.far));
+  check('a chest vulcan shoots down a missile that would have hit a stock machine', turrets.stock.taken > 0 && turrets.vulcan.dead && turrets.vulcan.taken === 0, JSON.stringify([turrets.stock, turrets.vulcan]));
+  check('the tail, both pods and the chest each carry one turret', turrets.listed === 'tail,podL,podR,chestMod', turrets.listed);
+
+  // ---- the rigged enemies and the campaign
+  const rigged = await page.evaluate(async () => {
+    const g = window.__game, P = await import('/src/parts.js');
+    const THREE = await import('three');
+    const R = await import('/src/rigged.js');
+    const D = await import('/src/data.js');
+    const out = {};
+    g.cheat.invincible = true;
+    g.startRange(); g.manual = true; g.step(30);
+    for (const id of ['screen-end', 'screen-pause', 'screen-title']) document.getElementById(id).classList.add('hidden');
+    g.range.clearSparring();
+    out.valid = Object.fromEntries(Object.entries(R.RIGGED_BUILDS).map(([k, b]) => [k, JSON.stringify(P.sanitizeBuild(b)) === JSON.stringify(b)]));
+    out.crawlerStats = (({ counts, layout }) => ({ counts, layout }))(R.riggedOf('crawler').stats);
+    out.hydraStats = (({ counts, turrets }) => ({ counts, turrets: turrets.map((t) => t.slot) }))(R.riggedOf('hydra').stats);
+    g.range.spar('crawler'); g.range.spar('hydra');
+    const crawler = g.enemies.find((e) => e.type === 'crawler'), hydra = g.enemies.find((e) => e.type === 'hydra');
+    out.names = [crawler.mech.def.name, hydra.mech.def.name];
+    out.guns = crawler.guns.length; out.pods = hydra.pods.size; out.parts = [crawler.mech.parts.length, hydra.mech.parts.length];
+    out.legsOnModel = crawler.mech.model.rig.legs.length;
+    const at = (e, slot) => (slot.startsWith('leg') ? e.mech.model.feet[Number(slot.slice(3))] : e.mech.model.partNode(slot)).getWorldPosition(new THREE.Vector3());
+    const shoot = (e, slot) => { const part = e.mech.parts.find((q) => q.slot === slot); e.mech.hp = e.mech.maxHp; return e.mech.takeDamage((part.hp / 0.4 + 1) / (1 - (e.mech.def.guard || 0)), { kind: 'bullet', point: at(e, slot) }); };
+    shoot(crawler, 'armLowerL');
+    out.crawlerArm = { guns: crawler.guns.filter((q) => !q.broken).length, broken: crawler.mech.parts.filter((q) => q.broken).map((q) => q.slot).join(',') };
+    shoot(crawler, 'leg1');
+    out.crawlerLeg = { legsLost: crawler.legsLost };
+    shoot(crawler, 'tail');
+    out.crawlerTail = crawler.turrets.filter((q) => !q.broken).length;
+    shoot(hydra, 'podL');
+    out.hydraPod = hydra.pods.size;
+    out.partsShot = g.stats.partsShot;
+    // the hydra's vulcan shoots down a missile aimed at it
+    g.range.clearSparring();
+    for (let i = g.enemies.length - 1; i >= 0; i--) if (g.enemies[i].type === 'dummy') { g.enemies[i].mech.destroy(); g.enemies.splice(i, 1); } // (a dummy in the lane would take the missile)
+    g.range.slots = [];
+    g.range.spar('hydra');
+    const h = g.enemies.find((e) => e.type === 'hydra');
+    h.mech.place(0, -150, 0, 0); h.mech.vel.set(0, 0, 0);
+    const q = g.projectiles.spawn({ type: 'missile', team: 'player', source: g.player.mech, pos: new THREE.Vector3(0, 14, -60), dir: new THREE.Vector3(0, 0, -1), color: 0xffaa40, damage: 150, speed: 90, maxSpeed: 230, delay: 0, turn: 3, target: h.mech, splash: { radius: 18, damage: 80 } });
+    for (let i = 0; i < 150 && !q.dead; i++) g.step(1);
+    out.hydraVulcan = { dead: q.dead, hit: Math.round(h.mech.maxHp - h.mech.hp), z: Math.round(q.pos.z) };
+    g.range.clearSparring();
+    // the campaign: a crawler in wave 3 and a hydra in wave 4, named on the pit card
+    out.waves = [D.WAVES[2].spawn.map((s) => s.join(':')).join(' '), D.WAVES[3].spawn.map((s) => s.join(':')).join(' ')];
+    g.startMission(); g.manual = true; g.missions.state = 'idle';
+    g.missions.index = 1;
+    out.card3 = g.missions.pitInfo().next.hostiles.map((x) => `${x.count} × ${x.name}`).join(', ');
+    g.missions.index = 2;
+    out.card4 = g.missions.pitInfo().next.hostiles.map((x) => `${x.count} × ${x.name}`).join(', ');
+    g.missions.index = 2;
+    g.missions._spawnWave();
+    out.spawned = g.enemies.map((e) => e.type).sort().join(',');
+    for (const e of g.enemies) e.mech.destroy();
+    g.enemies.length = 0;
+    return out;
+  });
+  dump('rigged', rigged);
+  check('the rigged enemies are valid garage builds that load like any other', rigged.valid.crawler && rigged.valid.hydra, JSON.stringify(rigged.valid));
+  check('the crawler is a six-legged, six-armed machine with four arm guns; the hydra has three heads and a chest vulcan', rigged.crawlerStats.counts.legs === 6 && rigged.crawlerStats.counts.arms === 6 && rigged.guns === 4 && rigged.legsOnModel === 6 && rigged.hydraStats.counts.heads === 3 && rigged.hydraStats.turrets.join() === 'chestMod' && rigged.pods === 2, JSON.stringify([rigged.crawlerStats, rigged.hydraStats, rigged.guns, rigged.pods]));
+  check('their parts have health of their own', rigged.parts[0] === 11 && rigged.parts[1] === 10 && rigged.names.join() === 'SP-18 CRAWLER,HD-40 HYDRA', JSON.stringify([rigged.parts, rigged.names]));
+  check('shoot a crawler\'s arm off and that gun stops; a leg and the tail go the same way', rigged.crawlerArm.guns === 3 && rigged.crawlerArm.broken === 'armLowerL' && rigged.crawlerLeg.legsLost === 1 && rigged.crawlerTail === 0, JSON.stringify([rigged.crawlerArm, rigged.crawlerLeg, rigged.crawlerTail]));
+  check('shoot a hydra\'s missile pod off and it has one pod left; shot-off parts are counted', rigged.hydraPod === 1 && rigged.partsShot === 4, JSON.stringify([rigged.hydraPod, rigged.partsShot]));
+  check('the hydra\'s vulcan shoots down a missile you send at it', rigged.hydraVulcan.dead && rigged.hydraVulcan.hit < 100, JSON.stringify(rigged.hydraVulcan));
+  check('wave 3 has a crawler and wave 4 a hydra, named on the pit card', /crawler:1/.test(rigged.waves[0]) && /hydra:1/.test(rigged.waves[1]) && /1 × SP-18 CRAWLER/.test(rigged.card3) && /1 × HD-40 HYDRA/.test(rigged.card4) && rigged.spawned === 'bulwark,bulwark,crawler,drone,drone,drone', JSON.stringify([rigged.waves, rigged.card3, rigged.card4, rigged.spawned]));
+
+  // ---- the test range, by real clicks
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.toTitle();
+    for (const id of ['screen-end', 'screen-pause', 'screen-garage']) document.getElementById(id).classList.add('hidden');
+    document.getElementById('screen-title').classList.remove('hidden');
+  });
+  await page.click('#btn-garage');
+  await page.evaluate(async () => { const P = await import('/src/parts.js'); window.__garage.commit({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning } }); });
+  await page.click('#g-range');
+  const range1 = await page.evaluate(() => {
+    const g = window.__game;
+    g.manual = true; g.cheat.invincible = false;
+    g.step(60);
+    const vis = (id) => !document.getElementById(id).classList.contains('hidden');
+    return { state: g.state, mode: g.mode, dummies: g.enemies.filter((e) => e.type === 'dummy').length, rangeHud: vis('range-hud'), missionHud: vis('mission'), garageHidden: !vis('screen-garage'), titleHidden: !vis('screen-title'), zero: g.range.total };
+  });
+  check('TEST RANGE opens the range: four dummies, the damage meter instead of the sortie panel, the garage and title gone', range1.state === 'playing' && range1.mode === 'range' && range1.dummies === 4 && range1.rangeHud && !range1.missionHud && range1.garageHidden && range1.titleHidden && range1.zero === 0, JSON.stringify(range1));
+  const range2 = await page.evaluate(() => {
+    const g = window.__game, p = g.player;
+    p.lock = g.enemies.find((e) => e.type === 'dummy').mech; p.lockEnabled = true;
+    g.input.keyDown('Mouse0');
+    let peak = 0;
+    for (let i = 0; i < 240; i++) { g.step(1); peak = Math.max(peak, g.range.dps); }
+    g.input.keyUp('Mouse0');
+    g.step(2);
+    return { total: g.range.total, peak, dps: g.range.dps, avg: g.range.average, text: document.getElementById('rg-total').textContent, dpsText: document.getElementById('rg-peak').textContent, expected: Math.round(g.range.total).toLocaleString('en-US'), dealt: g.stats.damageDealt };
+  });
+  check('the meter counts what you deal: the total matches the damage dealt, the peak DPS is real, and the HUD shows them', range2.total > 300 && Math.abs(range2.total - range2.dealt) < 1 && range2.peak > 100 && range2.avg > 50 && range2.text === range2.expected && Number(range2.dpsText.replace(/,/g, '')) > 100, JSON.stringify(range2));
+  const range3 = await page.evaluate(() => {
+    const g = window.__game, m = g.player.mech;
+    m.takeDamage(1e7, { kind: 'bullet' });
+    g.step(5);
+    const dummy = g.enemies.find((e) => e.type === 'dummy');
+    const dm = dummy.mech;
+    dm.hp = dm.maxHp * 0.4; dm.lastHitAt = g.time;
+    g.step(60 * 6);
+    const mended = dm.hp / dm.maxHp;
+    // destroy one: it comes back after a couple of seconds
+    const victim = g.enemies.filter((e) => e.type === 'dummy')[1];
+    victim.mech.takeDamage(1e9, { kind: 'bullet' });
+    const gone = g.enemies.filter((e) => e.type === 'dummy').length;
+    g.step(60 * 3);
+    return { hp: m.hp, dead: m.dead, state: g.state, mended, gone, back: g.enemies.filter((e) => e.type === 'dummy').length };
+  });
+  check('nothing can end the test: a million damage leaves 1 armor and the range running', range3.hp === 1 && !range3.dead && range3.state === 'playing', JSON.stringify(range3));
+  check('a dummy mends itself when left alone, and a destroyed one is replaced', range3.mended > 0.95 && range3.gone === 3 && range3.back === 4, JSON.stringify(range3));
+  // the pause menu's range tools
+  await page.evaluate(() => { const g = window.__game; g.canvas.requestPointerLock(); g.step(5); document.exitPointerLock(); });
+  const pause = await page.evaluate(() => { const vis = (id) => !document.getElementById(id).classList.contains('hidden'); return { paused: window.__game.state === 'paused', tools: vis('range-tools'), back: vis('btn-range-garage'), quit: document.getElementById('btn-quit').textContent }; });
+  check('pausing on the range shows the range tools, a way back to the garage and LEAVE RANGE', pause.paused && pause.tools && pause.back && pause.quit === 'LEAVE RANGE', JSON.stringify(pause));
+  await page.click('[data-spar="crawler"]');
+  await page.click('[data-spar="hydra"]');
+  const spar = await page.evaluate(() => ({ types: window.__game.range.sparring().map((e) => e.type).join(','), note: document.getElementById('range-note').textContent }));
+  check('the tools call in sparring partners', spar.types === 'crawler,hydra' && /CALLED IN/.test(spar.note), JSON.stringify(spar));
+  await page.click('[data-spar="drone"]'); await page.click('[data-spar="drone"]'); await page.click('[data-spar="drone"]');
+  const full = await page.evaluate(() => ({ n: window.__game.range.sparring().length, note: document.getElementById('range-note').textContent }));
+  check('only four at a time', full.n === 4 && /FULL/.test(full.note), JSON.stringify(full));
+  await page.click('[data-range="clear"]');
+  check('CLEAR SPARRING sends them away and leaves the dummies', await page.evaluate(() => window.__game.range.sparring().length === 0 && window.__game.enemies.filter((e) => e.type === 'dummy').length === 4));
+  await page.evaluate(() => { const g = window.__game; g.player.mech.hp = 1; g.player.mech.takeDamage(0, {}); g.player.ammo = 0; });
+  await page.click('[data-range="repair"]');
+  const rep = await page.evaluate(() => ({ hp: window.__game.player.mech.hp, max: window.__game.player.mech.maxHp, ammo: window.__game.player.ammo, mag: window.__game.player.magSize }));
+  check('REPAIR ME restores armor and ammo', rep.hp === rep.max && rep.ammo === rep.mag, JSON.stringify(rep));
+  await page.click('[data-range="meter"]');
+  check('RESET METER zeroes the meter', await page.evaluate(() => window.__game.range.total === 0 && window.__game.range.peak === 0 && window.__game.range.partsShot === 0));
+  await page.click('#btn-range-garage');
+  const back = await page.evaluate(() => { const g = window.__game; const vis = (id) => !document.getElementById(id).classList.contains('hidden'); return { state: g.state, mode: g.mode, garage: vis('screen-garage'), enemies: g.enemies.length, rangeHud: vis('range-hud'), pause: vis('screen-pause') }; });
+  check('BACK TO GARAGE returns to the garage with the range cleared away', back.state === 'garage' && back.mode === 'campaign' && back.garage && back.enemies === 0 && !back.rangeHud && !back.pause, JSON.stringify(back));
+  // a normal sortie pauses without the range tools
+  await page.evaluate(() => { const g = window.__game; g.toTitle(); document.getElementById('screen-garage').classList.add('hidden'); g.startMission(); g.manual = true; g.canvas.requestPointerLock(); g.step(5); document.exitPointerLock(); });
+  const camp = await page.evaluate(() => { const vis = (id) => !document.getElementById(id).classList.contains('hidden'); return { tools: vis('range-tools'), back: vis('btn-range-garage'), quit: document.getElementById('btn-quit').textContent, mission: vis('mission'), range: vis('range-hud'), mode: window.__game.mode }; });
+  check('a real sortie has no range tools, and its HUD is the sortie panel', !camp.tools && !camp.back && camp.quit === 'ABORT MISSION' && camp.mission && !camp.range && camp.mode === 'campaign', JSON.stringify(camp));
+  await page.click('#btn-resume');
+
+  // the sections after this one expect the stock machine on the pad
+  await page.evaluate(async () => {
+    const P = await import('/src/parts.js');
+    const g = window.__game;
+    g.cheat.invincible = true;
+    window.__garage.commit({ ...P.DEFAULT_BUILD, paint: { ...P.DEFAULT_BUILD.paint }, tuning: { ...P.DEFAULT_BUILD.tuning } });
+    g.manual = true;
+  });
+  }
+
   // ------------------------------------------------------------ 6. enemies fight back
   const enemies = await page.evaluate(async () => {
     const g = window.__game, p = g.player, m = p.mech;
@@ -2854,6 +3252,8 @@ try {
     out.striker = run('striker', 0, -90, 25);
     out.bulwark = run('bulwark', 0, -150, 30);
     out.baron = run('baron', 0, -120, 30);
+    out.crawler = run('crawler', 0, -100, 25);
+    out.hydra = run('hydra', 0, -150, 30);
     for (const e of g.enemies) e.mech.destroy();
     g.enemies.length = 0; g.projectiles.clear();
     return out;
@@ -2862,6 +3262,8 @@ try {
   check('drone shoots the player', enemies.drone.lost > 0, `-${Math.round(enemies.drone.lost)} armor`);
   check('striker closes in and cuts the player', enemies.striker.lost > 0, `-${Math.round(enemies.striker.lost)} armor, modes ${enemies.striker.modes}`);
   check('bulwark lobs cannon shells', enemies.bulwark.lost > 0, `-${Math.round(enemies.bulwark.lost)} armor`);
+  check('the crawler fires from every arm gun and the tail', enemies.crawler.lost > 100, `-${Math.round(enemies.crawler.lost)} armor`);
+  check('the hydra\'s rifle and missile salvos hurt', enemies.hydra.lost > 100, `-${Math.round(enemies.hydra.lost)} armor`);
   check('baron attacks with several patterns', enemies.baron.lost > 0 && enemies.baron.modes.length >= 3, `-${Math.round(enemies.baron.lost)} armor, modes ${enemies.baron.modes}`);
 
   // ------------------------------------------------------------ 7. full mission with the pilot bot
