@@ -2,6 +2,7 @@
 
 import { MECHS, WAVES } from './data.js';
 import { createEnemy } from './ai.js';
+import { riggedOf } from './rigged.js';
 
 const INTRO_TIME = 2.8;
 const CLEAR_TIME = 4.2;
@@ -34,7 +35,7 @@ export class Missions {
   pitInfo() {
     const i = this.index;
     const next = WAVES[i + 1];
-    const hostiles = next ? next.spawn.map(([type, count]) => ({ name: MECHS[type].name, count })) : [];
+    const hostiles = next ? next.spawn.map(([type, count]) => ({ name: (MECHS[type] ?? riggedOf(type).def).name, count })) : [];
     return {
       cleared: i + 1,
       total: WAVES.length,

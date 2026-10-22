@@ -37,7 +37,7 @@ kbd {
 }
 .label { font-size: 10px; letter-spacing: 0.28em; color: var(--cyan); margin-bottom: 6px; }
 
-#mission { left: 20px; top: 20px; min-width: 190px; }
+#mission, #range-hud { left: 20px; top: 20px; min-width: 190px; }
 #wave-title { font-size: 15px; letter-spacing: 0.12em; margin-bottom: 6px; font-family: var(--sans); font-weight: 600; }
 .row { display: flex; justify-content: space-between; gap: 18px; font-size: 12px; color: var(--dim); line-height: 1.6; }
 .row b { color: var(--text); font-weight: 600; }
@@ -152,7 +152,7 @@ button.secondary { margin-left: 10px; }
 @media (max-width: 760px) {
   #weapons { display: none; }
   #status { width: calc(100% - 40px); }
-  #mission { top: 10px; left: 10px; }
+  #mission, #range-hud { top: 10px; left: 10px; }
 }
 
 /* ---------- weapon panel additions ---------- */
@@ -385,6 +385,12 @@ html.touch .parts-label { display: none; }
 .areas .mark.painted::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--amber); }
 .pit #g-range { display: none; }
 
+#range-tools { margin: 4px 0 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+#range-tools h3 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.24em; color: var(--cyan); }
+.range-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.range-grid button { margin: 0; padding: 8px 6px; font-size: 11px; letter-spacing: 0.1em; }
+.range-note { min-height: 16px; margin-top: 6px; font-size: 10px; letter-spacing: 0.1em; color: var(--dim); }
+
 .g-share { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(2, 6, 12, 0.72); pointer-events: auto; }
 .g-share-box { width: min(520px, calc(100% - 28px)); max-height: calc(100% - 20px); overflow-y: auto; padding: 18px 20px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 9px; }
 .g-share-box h3 { margin: 0; font-size: 14px; letter-spacing: 0.24em; color: var(--cyan); }
@@ -513,8 +519,8 @@ html:not(.touch) .touch-only, html.touch .no-touch { display: none !important; }
 
 /* the HUD, compact, while the controls are up: weapon state lives on the buttons instead */
 html.touch #weapons { display: none; }
-html.touch #mission { top: calc(var(--ins-top, 0px) + 8px); left: calc(var(--ins-left, 0px) + 10px); min-width: 0; padding: 6px 12px; }
-html.touch #mission .label, html.touch #mission .row:last-child { display: none; }
+html.touch #mission, html.touch #range-hud { top: calc(var(--ins-top, 0px) + 8px); left: calc(var(--ins-left, 0px) + 10px); min-width: 0; padding: 6px 12px; }
+html.touch #mission .label, html.touch #mission .row:last-child, html.touch #range-hud .label, html.touch #range-hud .row:nth-child(n+4) { display: none; }
 html.touch #wave-title { font-size: 12px; margin-bottom: 3px; }
 html.touch .row { font-size: 11px; line-height: 1.4; gap: 14px; }
 html.touch #status { left: calc(var(--ins-left, 0px) + 10px); top: calc(var(--ins-top, 0px) + 78px); bottom: auto; width: 214px; padding: 6px 12px; }

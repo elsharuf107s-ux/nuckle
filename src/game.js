@@ -10,6 +10,7 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Missions } from './missions.js';
 import { Player } from './player.js';
+import { Range } from './range.js';
 import { Projectiles } from './weapons.js';
 import { World } from './world.js';
 import { clamp, damp, dampAngle, fmtTime, lerp, rand } from './util.js';
@@ -111,6 +112,8 @@ export class Game {
     this.hud = new Hud(this);
     this.player = new Player(this);
     this.missions = new Missions(this);
+    this.range = new Range(this);
+    this.mode = 'campaign'; // 'campaign' (the five waves) or 'range' (the test range: see range.js)
     this._mechs = [];
 
     this.resize();
@@ -148,6 +151,17 @@ export class Game {
   // ------------------------------------------------------------------ lifecycle
 
   startMission() {
+    this._begin('campaign');
+  }
+
+  /** Open the test range with the current build: dummies, a damage meter, sparring partners on call. */
+  startRange() {
+    this._begin('range');
+  }
+
+  _begin(mode) {
+    this.mode = mode;
+    this.range.stop();
     for (const e of this.enemies) e.mech.destroy();
     this.enemies.length = 0;
     this._clearWrecks();
@@ -159,6 +173,7 @@ export class Game {
     this.combo = { count: 0, t: 0 };
     this.player.reset(0, 0);
     this.hud.configure();
+    this.hud.setRange(mode === 'range');
     this.rig.reset(0);
     this.timeScale = 1;
     this.hitstopT = this.slowmoT = this.endTimer = 0;
@@ -174,12 +189,21 @@ export class Game {
     this.launch = null;
     this.rig.cine = null;
     this.world.showCatapult(false);
+    if (mode === 'range') {
+      this.missions.reset();
+      this.hud.message('TEST RANGE', '', 'PAUSE FOR THE RANGE TOOLS');
+      this.range.start();
+      return;
+    }
     if (this.launchIntro) this._beginLaunch();
     this.missions.start(this.launch ? 0.9 : 0);
   }
 
   /** Abandon the sortie and return to the title flyaround. */
   toTitle() {
+    this.mode = 'campaign';
+    this.range.stop();
+    this.hud.setRange(false);
     for (const e of this.enemies) e.mech.destroy();
     this.enemies.length = 0;
     this._clearWrecks();
@@ -344,7 +368,10 @@ export class Game {
     this._updateWrecks(dt);
     this._separate();
     this.projectiles.update(dt);
-    if (this.state === 'playing') this.missions.update(dt);
+    if (this.state === 'playing') {
+      if (this.mode === 'range') this.range.update(dt);
+      else this.missions.update(dt);
+    }
     this.fx.update(dt);
     this.destruction.update(dt);
 
@@ -826,7 +853,7 @@ export class Game {
         this.rig.punch(1);
         this.hud.message('BARON DESTROYED', 'good');
       } else {
-        this.cinematic(this.enemies.length === 0 && this.missions.state === 'combat' ? 'lastKill' : 'kill');
+        if (mech.enemy.type !== 'dummy') this.cinematic(this.enemies.length === 0 && this.missions.state === 'combat' ? 'lastKill' : 'kill');
       }
       if (mech.def.boss && this.missions.index === 4) this.audio.setMusicLevel(0.3);
     } else {

@@ -621,6 +621,11 @@ export class World {
     return { x: 0, z: -minR };
   }
 
+  /** Is there room to stand here (inside the arena, clear of every building by `margin`)? */
+  isOpen(x, z, margin = 12) {
+    return Math.abs(x) <= ARENA - 20 && Math.abs(z) <= ARENA - 20 && !this.pointBlocked(x, 5, z) && !this._nearBox(x, z, margin);
+  }
+
   _nearBox(x, z, margin) {
     for (const b of this.boxes) {
       if (x > b.minX - margin && x < b.maxX + margin && z > b.minZ - margin && z < b.maxZ + margin) return true;

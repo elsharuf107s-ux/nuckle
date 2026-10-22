@@ -6,17 +6,20 @@
 
 import * as THREE from 'three';
 import { Mech } from './mech.js';
+import { DUMMY_DEF, riggedOf } from './rigged.js';
 import { angleDiff, clamp, pick, rand, randSign, yawToward } from './util.js';
 
 const SLASHES = ['slash1', 'slash2', 'slash3'];
 const DODGEABLE = new Set(['beam', 'bullet', 'cannon']);
+const FIRING_LIMBS = new Set(['gun', 'cannon', 'shotgun', 'rail']); // the arm weapons a rigged enemy fires
 
 class Enemy {
-  constructor(game, type, skill = 1) {
+  /** `def` is for machines that are not in data.js: the rigged enemies and the practice dummy (see rigged.js). */
+  constructor(game, type, skill = 1, def = null) {
     this.game = game;
     this.type = type;
     this.skill = skill; // grows with the wave number: tighter aim, shorter cooldowns
-    this.mech = new Mech(game, type, 'enemy');
+    this.mech = new Mech(game, type, 'enemy', def);
     this.mech.enemy = this;
 
     this.t = 0;
@@ -517,12 +520,184 @@ class Baron extends Enemy {
   }
 }
 
+// ==================================================================== Dummy (the test range)
+
+class Dummy extends Enemy {
+  constructor(game, skill) {
+    super(game, 'dummy', skill, DUMMY_DEF);
+    this.home = null; // where it was put: a knock sends it sliding, and it walks back
+  }
+
+  _hop() {} // it never climbs after you
+  _dodge() {}
+
+  think(dt) {
+    const m = this.mech;
+    this.home ??= { x: m.pos.x, z: m.pos.z };
+    // it mends itself once left alone, so the range is always ready for the next test
+    if (m.hp < m.maxHp && this.game.time - m.lastHitAt > 3) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * 0.4 * dt);
+    const dx = this.home.x - m.pos.x, dz = this.home.z - m.pos.z;
+    const d = Math.hypot(dx, dz);
+    const it = { faceYaw: this.faceTarget() };
+    if (d > 4) { it.moveX = dx / d; it.moveZ = dz / d; it.speedMul = 0.5; }
+    return it;
+  }
+}
+
+// ==================================================================== Rigged (built from the garage's rig)
+//   Crawler  six legs and four arm guns: closes to mid range and fires in bursts from every barrel
+//   Hydra    three heads, missile pods and a heavy rifle: keeps its distance, shoots missiles down with the chest vulcan
+// Each gun is a part with health of its own: shoot an arm (or a pod) off and that weapon is gone.
+
+const RIG_AI = {
+  crawler: {
+    band: [55, 130], strafe: 1.1, range: 230, volley: [1.3, 1.6], gunMul: 0.45, dodge: 0.12, color: 0xff9a30,
+    main: { type: 'bullet', speed: 420, damage: 8, interval: 0.18, spread: 0.06, color: 0xff9a30 },
+  },
+  hydra: {
+    band: [110, 210], strafe: 0.5, range: 340, volley: [1.8, 1.3], gunMul: 0.5, dodge: 0.05, color: 0x5dffa5,
+    main: { type: 'beam', speed: 560, damage: 85, interval: 1.4, spread: 0.03, color: 0x5dffa5, knock: 10 },
+    missiles: { perPod: 2, damage: 55, every: 8 },
+  },
+};
+
+class Rigged extends Enemy {
+  constructor(game, type, skill) {
+    const r = riggedOf(type);
+    super(game, type, skill, r.def);
+    this.cfg = RIG_AI[type];
+    this.def_dodge = this.cfg.dodge * skill;
+    const limbs = this.mech.model.rig.limbs;
+    this.guns = r.stats.limbs
+      .filter((l) => FIRING_LIMBS.has(l.kind))
+      .map((def) => ({ def, slot: def.slot, idx: limbs.findIndex((l) => l.slot === def.slot), cd: rand(0.2, 1), broken: false }));
+    this.turrets = r.stats.turrets.map((def) => ({ def, slot: def.slot, cd: rand(0, def.interval), broken: false }));
+    this.pods = new Set(['podL', 'podR'].filter((slot) => r.build[slot] === 'missile'));
+    this.legsLost = 0;
+    this.volleyOn = false;
+    this.volleyT = rand(0.5, 1.5);
+    this.mainCd = rand(0.4, 1.2);
+    this.missileCd = this.cfg.missiles ? rand(3, 5) : Infinity;
+    this._a = new THREE.Vector3();
+  }
+
+  /** A part was shot off (see Game.onPartBroken): its weapon goes with it, and a lost leg slows the machine. */
+  onPartBroken(part) {
+    for (const g of this.guns) if (g.slot === part.slot) g.broken = true;
+    for (const t of this.turrets) if (t.slot === part.slot) t.broken = true;
+    this.pods.delete(part.slot);
+    if (part.kind === 'leg') this.legsLost++;
+  }
+
+  think(dt) {
+    const m = this.mech, cfg = this.cfg;
+    const it = this.steer(cfg.band[0], cfg.band[1], cfg.strafe);
+    it.faceYaw = this.faceTarget();
+    it.speedMul = Math.pow(0.88, this.legsLost);
+    const c = this.target.center(this._a);
+    it.pitch = clamp(Math.atan2(c.y - (m.pos.y + m.height * 0.6), Math.max(20, this.dist)), -0.5, 0.6);
+
+    this._turrets(dt);
+    this.mainCd -= dt;
+    this.missileCd -= dt;
+    for (const g of this.guns) g.cd = Math.max(0, g.cd - dt);
+    if (m.stagger > 0) return it; // reeling from a hit: nothing fires
+
+    this.volleyT -= dt;
+    if (this.volleyT <= 0) {
+      this.volleyOn = !this.volleyOn;
+      this.volleyT = this.volleyOn ? cfg.volley[0] : (cfg.volley[1] * rand(0.8, 1.3)) / this.skill;
+    }
+    const facing = Math.abs(angleDiff(m.yaw, it.faceYaw)) < 0.5;
+    if (this.volleyOn && facing && this.dist < cfg.range) {
+      for (const g of this.guns) if (!g.broken && g.cd <= 0) this._fireGun(g);
+      if (cfg.main && this.mainCd <= 0) {
+        this.fire(cfg.main);
+        this.mainCd = (cfg.main.interval * rand(1, 1.4)) / this.skill;
+        this.game.audio[cfg.main.type === 'beam' ? 'beam' : 'gun'](m.pos);
+      }
+    }
+    if (cfg.missiles && this.missileCd <= 0 && this.pods.size > 0 && this.dist > 60) this._salvo();
+    return it;
+  }
+
+  /** One arm gun: from its own muzzle, with a little lead and a lot of spread. */
+  _fireGun(g) {
+    const m = this.mech;
+    m.model.limbMuzzleWorld(g.idx, this._muz);
+    const speed = g.def.speed ?? 420;
+    const c = this.target.center(this._dir);
+    c.addScaledVector(this.target.vel, (c.distanceTo(this._muz) / speed) * 0.6);
+    const dir = c.sub(this._muz).normalize();
+    const s = 0.05 / this.skill;
+    dir.x += rand(-s, s); dir.y += rand(-s, s); dir.z += rand(-s, s);
+    dir.normalize();
+    this.game.projectiles.spawn({
+      type: 'bullet', team: 'enemy', source: m, pos: this._muz, dir, damage: g.def.damage * this.cfg.gunMul, color: this.cfg.color, speed,
+    });
+    m.model.fireLimb(g.idx, 0.3);
+    if (Math.random() < 0.3) this.game.audio.gun(this._muz);
+    g.cd = g.def.interval * rand(1, 1.5);
+  }
+
+  /** The tail gun and the pods fire on their own at the player; the chest vulcan only shoots down missiles. */
+  _turrets(dt) {
+    const m = this.mech, game = this.game;
+    for (const t of this.turrets) {
+      t.cd = Math.max(0, t.cd - dt);
+      if (t.broken || m.dead) continue;
+      m.model.turretMuzzleWorld(t.slot, this._muz);
+      let at = null;
+      if (t.def.intercept) {
+        const q = game.projectiles.incomingNear(m, this._muz, t.def.range);
+        if (q) at = this._tmp.copy(q.pos);
+      } else if (this.dist < t.def.range) {
+        at = this.target.center(this._tmp);
+      }
+      if (!at) continue;
+      m.model.aimTurret(t.slot, at);
+      if (t.cd > 0) continue;
+      const dir = this._dir.copy(at).sub(this._muz).normalize();
+      dir.x += rand(-0.04, 0.04); dir.y += rand(-0.04, 0.04); dir.z += rand(-0.04, 0.04);
+      dir.normalize();
+      game.projectiles.spawn({
+        type: 'bullet', team: 'enemy', source: m, pos: this._muz, dir, damage: t.def.damage * this.cfg.gunMul, color: this.cfg.color,
+        speed: t.def.speed, life: t.def.range / t.def.speed + 0.1, intercept: !!t.def.intercept,
+      });
+      t.cd = t.def.interval * rand(1, 1.5);
+    }
+  }
+
+  /** The pods that are still on the machine loose a pair of homing missiles each. */
+  _salvo() {
+    const m = this.mech, cfg = this.cfg.missiles;
+    this.missileCd = cfg.every * rand(0.85, 1.2);
+    const right = this._tmp.set(Math.cos(m.yaw), 0, -Math.sin(m.yaw)).clone();
+    for (const slot of this.pods) {
+      const side = slot === 'podL' ? -1 : 1;
+      const pos = m.model.anchorWorld(slot, new THREE.Vector3());
+      for (let i = 0; i < cfg.perPod; i++) {
+        const dir = new THREE.Vector3(0, 1, 0).addScaledVector(right, side * rand(0.15, 0.5)).addScaledVector(m.forward(), 0.5).normalize();
+        this.game.projectiles.spawn({
+          type: 'missile', team: 'enemy', source: m, pos, dir, color: 0x5dffa5,
+          damage: cfg.damage, speed: 90, maxSpeed: 220, delay: 0.35 + i * 0.12, turn: 2.6, target: this.target,
+          splash: { radius: 16, damage: 35 }, knock: 16,
+        });
+      }
+      this.game.audio.missile(pos);
+    }
+  }
+}
+
 export function createEnemy(game, type, skill) {
   switch (type) {
     case 'drone': return new Drone(game, skill);
     case 'striker': return new Striker(game, skill);
     case 'bulwark': return new Bulwark(game, skill);
     case 'baron': return new Baron(game, skill);
+    case 'dummy': return new Dummy(game, skill);
+    case 'crawler':
+    case 'hydra': return new Rigged(game, type, skill);
     default: throw new Error(`unknown enemy type: ${type}`);
   }
 }

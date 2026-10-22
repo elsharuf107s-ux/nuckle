@@ -32,6 +32,7 @@ export class Hud {
       weaponName: $('weapon-name'), weaponKey: $('weapon-key'), gunRow: $('gun-row'), saberRow: $('saber-row'),
       cannonRow: $('cannon-row'), cannonFill: $('cannon-fill'), cannon2Row: $('cannon2-row'), cannon2Fill: $('cannon2-fill'), cannon2Name: $('cannon2-name'), mechName: $('mech-name'), buildFlags: $('build-flags'),
       partsPanel: $('parts-panel'), partsGrid: $('parts-grid'),
+      mission: $('mission'), range: $('range-hud'), rgDps: $('rg-dps'), rgPeak: $('rg-peak'), rgAvg: $('rg-avg'), rgTotal: $('rg-total'), rgParts: $('rg-parts'),
       armsRow: $('arms-row'), armsName: $('arms-name'), armsKey: $('arms-key'), armsFill: $('arms-fill'),
       subRow: $('sub-row'), subName: $('sub-name'), subFill: $('sub-fill'), subState: $('sub-state'), subBar: $('sub-fill').parentElement,
       boss: $('boss-bar'), bossFill: $('boss-fill'), bossName: $('boss-name'),
@@ -53,6 +54,12 @@ export class Hud {
     this._bannerT = 0;
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  /** The test range swaps the sortie panel for the damage meter. */
+  setRange(on) {
+    this.el.mission.classList.toggle('hidden', on);
+    this.el.range.classList.toggle('hidden', !on);
   }
 
   resize() {
@@ -185,6 +192,14 @@ export class Hud {
     e.enemies.textContent = String(g.enemies.length);
     e.score.textContent = g.stats.score.toLocaleString('en-US');
     e.clock.textContent = fmtTime(g.stats.time);
+    if (g.mode === 'range') {
+      const r = g.range, n = (v) => Math.round(v).toLocaleString('en-US');
+      e.rgDps.textContent = n(r.dps);
+      e.rgPeak.textContent = n(r.peak);
+      e.rgAvg.textContent = n(r.average);
+      e.rgTotal.textContent = n(r.total);
+      e.rgParts.textContent = String(r.partsShot);
+    }
 
     // ---- bars
     const hpK = mech.hp / mech.maxHp;

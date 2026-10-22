@@ -27,6 +27,10 @@ const garage = new Garage(game, {
     garage.close();
     startUI();
   },
+  onRange: () => {
+    garage.close();
+    startRangeUI();
+  },
   onChange: (build) => updateTitleBuild(build),
 });
 game.setBuild(garage.build);
@@ -72,6 +76,11 @@ function lockPointer() {
 function pauseUI() {
   if (game.state !== 'playing') return;
   game.pause();
+  const range = game.mode === 'range'; // the test range adds its own tools to the pause menu
+  show('range-tools', range);
+  show('btn-range-garage', range);
+  $('btn-quit').textContent = range ? 'LEAVE RANGE' : 'ABORT MISSION';
+  $('range-note').textContent = '';
   show('screen-pause', true);
 }
 
@@ -103,6 +112,34 @@ function startUI() {
   game.startMission();
   lockPointer();
 }
+
+function startRangeUI() {
+  show('screen-title', false);
+  show('screen-end', false);
+  show('screen-pause', false);
+  game.startRange();
+  lockPointer();
+}
+
+// the range tools in the pause menu
+const rangeNote = (text) => { $('range-note').textContent = text; };
+for (const b of document.querySelectorAll('[data-spar]')) {
+  b.addEventListener('click', () => rangeNote(game.range.spar(b.dataset.spar) ? `${b.textContent.replace('+ ', '')} CALLED IN` : 'THE RANGE IS FULL (4 AT A TIME)'));
+}
+for (const b of document.querySelectorAll('[data-range]')) {
+  b.addEventListener('click', () => {
+    const act = b.dataset.range;
+    if (act === 'repair') { game.range.repair(); rangeNote('REPAIRED: ARMOR, AMMO AND EVERY PART'); }
+    else if (act === 'meter') { game.range.resetMeter(); rangeNote('METER RESET'); }
+    else if (act === 'clear') { game.range.clearSparring(); rangeNote('SPARRING PARTNERS CLEARED'); }
+  });
+}
+$('btn-range-garage').addEventListener('click', () => {
+  show('screen-pause', false);
+  game.resume();
+  game.toTitle();
+  openGarage();
+});
 
 $('btn-start').addEventListener('click', startUI);
 $('btn-garage').addEventListener('click', openGarage);

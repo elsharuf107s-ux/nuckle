@@ -54,11 +54,11 @@ export const MECHS = {
   },
 };
 
-/** The sortie: each wave lists [mech type, count]. */
+/** The sortie: each wave lists [mech type, count]. (The crawler and the hydra are built from the garage's rig: see rigged.js.) */
 export const WAVES = [
   { title: 'FIRST CONTACT', spawn: [['drone', 3]] },
   { title: 'PINCER', spawn: [['drone', 4], ['striker', 1]] },
-  { title: 'HEAVY SUPPORT', spawn: [['drone', 4], ['bulwark', 2]] },
-  { title: 'BLADE DANCE', spawn: [['striker', 3], ['drone', 3], ['bulwark', 2]] },
+  { title: 'HEAVY SUPPORT', spawn: [['drone', 3], ['bulwark', 2], ['crawler', 1]] },
+  { title: 'BLADE DANCE', spawn: [['striker', 3], ['drone', 2], ['bulwark', 2], ['hydra', 1]] },
   { title: 'THE CRIMSON BARON', spawn: [['baron', 1], ['drone', 2]], boss: true },
 ];

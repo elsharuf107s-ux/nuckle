@@ -405,6 +405,7 @@ export class Mech {
       }
     }
     if (this.parts.length) amount = this._hitParts(amount, info);
+    if (this.team === 'player' && this.game.mode === 'range') amount = Math.min(amount, Math.max(0, this.hp - 1)); // the test range cannot destroy you
     this.hp -= amount;
     this.flashT = 0.12;
     this.lastHitAt = this.game.time; // the nano-repair core waits for a lull
