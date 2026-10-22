@@ -391,6 +391,13 @@ html.touch .parts-label { display: none; }
 .range-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .range-grid button { margin: 0; padding: 8px 6px; font-size: 11px; letter-spacing: 0.1em; }
 .range-note { min-height: 16px; margin-top: 6px; font-size: 10px; letter-spacing: 0.1em; color: var(--dim); }
+@media (max-height: 520px) { /* a phone in landscape: the range tools four across, so RESUME stays on screen */
+  #range-tools { margin: 0 0 4px; padding-top: 6px; }
+  #range-tools h3 { margin-bottom: 5px; }
+  .range-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+  .range-grid button { padding: 7px 2px; font-size: 9px; letter-spacing: 0.06em; margin-top: 0; }
+  .range-note { min-height: 12px; margin-top: 3px; }
+}
 
 .g-share { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(2, 6, 12, 0.72); pointer-events: auto; }
 .g-share-box { width: min(520px, calc(100% - 28px)); max-height: calc(100% - 20px); overflow-y: auto; padding: 18px 20px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 9px; }
